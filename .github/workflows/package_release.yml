@@ -63,26 +63,25 @@ jobs:
     - name: Run package_release.ps1
       shell: powershell
       run: |
-        $params = @{
-            Version = "${{ inputs.version }}"
-        }
+        $scriptArgs = @("-Version", "${{ inputs.version }}")
         if ("${{ inputs.include_ampere_mfg }}" -eq "true") {
-            $params["IncludeAmpereMfg"] = $true
+            $scriptArgs += "-IncludeAmpereMfg"
         }
         if ("${{ inputs.accept_ampere_mfg_licenses }}" -eq "true") {
-            $params["AcceptAmpereMfgLicenses"] = $true
+            $scriptArgs += "-AcceptAmpereMfgLicenses"
         }
         if ("${{ inputs.include_dlss_fg }}" -eq "true") {
-            $params["IncludeDlssFrameGeneration"] = $true
+            $scriptArgs += "-IncludeDlssFrameGeneration"
         }
         if ("${{ inputs.accept_nvidia_licenses }}" -eq "true") {
-            $params["AcceptNvidiaLicenses"] = $true
+            $scriptArgs += "-AcceptNvidiaLicenses"
         }
 
-        Write-Host "Executing package_release.ps1 with options:"
-        $params.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key): $($_.Value)" }
-
-        powershell -ExecutionPolicy Bypass -File .\package_release.ps1 @params
+        Write-Host "Executing: .\package_release.ps1 $($scriptArgs -join ' ')"
+        & .\package_release.ps1 @scriptArgs
+        if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
+            exit $LASTEXITCODE
+        }
 
     - name: Upload Release Archive
       uses: actions/upload-artifact@v4
