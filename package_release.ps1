@@ -258,7 +258,12 @@ $checksumLines = Get-ChildItem -LiteralPath $stage -Recurse -File |
     Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
     Sort-Object FullName |
     ForEach-Object {
-        $relative = [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\', '/')
+        $stageClean = $stage.TrimEnd('\', '/')
+        $relative = if ($_.FullName.StartsWith($stageClean, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $_.FullName.Substring($stageClean.Length).TrimStart('\', '/').Replace('\', '/')
+        } else {
+            $_.Name
+        }
         "{0} *{1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash, $relative
     }
 [IO.File]::WriteAllLines("$stage\SHA256SUMS.txt", $checksumLines, [Text.UTF8Encoding]::new($false))
