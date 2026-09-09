@@ -71,6 +71,21 @@ bool Config::Reload(std::filesystem::path iniPath)
             ExternalFrameGeneration.set_from_config(readBool("FrameGen", "External"));
             FGDLSSGAdaMfgUnlock.set_from_config(readBool("DLSSG", "AdaMfgUnlock"));
             FGDLSSGAdaBlackwellKernels.set_from_config(readBool("DLSSG", "AdaBlackwellKernels"));
+            FGDLSSGAmpereMfgUnlock.set_from_config(readBool("DLSSG", "AmpereMfgUnlock"));
+            FGDLSSGAmpereMfgMaxFrames.set_from_config(readInt("DLSSG", "AmpereMfgMaxFrames"));
+            if (FGDLSSGAmpereMfgMaxFrames.has_value() &&
+                (FGDLSSGAmpereMfgMaxFrames.value() < 0 || FGDLSSGAmpereMfgMaxFrames.value() > 3))
+                FGDLSSGAmpereMfgMaxFrames.reset();
+
+            if (auto ampereKernel = readString("DLSSG", "AmpereMfgKernelImage"); ampereKernel.has_value())
+            {
+                if (lstrcmpiA(ampereKernel.value().c_str(), "ptx") == 0)
+                    FGDLSSGAmpereMfgKernelImage.set_from_config("PTX");
+                else if (lstrcmpiA(ampereKernel.value().c_str(), "cubin") == 0)
+                    FGDLSSGAmpereMfgKernelImage.set_from_config("Cubin");
+                else
+                    FGDLSSGAmpereMfgKernelImage.set_from_config("Auto");
+            }
             FGDebugView.set_from_config(readBool("FrameGen", "DebugView"));
 
             if (auto FGInputString = readString("FrameGen", "FGInput"); FGInputString.has_value())
@@ -977,6 +992,9 @@ bool Config::SaveIni()
         ini.SetValue("FrameGen", "External", GetBoolValue(Instance()->ExternalFrameGeneration.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AdaMfgUnlock", GetBoolValue(Instance()->FGDLSSGAdaMfgUnlock.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AdaBlackwellKernels", GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgUnlock", GetBoolValue(Instance()->FGDLSSGAmpereMfgUnlock.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgMaxFrames", GetIntValue(Instance()->FGDLSSGAmpereMfgMaxFrames.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgKernelImage", Instance()->FGDLSSGAmpereMfgKernelImage.value_for_config_or("auto").c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())
