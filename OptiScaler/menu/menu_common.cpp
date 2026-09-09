@@ -3120,8 +3120,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            status.ValidateMatched ? "matched" : "not matched", status.KernelsRewritten);
     }
 
-    // ── Ampere (SM86) MFG Unlock ──────────────────────────────────────
-    if (ImGui::CollapsingHeader("RTX 30 (Ampere SM86) MFG Unlock"))
+    // ── Ampere/Turing (SM86/SM75) MFG Unlock ─────────────────────────
+    if (ImGui::CollapsingHeader("RTX 20 / 30 (SM75 / SM86) MFG Unlock"))
     {
         ImGui::Indent();
 
@@ -3132,14 +3132,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         if (adaActive)
         {
             ImGui::BeginDisabled();
-            ImGui::Checkbox("Enable SM86 MFG (experimental; restart)##ampere", &ampereUnlock);
+            ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock);
             ImGui::EndDisabled();
             ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
                            "Disable AdaMfgUnlock first, Save Settings and restart.");
         }
         else
         {
-            if (ImGui::Checkbox("Enable SM86 MFG (experimental; restart)##ampere", &ampereUnlock))
+            if (ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock))
             {
                 config->FGDLSSGAmpereMfgUnlock = ampereUnlock;
                 if (ampereUnlock)
@@ -3148,9 +3148,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     config->FGDLSSGAdaMfgUnlock = false;
                 }
             }
-            ShowHelpMarker("sdli1995 Ampere SM86 unlock. Sideloads the dlssg_for_sm86 proxy.\n"
+            ShowHelpMarker("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
                            "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
-                           "Requires RTX 30 series. Save Settings and restart.\n"
+                           "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
                            "Do not combine with the Ada unlock or another external MFG unlocker.");
         }
 
@@ -3161,19 +3161,23 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (!status.ErrorMessage.empty())
                 ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Error: %s", status.ErrorMessage.c_str());
             else
-                ImGui::TextWrapped("DLL: %s | INI: %s | Loaded: %s",
+            {
+                std::string routerStr = AmpereMfgLoader::ResolveRouter();
+                ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s",
                                    status.DllFound ? "found" : "missing",
+                                   routerStr.c_str(),
                                    status.IniWritten ? "written" : "not written",
                                    status.DllLoaded ? "yes" : "no");
+            }
 
             // MaxGeneratedFrames slider
             int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-            const char* frameLabels[] = { "Runtime default", "1 (2X)", "2 (3X)", "3 (4X)" };
-            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 3) ? frameLabels[maxFrames] : "Runtime default";
+            const char* frameLabels[] = { "Capability default (3X)", "1 (2X)", "2 (3X)", "3 (4X)" };
+            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 3) ? frameLabels[maxFrames] : "Capability default (3X)";
             if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 3, currentLabel))
                 config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
-            ShowHelpMarker("Advertised maximum. The game chooses the actual count.\n"
-                           "0 = preserve runtime capability.\n"
+            ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X). The game chooses the actual count.\n"
+                           "0 = Default capability limit (allows up to 4X).\n"
                            "Save Settings and restart to apply.");
 
             // KernelImage combo
@@ -3187,9 +3191,17 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 const char* storedOptions[] = { "Auto", "PTX", "Cubin" };
                 config->FGDLSSGAmpereMfgKernelImage = std::string(storedOptions[kernelIdx]);
             }
-            ShowHelpMarker("Auto: resolves to optimal format (e.g. PTX on Linux/Proton or RTX 3080 Ti).\n"
-                           "PTX: JIT-compiled, recommended for Linux/Proton and RTX 3080 Ti.\n"
-                           "Cubin: precompiled binary, requires real SM86 hardware on Windows.\n"
+            ShowHelpMarker("Auto: resolves to optimal format (PTX on Linux/Proton, RTX 3080 Ti, or Turing).\n"
+                           "PTX: JIT-compiled driver path, recommended for Linux/Proton, RTX 3080 Ti, and RTX 20 series.\n"
+                           "Cubin: precompiled binary, requires exact physical SM match on Windows.\n"
+                           "Save Settings and restart to apply.");
+
+            // HardwareBilinear checkbox
+            bool hwBilinear = config->FGDLSSGAmpereMfgHardwareBilinear.value_or_default();
+            if (ImGui::Checkbox("Hardware Bilinear (approximate sampling)##sm86", &hwBilinear))
+                config->FGDLSSGAmpereMfgHardwareBilinear = hwBilinear;
+            ShowHelpMarker("SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
+                           "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
                            "Save Settings and restart to apply.");
         }
 

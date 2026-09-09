@@ -68,7 +68,7 @@ std::string GenerateIniContent()
         }
     }
 
-    int hwBilinear = 0;
+    int hwBilinear = cfg->FGDLSSGAmpereMfgHardwareBilinear.value_or_default() ? 1 : 0;
     std::string router = ResolveRouter();
     int logLevel = 1;
 
