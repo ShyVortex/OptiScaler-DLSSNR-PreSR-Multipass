@@ -41,5 +41,6 @@ The contribution remains open for a rebased integration with native handoff/time
 - `tests/nr_ngx_routing_smoke.cpp`: missing/reused/released handles, removal of stale FG presence, concurrent registry reads/writes, and all eight combinations of optional-resource availability/auto-exposure/reactive disable passed. This is a CPU parameter-routing regression, not an NVIDIA model test.
 - `tests/nr_seam_clock_smoke.cpp`: pairing, Present-counter stalls/changes, gaps, resets and bridge epochs passed.
 - `git diff --check` passed.
+- GitHub's repository-wide clang-format check fails on existing main (`73f26daa`, [run](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/actions/runs/34319077007)) as well as this branch. Applied formatting to the changed C++ ranges; unrelated repository-wide formatting remains outside this patch.
 
 Cyberpunk is installed locally, but the existing local log is from v0.7.3 and does not show RR. No fresh gameplay or visual-quality validation was performed in this session. Nioh 2, Requiem, Onimusha, Stellar Blade, Aphelion, NBA 2K26, Dawnwalker and Crimson Desert were not found in the inspected Steam libraries. The available GPU is an RTX 5090, so RTX 40 MFG results need reporter testing.

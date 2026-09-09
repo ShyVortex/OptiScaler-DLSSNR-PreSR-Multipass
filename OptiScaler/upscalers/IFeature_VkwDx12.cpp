@@ -2150,8 +2150,8 @@ bool IFeature_VkwDx12::Evaluate(VkCommandBuffer InCmdBuffer, NVSDK_NGX_Parameter
         InParameters->Set(NVSDK_NGX_Parameter_Output, (void*) vkOut.Dx12Resource);
         InParameters->Set(NVSDK_NGX_Parameter_Depth, (void*) vkDepth.Dx12Resource);
 
-        SetOptionalDx12Inputs(InParameters, vkExp.Dx12Resource, vkReactive.Dx12Resource,
-                              AutoExposure(), Config::Instance()->DisableReactiveMask.value_or(false));
+        SetOptionalDx12Inputs(InParameters, vkExp.Dx12Resource, vkReactive.Dx12Resource, AutoExposure(),
+                              Config::Instance()->DisableReactiveMask.value_or(false));
 
         LOG_DEBUG("Dispatch!!");
         DlssNr::EvaluateBeforeUpscale(cmdList, InParameters, Dx12CommandQueue, _frameCount,

@@ -159,7 +159,8 @@ void RenderMenu(Config* config, float menuResScale)
             config->DlssNrDeferredDlss = deferredDlss;
         HelpMarker("Compute NR at input resolution, upscale its changes with DLSS, then apply them after SR.\nExperimental: may flicker and adds GPU cost. Requires DLSS on DX12 or its bridges; does not support RR.\nOverrides Apply before Super Resolution. Disable Hold frame, Compare and Debug view.");
         if (deferredDlss && rayReconstruction)
-            ImGui::TextWrapped("Generate before / apply after is unavailable with RR. Apply before Super Resolution controls NR placement.");
+            ImGui::TextWrapped("Generate before / apply after is unavailable with RR. Apply before Super Resolution "
+                               "controls NR placement.");
         else if (deferredDlss)
             ImGui::TextWrapped("Residual DLSS: %s", DlssNr::DeferredDlssStatus().c_str());
         ImGui::BeginDisabled(!deferredDlss || rayReconstruction);

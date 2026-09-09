@@ -25,13 +25,15 @@ int main()
     assert(!registry.Read(100).feature);
     registry.Record(100, NVSDK_NGX_Feature_SuperSampling);
     assert(registry.Read(100).feature == NVSDK_NGX_Feature_SuperSampling);
-    std::thread writer([&] {
-        for (unsigned int i = 0; i < 1000; ++i)
+    std::thread writer(
+        [&]
         {
-            registry.Record(200, NVSDK_NGX_Feature_FrameGeneration);
-            registry.Forget(200);
-        }
-    });
+            for (unsigned int i = 0; i < 1000; ++i)
+            {
+                registry.Record(200, NVSDK_NGX_Feature_FrameGeneration);
+                registry.Forget(200);
+            }
+        });
     for (unsigned int i = 0; i < 1000; ++i)
         assert(registry.Read(100).feature == NVSDK_NGX_Feature_SuperSampling);
     writer.join();
@@ -46,10 +48,9 @@ int main()
                 Parameters parameters;
                 parameters.Set(NVSDK_NGX_Parameter_ExposureTexture, &foreignExposure);
                 parameters.Set(NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, &foreignReactive);
-                SetOptionalDx12Inputs(&parameters,
-                    available ? reinterpret_cast<ID3D12Resource*>(&dx12Exposure) : nullptr,
-                    available ? reinterpret_cast<ID3D12Resource*>(&dx12Reactive) : nullptr,
-                    automatic, disabled);
+                SetOptionalDx12Inputs(
+                    &parameters, available ? reinterpret_cast<ID3D12Resource*>(&dx12Exposure) : nullptr,
+                    available ? reinterpret_cast<ID3D12Resource*>(&dx12Reactive) : nullptr, automatic, disabled);
                 assert(parameters.resources[NVSDK_NGX_Parameter_ExposureTexture] ==
                        (automatic || !available ? nullptr : &dx12Exposure));
                 assert(parameters.resources[NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask] ==
