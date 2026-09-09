@@ -104,7 +104,7 @@ void TrySetup()
     {
         s_status.ErrorMessage = std::format(
             "Ampere SM86 MFG requires an RTX 30 series (Ampere) GPU. Detected arch 0x{:x}.",
-            gpu.nvidiaArchInfo.architecture_id);
+            static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id));
         LOG_ERROR("AmpereMfgLoader: {}", s_status.ErrorMessage);
         return;
     }
