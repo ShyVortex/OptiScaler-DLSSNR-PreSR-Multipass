@@ -9,12 +9,12 @@ on:
         default: 'v0.1.0-dlssnr'
         type: string
       include_ampere_mfg:
-        description: 'Include Ampere SM86 MFG (dlssg_sm86.dll)'
+        description: 'Include RTX 20/30 (SM75/SM86) MFG (dlssg_sm86.dll)'
         required: false
         default: true
         type: boolean
       accept_ampere_mfg_licenses:
-        description: 'Accept Ampere MFG Licenses'
+        description: 'Accept RTX 20/30 (SM75/SM86) MFG Licenses'
         required: false
         default: true
         type: boolean
@@ -46,7 +46,7 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    - name: Ensure Ampere SM86 files are present
+    - name: Ensure RTX 20/30 (SM75/SM86) files are present
       if: ${{ inputs.include_ampere_mfg }}
       shell: powershell
       run: |

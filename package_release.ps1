@@ -240,16 +240,20 @@ if ($IncludeAmpereMfg) {
     $sm86Src = "$root\dlssg_for_sm86"
     $sm86Dll = "$sm86Src\version.dll"
     if (-not (Test-Path -LiteralPath $sm86Dll)) {
-        throw "Ampere SM86 binary not found at $sm86Dll"
+        throw "Ampere/Turing SM86/SM75 binary not found at $sm86Dll"
     }
     $sm86DestDir = "$stage\OptiScaler\dlssg_sm86"
     New-Item -ItemType Directory -Force -Path $sm86DestDir | Out-Null
     Copy-Item -LiteralPath $sm86Dll -Destination "$sm86DestDir\dlssg_sm86.dll"
+    $sm86Ini = "$sm86Src\dlssg_sm86.ini"
+    if (Test-Path -LiteralPath $sm86Ini) {
+        Copy-Item -LiteralPath $sm86Ini -Destination "$sm86DestDir\dlssg_sm86.ini"
+    }
     $notices = "$sm86Src\THIRD_PARTY_NOTICES.txt"
     if (Test-Path -LiteralPath $notices) {
         Copy-Item -LiteralPath $notices -Destination "$sm86DestDir\THIRD_PARTY_NOTICES.txt"
     }
-    Write-Host "Ampere SM86 MFG: dlssg_sm86.dll and notices staged"
+    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, and notices staged"
 }
 
 # Hash every shipped file after the staging tree is final. Use forward slashes so the list is easy
