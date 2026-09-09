@@ -3058,11 +3058,24 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& state = ctx.state;
     auto config = ctx.config;
     bool external = config->ExternalFrameGeneration.value_or_default();
-    if (ImGui::Checkbox("External frame generation / MFG unlocker", &external))
-        config->ExternalFrameGeneration = external;
-    ShowHelpMarker("Leaves Streamline, Reflex and FG control to the game/external mod."
-                   "\nNR and NGX upscaling remain available. Save Settings and restart."
-                   "\nDoes not install an unlocker or enable FG in unsupported games.");
+    const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    if (ampereActive)
+    {
+        external = true;
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("External frame generation / MFG unlocker", &external);
+        ImGui::EndDisabled();
+        ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
+                       "To disable External FG, disable Ampere SM86 MFG below first.");
+    }
+    else
+    {
+        if (ImGui::Checkbox("External frame generation / MFG unlocker", &external))
+            config->ExternalFrameGeneration = external;
+        ShowHelpMarker("Leaves Streamline, Reflex and FG control to the game/external mod."
+                       "\nNR and NGX upscaling remain available. Save Settings and restart."
+                       "\nDoes not install an unlocker or enable FG in unsupported games.");
+    }
     if (external != state.externalFrameGeneration)
         ImGui::TextWrapped("Save Settings and restart to change frame-generation ownership.");
 
@@ -3071,7 +3084,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
     /// FG INPUTS
     bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
-    const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
     const bool disableAda = ampereActive || state.externalFrameGeneration;
 
     if (disableAda)
@@ -3128,7 +3140,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         else
         {
             if (ImGui::Checkbox("Enable SM86 MFG (experimental; restart)##ampere", &ampereUnlock))
+            {
                 config->FGDLSSGAmpereMfgUnlock = ampereUnlock;
+                if (ampereUnlock)
+                {
+                    config->ExternalFrameGeneration = true;
+                    config->FGDLSSGAdaMfgUnlock = false;
+                }
+            }
             ShowHelpMarker("sdli1995 Ampere SM86 unlock. Sideloads the dlssg_for_sm86 proxy.\n"
                            "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
                            "Requires RTX 30 series. Save Settings and restart.\n"
@@ -3158,14 +3177,19 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Save Settings and restart to apply.");
 
             // KernelImage combo
-            const char* kernelOptions[] = { "Auto", "PTX", "Cubin" };
+            std::string resolvedAuto = AmpereMfgLoader::ResolveAutoKernelImage();
+            std::string autoLabel = (resolvedAuto != "Auto") ? "Auto (" + resolvedAuto + " on this GPU)" : "Auto";
+            const char* kernelOptions[] = { autoLabel.c_str(), "PTX", "Cubin" };
             std::string current = config->FGDLSSGAmpereMfgKernelImage.value_or("Auto");
             int kernelIdx = (current == "PTX") ? 1 : (current == "Cubin") ? 2 : 0;
             if (ImGui::Combo("Kernel Image##sm86", &kernelIdx, kernelOptions, 3))
-                config->FGDLSSGAmpereMfgKernelImage = std::string(kernelOptions[kernelIdx]);
-            ShowHelpMarker("Auto: cubin on real SM86, PTX for other GPUs.\n"
-                           "PTX: JIT-compiled, also works on RTX 3080 Ti.\n"
-                           "Cubin: requires real SM86 hardware.\n"
+            {
+                const char* storedOptions[] = { "Auto", "PTX", "Cubin" };
+                config->FGDLSSGAmpereMfgKernelImage = std::string(storedOptions[kernelIdx]);
+            }
+            ShowHelpMarker("Auto: resolves to optimal format (e.g. PTX on Linux/Proton or RTX 3080 Ti).\n"
+                           "PTX: JIT-compiled, recommended for Linux/Proton and RTX 3080 Ti.\n"
+                           "Cubin: precompiled binary, requires real SM86 hardware on Windows.\n"
                            "Save Settings and restart to apply.");
         }
 

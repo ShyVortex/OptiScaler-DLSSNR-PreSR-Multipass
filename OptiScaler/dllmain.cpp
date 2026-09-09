@@ -1860,7 +1860,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 #endif
 
         // Initial state of FG
-        State::Instance().externalFrameGeneration = Config::Instance()->ExternalFrameGeneration.value_or_default();
+        State::Instance().externalFrameGeneration = Config::Instance()->ExternalFrameGeneration.value_or_default() ||
+                                                    Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
         if (State::Instance().externalFrameGeneration)
         {
             // Only runtime overrides: preserve the user's OptiFG configuration for the next

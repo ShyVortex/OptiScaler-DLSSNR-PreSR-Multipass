@@ -21,4 +21,7 @@ void TrySetup();
 
 /// Generates dlssg_sm86.ini content from OptiScaler config values.
 std::string GenerateIniContent();
+
+/// Resolves optimal kernel image format for current hardware/environment when Auto is requested.
+std::string ResolveAutoKernelImage();
 } // namespace AmpereMfgLoader
