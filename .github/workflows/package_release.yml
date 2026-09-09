@@ -63,22 +63,26 @@ jobs:
     - name: Run package_release.ps1
       shell: powershell
       run: |
-        $scriptArgs = @("-Version", "${{ inputs.version }}")
+        $params = @{
+            Version = "${{ inputs.version }}"
+        }
         if ("${{ inputs.include_ampere_mfg }}" -eq "true") {
-            $scriptArgs += "-IncludeAmpereMfg"
+            $params["IncludeAmpereMfg"] = $true
         }
         if ("${{ inputs.accept_ampere_mfg_licenses }}" -eq "true") {
-            $scriptArgs += "-AcceptAmpereMfgLicenses"
+            $params["AcceptAmpereMfgLicenses"] = $true
         }
         if ("${{ inputs.include_dlss_fg }}" -eq "true") {
-            $scriptArgs += "-IncludeDlssFrameGeneration"
+            $params["IncludeDlssFrameGeneration"] = $true
         }
         if ("${{ inputs.accept_nvidia_licenses }}" -eq "true") {
-            $scriptArgs += "-AcceptNvidiaLicenses"
+            $params["AcceptNvidiaLicenses"] = $true
         }
 
-        Write-Host "Executing: .\package_release.ps1 $($scriptArgs -join ' ')"
-        & .\package_release.ps1 @scriptArgs
+        Write-Host "Executing package_release.ps1 with options:"
+        $params.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key): $($_.Value)" }
+
+        & .\package_release.ps1 @params
         if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
             exit $LASTEXITCODE
         }
