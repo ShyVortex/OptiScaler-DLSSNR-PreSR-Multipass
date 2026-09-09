@@ -46,7 +46,7 @@ std::string GenerateIniContent()
     ss << "[FrameGeneration]\n";
     ss << "MaxGeneratedFrames=" << maxFrames << "\n\n";
     ss << "[Logging]\n";
-    ss << "Level=2\n";
+    ss << "Level=3\n";
     ss << "File=1\n";
     ss << "DebugOutput=0\n";
     ss << "EvaluateEvery=120\n";
