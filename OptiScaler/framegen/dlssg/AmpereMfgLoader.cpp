@@ -111,7 +111,11 @@ void TrySetup()
 
     // Locate dlssg_sm86.dll
     auto basePath = Util::DllPath().parent_path();
-    auto dllPath = basePath / L"dlssg_sm86" / L"dlssg_sm86.dll";
+    auto dllPath = basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll";
+    if (!std::filesystem::exists(dllPath))
+    {
+        dllPath = basePath / L"dlssg_sm86" / L"dlssg_sm86.dll";
+    }
     if (!std::filesystem::exists(dllPath))
     {
         // Fallback: check directly beside OptiScaler DLL
@@ -123,7 +127,7 @@ void TrySetup()
         else
         {
             s_status.DllFound = false;
-            s_status.ErrorMessage = "dlssg_sm86.dll not found in dlssg_sm86/ subfolder.";
+            s_status.ErrorMessage = "dlssg_sm86.dll not found in OptiScaler/dlssg_sm86/ or dlssg_sm86/ subfolders.";
             LOG_ERROR("AmpereMfgLoader: {}", s_status.ErrorMessage);
             return;
         }
@@ -156,6 +160,7 @@ void TrySetup()
     }
 
     // Load dlssg_sm86.dll
+    NtdllProxy::Init();
     LOG_INFO("AmpereMfgLoader: Loading {}", wstring_to_string(dllPath.wstring()));
     HMODULE hMod = NtdllProxy::LoadLibraryExW_Ldr(dllPath.c_str(), NULL, 0);
     if (!hMod)

@@ -1876,6 +1876,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             LOG_INFO("External frame generation: leaving Streamline/Reflex and MFG control to the game or unlocker; NR/SR remain available");
         }
 
+        // Init Kernel proxies
+        NtdllProxy::Init();
+        KernelBaseProxy::Init();
+        Kernel32Proxy::Init();
+
         // Ampere SM86 MFG: write INI, load DLL, then enter External FG mode.
         if (Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default())
         {
@@ -1907,11 +1912,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         if (State::Instance().activeFgInput == FGInput::NvngxFG)
             State::Instance().activeFgOutput = FGOutput::NoFG;
-
-        // Init Kernel proxies
-        NtdllProxy::Init();
-        KernelBaseProxy::Init();
-        Kernel32Proxy::Init();
 
         // Check for Wine
         spdlog::info("");
