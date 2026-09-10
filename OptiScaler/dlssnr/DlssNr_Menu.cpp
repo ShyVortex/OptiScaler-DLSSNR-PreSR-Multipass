@@ -133,7 +133,9 @@ void RenderMenu(Config* config, float menuResScale)
         HelpMarker("Enhance lighting and material appearance with the NR model. Placement selects before or after upscaling.\nRequires nvngx_dlssnr.dll plus the included nvngx.dll_dlssnr.dll helper.");
 
         bool beforeSr = config->DlssNrRunBeforeSr.value_or_default();
-        const bool deferredActive = config->DlssNrDeferredDlss.value_or_default();
+        const auto activeFeature = State::Instance().currentFeature;
+        const bool rayReconstruction = activeFeature && activeFeature->GetUpscalerType() == Upscaler::DLSSD;
+        const bool deferredActive = config->DlssNrDeferredDlss.value_or_default() && !rayReconstruction;
         if (deferredActive)
             ImGui::BeginDisabled();
         if (ImGui::Checkbox("Apply before Super Resolution", &beforeSr))
@@ -170,9 +172,12 @@ void RenderMenu(Config* config, float menuResScale)
         if (ImGui::Checkbox("Generate before SR, apply after SR (DLSS)", &deferredDlss))
             config->DlssNrDeferredDlss = deferredDlss;
         HelpMarker("Compute NR at input resolution, upscale its changes with DLSS, then apply them after SR.\nExperimental: may flicker and adds GPU cost. Requires DLSS on DX12 or its bridges; does not support RR.\nOverrides Apply before Super Resolution. Disable Hold frame, Compare and Debug view.");
-        if (deferredDlss)
+        if (deferredDlss && rayReconstruction)
+            ImGui::TextWrapped("Generate before / apply after is unavailable with RR. Apply before Super Resolution "
+                               "controls NR placement.");
+        else if (deferredDlss)
             ImGui::TextWrapped("Residual DLSS: %s", DlssNr::DeferredDlssStatus().c_str());
-        ImGui::BeginDisabled(!deferredDlss);
+        ImGui::BeginDisabled(!deferredDlss || rayReconstruction);
         bool residualFg = config->DlssNrResidualFg.value_or_default();
         if (ImGui::Checkbox("NR every second frame (NVIDIA FG, experimental)", &residualFg))
             config->DlssNrResidualFg = residualFg;
