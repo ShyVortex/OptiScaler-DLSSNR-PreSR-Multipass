@@ -36,6 +36,29 @@ inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool onLinux)
     return configuredMaxFrames;
 }
 
+constexpr uint32_t DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID = 0x104D6667;
+constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562D0F;
+
+/// Evaluates whether a DRS query matches a DLSSG multi-frame setting and resolves
+/// the overridden value when running on Linux with Ampere MFG unlock enabled.
+inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, uint32_t& outValue)
+{
+    if (!onLinux || !mfgUnlockEnabled)
+        return false;
+
+    if (settingId == DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID ||
+        settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID)
+    {
+        int clamped = configuredMaxFrames;
+        if (clamped <= 0 || clamped > 3)
+            clamped = 3;
+        outValue = static_cast<uint32_t>(clamped);
+        return true;
+    }
+
+    return false;
+}
+
 /// Formats dlssg_sm86.ini content with Native 0.2.3 specification and strict clamping.
 inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg, int hwBilinear = 0, const std::string& router = "SM86", int logLevel = 1)
 {

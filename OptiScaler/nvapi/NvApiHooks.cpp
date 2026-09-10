@@ -2,6 +2,7 @@
 #include "NvApiHooks.h"
 #include <dlssnr/DlssNrNative.h>
 #include <NvApiDriverSettings.h>
+#include <framegen/dlssg/AmpereMfgLoader.h>
 
 #include "State.h"
 #include <Config.h>
@@ -61,6 +62,33 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
 NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSession, NvDRSProfileHandle hProfile,
                                                           NvU32 settingId, NVDRS_SETTING* pSetting)
 {
+    // On Linux / Proton with Ampere SM86 MFG, Streamline queries DRS settings to determine
+    // the static and dynamic multi-frame count limits:
+    //   0x104D6667: Override DLSSG multi-frame count
+    //   0x10562D0F: Override maximum DLSSG dynamic multi frame count
+    // When dlssg_sm86.ini is elevated to 2 to bypass unimplemented SetFlipConfig in DXVK-NVAPI,
+    // answering these DRS queries with the user's configured AmpereMfgMaxFrames (e.g. 1 for 2X FG)
+    // forces Streamline to evaluate exactly 1 interpolated frame per present without toggling or flickering.
+    const bool onLinux = State::Instance().isRunningOnLinux || IdentifyGpu::getPrimaryGpu().usesVkd3dProton;
+    const bool mfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    const int configuredFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+    uint32_t targetFrames = 0;
+    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames))
+    {
+        if (pSetting)
+        {
+            pSetting->settingId = settingId;
+            pSetting->settingType = NVDRS_DWORD_TYPE;
+            pSetting->settingLocation = NVDRS_CURRENT_PROFILE_LOCATION;
+            pSetting->isCurrentPredefined = 0;
+            pSetting->isPredefinedValid = 0;
+            pSetting->u32CurrentValue = targetFrames;
+            pSetting->u32PredefinedValue = targetFrames;
+        }
+        LOG_INFO("hkNvAPI_DRS_GetSetting: overriding setting 0x{:X} to {} for Ampere MFG on Linux", settingId, targetFrames);
+        return NVAPI_OK;
+    }
+
     if (!o_NvAPI_DRS_GetSetting)
         return NVAPI_ERROR;
 
@@ -202,8 +230,18 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
     // Native Reflex, flip metering, architecture/capability queries and driver
     // presets belong to the external FG owner in this mode. Returning null for
     // a Reflex query would disable it, so forward to the real function table.
+    // However, NvAPI_DRS_GetSetting is intercepted to permit multi-frame count overrides.
     if (State::Instance().externalFrameGeneration)
-        return DlssNrNative::WrapNvapi(InterfaceId,o_NvAPI_QueryInterface ? o_NvAPI_QueryInterface(InterfaceId) : nullptr);
+    {
+        if (InterfaceId == GET_ID(NvAPI_DRS_GetSetting))
+        {
+            if (o_NvAPI_QueryInterface && !o_NvAPI_DRS_GetSetting)
+                o_NvAPI_DRS_GetSetting = reinterpret_cast<decltype(&NvAPI_DRS_GetSetting)>(o_NvAPI_QueryInterface(InterfaceId));
+            return &hkNvAPI_DRS_GetSetting;
+        }
+
+        return DlssNrNative::WrapNvapi(InterfaceId, o_NvAPI_QueryInterface ? o_NvAPI_QueryInterface(InterfaceId) : nullptr);
+    }
 
     if (!o_NvAPI_QueryInterface)
         if (Config::Instance()->UseFakenvapi.value_or_default())

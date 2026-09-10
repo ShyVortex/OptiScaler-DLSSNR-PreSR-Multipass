@@ -1147,17 +1147,6 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         int frameCount = 0;
         InParameters->Get("DLSSG.MultiFrameCount", &frameCount);
 
-        // On Linux / Wine, single-frame hardware flip metering (SetFlipConfig) is not implemented in DXVK-NVAPI.
-        // When configured for 2X FG (AmpereMfgMaxFrames == 1), dlssg_sm86.ini advertises 2 to activate Streamline's
-        // stable Dynamic MFG loop, while we clamp runtime MultiFrameCount to 1 so exactly one interpolated frame is generated.
-        const bool onLinux = State::Instance().isRunningOnLinux || IdentifyGpu::getPrimaryGpu().usesVkd3dProton;
-        if (onLinux && Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() &&
-            Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default() == 1)
-        {
-            frameCount = 1;
-            InParameters->Set("DLSSG.MultiFrameCount", 1);
-        }
-
         State::Instance().dlssgDetectedInterpolationCount = frameCount;
         ReflexHooks::setDlssgFrameCount(frameCount);
 
