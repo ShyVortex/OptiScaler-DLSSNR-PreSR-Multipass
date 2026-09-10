@@ -3057,6 +3057,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 {
     auto& state = ctx.state;
     auto config = ctx.config;
+    auto& primaryGpu = *ctx.primaryGpu;
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
@@ -3093,7 +3094,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::TextWrapped("Save Settings and restart to change frame-generation ownership.");
 
     auto& menuResScale = ctx.menuResScale;
-    auto& primaryGpu = *ctx.primaryGpu;
 
     /// FG INPUTS
     bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
