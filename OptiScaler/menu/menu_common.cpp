@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "menu_common.h"
 #include <framegen/dlssg/MfgUnlock.h>
+#include <framegen/dlssg/AmpereMfgLoader.h>
 #include <dlssnr/DlssNr_ExposureScan.h>
 
 #include <algorithm>
@@ -295,7 +296,7 @@ void MenuCommon::ShowTooltip(const char* tip)
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     {
         ImGui::BeginTooltip();
-        ImGui::Text(tip);
+        ImGui::TextUnformatted(tip);
         ImGui::EndTooltip();
     }
 }
@@ -3057,36 +3058,160 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& state = ctx.state;
     auto config = ctx.config;
     bool external = config->ExternalFrameGeneration.value_or_default();
-    if (ImGui::Checkbox("External frame generation / MFG unlocker", &external))
-        config->ExternalFrameGeneration = external;
-    ShowHelpMarker("Leaves Streamline, Reflex and FG control to the game/external mod."
-                   "\nNR and NGX upscaling remain available. Save Settings and restart."
-                   "\nDoes not install an unlocker or enable FG in unsupported games.");
+    const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    if (ampereActive)
+    {
+        external = true;
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("External frame generation / MFG unlocker", &external);
+        ImGui::EndDisabled();
+        ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
+                       "To disable External FG, disable Ampere SM86 MFG below first.");
+    }
+    else
+    {
+        if (ImGui::Checkbox("External frame generation / MFG unlocker", &external))
+            config->ExternalFrameGeneration = external;
+        ShowHelpMarker("Leaves Streamline, Reflex and FG control to the game/external mod."
+                       "\nNR and NGX upscaling remain available. Save Settings and restart."
+                       "\nDoes not install an unlocker or enable FG in unsupported games.");
+    }
     if (external != state.externalFrameGeneration)
         ImGui::TextWrapped("Save Settings and restart to change frame-generation ownership.");
-    if (state.externalFrameGeneration)
-    {
-        ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
-        return;
-    }
+
     auto& menuResScale = ctx.menuResScale;
     auto& primaryGpu = *ctx.primaryGpu;
 
     /// FG INPUTS
     bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
-    if (ImGui::Checkbox("Built-in RTX 40 MFG unlock (experimental; restart)", &adaUnlock))
-        config->FGDLSSGAdaMfgUnlock = adaUnlock;
-    ShowHelpMarker("Optional y4my4my4m Ada unlock. Save Settings and restart to enable or remove it."
-                   "\nRequires a supported DLSSG runtime and Streamline 2.7.1+ for multiplier overrides."
-                   "\nDo not combine with another MFG unlocker. Does not add FG to an unsupported game."
-                   "\nNot validated on RTX 40 hardware here; RTX 20/30/50 are left unchanged.");
-    if (adaUnlock)
+    const bool disableAda = ampereActive || state.externalFrameGeneration;
+
+    if (disableAda)
+    {
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("Built-in RTX 40 MFG unlock (experimental; restart)", &adaUnlock);
+        ImGui::EndDisabled();
+        if (ampereActive)
+        {
+            ShowHelpMarker("Disabled because the Ampere (RTX 30) SM86 MFG unlock is active.\n"
+                           "Disable AmpereMfgUnlock first, Save Settings and restart.");
+        }
+        else
+        {
+            ShowHelpMarker("Disabled because External frame generation is active.\n"
+                           "Disable External FG first, Save Settings and restart.");
+        }
+    }
+    else
+    {
+        if (ImGui::Checkbox("Built-in RTX 40 MFG unlock (experimental; restart)", &adaUnlock))
+            config->FGDLSSGAdaMfgUnlock = adaUnlock;
+        ShowHelpMarker("Optional y4my4my4m Ada unlock. Save Settings and restart to enable or remove it.\n"
+                       "Requires a supported DLSSG runtime and Streamline 2.7.1+ for multiplier overrides.\n"
+                       "Do not combine with another MFG unlocker. Does not add FG to an unsupported game.\n"
+                       "Not validated on RTX 40 hardware here; RTX 20/30/50 are left unchanged.");
+    }
+    if (adaUnlock && !disableAda)
     {
         const auto& status = MfgUnlock::LastStatus();
         ImGui::TextWrapped("DLSSG %s: capability %s, validation %s, retargeted kernel groups %u",
                            status.SnippetVersion.empty() ? "not patched" : status.SnippetVersion.c_str(),
                            status.AdvertiseMatched ? "matched" : "not matched",
                            status.ValidateMatched ? "matched" : "not matched", status.KernelsRewritten);
+    }
+
+    // ── Ampere/Turing (SM86/SM75) MFG Unlock ─────────────────────────
+    if (ImGui::CollapsingHeader("RTX 20 / 30 (SM75 / SM86) MFG Unlock"))
+    {
+        ImGui::Indent();
+
+        bool ampereUnlock = config->FGDLSSGAmpereMfgUnlock.value_or_default();
+
+        // Mutual exclusion: disable if Ada is already enabled
+        const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
+        if (adaActive)
+        {
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock);
+            ImGui::EndDisabled();
+            ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
+                           "Disable AdaMfgUnlock first, Save Settings and restart.");
+        }
+        else
+        {
+            if (ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock))
+            {
+                config->FGDLSSGAmpereMfgUnlock = ampereUnlock;
+                if (ampereUnlock)
+                {
+                    config->ExternalFrameGeneration = true;
+                    config->FGDLSSGAdaMfgUnlock = false;
+                }
+            }
+            ShowHelpMarker("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
+                           "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
+                           "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
+                           "Do not combine with the Ada unlock or another external MFG unlocker.");
+        }
+
+        if (ampereUnlock)
+        {
+            // Status display
+            const auto& status = AmpereMfgLoader::LastStatus();
+            if (!status.ErrorMessage.empty())
+                ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Error: %s", status.ErrorMessage.c_str());
+            else
+            {
+                std::string routerStr = AmpereMfgLoader::ResolveRouter();
+                ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s",
+                                   status.DllFound ? "found" : "missing",
+                                   routerStr.c_str(),
+                                   status.IniWritten ? "written" : "not written",
+                                   status.DllLoaded ? "yes" : "no");
+            }
+
+            // MaxGeneratedFrames slider
+            int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+            const char* frameLabels[] = { "Capability default (3X)", "1 (2X)", "2 (3X)", "3 (4X)" };
+            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 3) ? frameLabels[maxFrames] : "Capability default (3X)";
+            if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 3, currentLabel))
+                config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
+            ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X). The game chooses the actual count.\n"
+                           "0 = Default capability limit (allows up to 4X).\n"
+                           "Save Settings and restart to apply.");
+
+            // KernelImage combo
+            std::string resolvedAuto = AmpereMfgLoader::ResolveAutoKernelImage();
+            std::string autoLabel = (resolvedAuto != "Auto") ? "Auto (" + resolvedAuto + " on this GPU)" : "Auto";
+            const char* kernelOptions[] = { autoLabel.c_str(), "PTX", "Cubin" };
+            std::string current = config->FGDLSSGAmpereMfgKernelImage.value_or("Auto");
+            int kernelIdx = (current == "PTX") ? 1 : (current == "Cubin") ? 2 : 0;
+            if (ImGui::Combo("Kernel Image##sm86", &kernelIdx, kernelOptions, 3))
+            {
+                const char* storedOptions[] = { "Auto", "PTX", "Cubin" };
+                config->FGDLSSGAmpereMfgKernelImage = std::string(storedOptions[kernelIdx]);
+            }
+            ShowHelpMarker("Auto: resolves to optimal format (PTX on Linux/Proton, RTX 3080 Ti, or Turing).\n"
+                           "PTX: JIT-compiled driver path, recommended for Linux/Proton, RTX 3080 Ti, and RTX 20 series.\n"
+                           "Cubin: precompiled binary, requires exact physical SM match on Windows.\n"
+                           "Save Settings and restart to apply.");
+
+            // HardwareBilinear checkbox
+            bool hwBilinear = config->FGDLSSGAmpereMfgHardwareBilinear.value_or_default();
+            if (ImGui::Checkbox("Hardware Bilinear (approximate sampling)##sm86", &hwBilinear))
+                config->FGDLSSGAmpereMfgHardwareBilinear = hwBilinear;
+            ShowHelpMarker("SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
+                           "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
+                           "Save Settings and restart to apply.");
+        }
+
+        ImGui::Unindent();
+    }
+
+    if (state.externalFrameGeneration)
+    {
+        ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
+        return;
     }
 
     static std::vector<MenuOption<FGInput>> inputOptions;
