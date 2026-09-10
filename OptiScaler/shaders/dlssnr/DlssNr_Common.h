@@ -245,7 +245,11 @@ struct alignas(256) DlssNrConstants
     // here rather than in a new struct so DispatchResidualPass reuses the existing constant upload --
     // it lands inside the 256-byte alignas padding, so sizeof(DlssNrConstants) is unchanged.
     float ResidualBlend;
+    uint32_t ResidualHistoryValid;
+    uint32_t ResidualMotionBaseX;
+    uint32_t ResidualMotionBaseY;
 };
+static_assert(sizeof(DlssNrConstants) == 256);
 
 // Local mode numbering for dlssnr_residual.hlsl (a separate blob / PSO from the DlssNrMode shader).
 enum DlssNrResidualMode : uint32_t

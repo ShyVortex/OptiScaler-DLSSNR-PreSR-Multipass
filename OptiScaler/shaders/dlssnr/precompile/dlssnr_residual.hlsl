@@ -12,7 +12,7 @@
 //               history_t = lerp( reproject(history_{t-1}), edited - original, blend )
 //               The per-frame ray-trace noise term of (edited - original) is temporally
 //               uncorrelated and averages to zero; the enhancement term follows geometry and
-//               persists. Invalid reprojection (disocclusion / off-screen / bad MV) -> the
+//               persists. Invalid reprojection (off-screen / bad MV) -> the
 //               history is treated as zero at that pixel and rebuilds over the next frames.
 //   gMode == 1  Apply: base + delta * gTransferStrength, clamped non-negative. Run after RR+SR
 //               with the upscaled history layer as the delta.
@@ -54,6 +54,9 @@ cbuffer Params : register(b0)
     float gEnvironmentDetail;
     float gEnvironmentColour;
     float gResidualBlend;   // v2 only: history blend rate, 0..1. 1 == no accumulation (== v1).
+    uint gResidualHistoryValid;
+    uint gResidualMotionBaseX;
+    uint gResidualMotionBaseY;
 };
 
 // Same registers and the same SPIR-V binding numbers as dlssnr.hlsl, including the slots these
@@ -74,7 +77,7 @@ Texture2D<float4>   gOriginal : register(t2);  // accumulate: the previous histo
 #ifdef VK_MODE
 [[vk::binding(4, 0)]]
 #endif
-Texture2D<float4>   gMotion   : register(t3);  // accumulate: normalized current->previous motion, validity in .a.
+Texture2D<float4>   gMotion   : register(t3);  // raw game motion; active size, offsets and scale come from the host.
 #ifndef VK_MODE
 Texture2D<float4>   gExposure : register(t4);  // unused here; bound for descriptor-table parity.
 #endif
@@ -110,18 +113,20 @@ void CSMain(uint3 id : SV_DispatchThreadID)
                                        gSource.Load(int3(id.xy, 0)).rgb, float3(0.0, 0.0, 0.0));
 
         float2 uv = (float2(id.xy) + 0.5) / float2(gWidth, gHeight);
-        float4 mv = gMotion.Load(int3(id.xy, 0));
-        float2 prevUV = uv + mv.xy;
+        uint2 guideSize = uint2(gGuideWidth, gGuideHeight);
+        uint2 guidePos = min(uint2(uv * guideSize), guideSize - 1) +
+                         uint2(gResidualMotionBaseX, gResidualMotionBaseY);
+        float2 motion = gMotion.Load(int3(guidePos, 0)).xy * float2(gMvScaleX, gMvScaleY);
+        float2 prevUV = uv + motion;
 
-        bool valid = mv.a > 0.999 && all(isfinite(mv.xy)) &&
+        bool valid = gResidualHistoryValid != 0 && all(isfinite(motion)) && all(abs(motion) < 2.0) &&
                      all(prevUV >= 0.0) && all(prevUV <= 1.0);
 
         float3 history = valid ? gOriginal.SampleLevel(gLinear, prevUV, 0).rgb : float3(0.0, 0.0, 0.0);
         history = SanitizeFinite3(history, float3(0.0, 0.0, 0.0));
 
         // Invalid reprojection: history is 0, so the pixel fades in from no edit at the normal blend
-        // rate over the next frames -- it never takes the noisy current delta whole. The cold start
-        // (first frame / post-cut) is handled by the host passing gResidualBlend = 1 for that frame.
+        // rate over the next frames. A cold start/cut also fades in, without sampling uninitialized history.
         float a = clamp(gResidualBlend, 0.0, 1.0);
 
         gTarget[id.xy] = float4(lerp(history, delta, a), 1.0);
@@ -131,7 +136,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     if (gMode == 1)
     {
         float4 base  = gSource.Load(int3(id.xy, 0));
-        float3 delta = SanitizeFinite3(gModel.Load(int3(id.xy, 0)).rgb, float3(0.0, 0.0, 0.0));
+        float2 uv = (float2(id.xy) + 0.5) / float2(gWidth, gHeight);
+        float3 delta = SanitizeFinite3(gModel.SampleLevel(gLinear, uv, 0).rgb, float3(0.0, 0.0, 0.0));
 
         gTarget[id.xy] = float4(max(base.rgb + delta * gTransferStrength, 0.0), base.a);
         return;
