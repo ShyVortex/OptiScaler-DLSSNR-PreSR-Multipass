@@ -54,8 +54,7 @@ std::string GenerateIniContent()
 
     if (onLinux && configuredFrames == 1)
     {
-        LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1), elevating companion dlssg_sm86.ini "
-                 "MaxGeneratedFrames to 2 to bypass unimplemented SetFlipConfig in DXVK-NVAPI while clamping runtime MultiFrameCount to 1");
+        LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1); SetFlipConfig is stubbed in NvApiHooks to enable clean native 2X FG");
     }
 
     std::string kernelImg = cfg->FGDLSSGAmpereMfgKernelImage.value_or("Auto");

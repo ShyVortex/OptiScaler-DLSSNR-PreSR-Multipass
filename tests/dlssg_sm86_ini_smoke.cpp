@@ -153,16 +153,15 @@ int main()
         assert(fg2x == expected2x);
     }
 
-    // 10. ResolveMaxGeneratedFrames: Linux Dynamic MFG 2X elevation vs Windows exact preservation
+    // 10. ResolveMaxGeneratedFrames: Clean preservation of 1, 2, 3 on both Windows and Linux
     {
         // Windows (onLinux = false): exact values 1, 2, 3 must be preserved
         assert(ResolveMaxGeneratedFrames(1, false) == 1);
         assert(ResolveMaxGeneratedFrames(2, false) == 2);
         assert(ResolveMaxGeneratedFrames(3, false) == 3);
 
-        // Linux (onLinux = true): 2X FG (maxFrames = 1) must elevate to 2 to bypass unimplemented SetFlipConfig
-        assert(ResolveMaxGeneratedFrames(1, true) == 2);
-        // Multi-frame modes (2, 3) must remain unchanged on Linux
+        // Linux (onLinux = true): with SetFlipConfig stubbed, 2X FG (maxFrames = 1) is cleanly preserved
+        assert(ResolveMaxGeneratedFrames(1, true) == 1);
         assert(ResolveMaxGeneratedFrames(2, true) == 2);
         assert(ResolveMaxGeneratedFrames(3, true) == 3);
 
@@ -176,7 +175,7 @@ int main()
         assert(winIni.find("[FrameGeneration]\nMaxGeneratedFrames=1\n") != std::string::npos);
 
         std::string linuxIni = FormatIniContent(ResolveMaxGeneratedFrames(1, true), "PTX", 0, "SM86", 1);
-        assert(linuxIni.find("[FrameGeneration]\nMaxGeneratedFrames=2\n") != std::string::npos);
+        assert(linuxIni.find("[FrameGeneration]\nMaxGeneratedFrames=1\n") != std::string::npos);
     }
 
     // 11. TryResolveDrsMultiFrameSetting: Streamline DRS override for Linux Ampere MFG vs Windows
@@ -192,11 +191,13 @@ int main()
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val) == true);
         assert(val == 3);
 
-        // Setting 0x10562D0F (Override maximum DLSSG dynamic multi frame count)
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, true, val) == true);
-        assert(val == 1);
+        // Setting 0x10562D0F (Override maximum DLSSG dynamic multi frame count):
+        // When configured for 1, must NOT override so Dynamic MFG is not falsely declared unsupported
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, true, val) == false);
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 2, true, true, val) == true);
         assert(val == 2);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 3, true, true, val) == true);
+        assert(val == 3);
 
         // Clamping on out-of-range configured frames
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 0, true, true, val) == true);

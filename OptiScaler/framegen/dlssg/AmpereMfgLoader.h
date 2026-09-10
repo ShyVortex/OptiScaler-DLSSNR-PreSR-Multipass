@@ -21,17 +21,13 @@ Status LastStatus();
 void TrySetup();
 
 /// Resolves the companion INI MaxGeneratedFrames setting.
-/// On Windows, maxFrames is clamped to [1, 3] (preserving native 1 for 2X FG).
-/// On Linux/Proton, when configured for 1 (2X FG), it is elevated to 2 so Streamline
-/// engages its stable Dynamic MFG presentation loop rather than falling back to
-/// single-frame hardware flip metering (NvAPI_D3D12_SetFlipConfig, unimplemented in DXVK-NVAPI).
-inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool onLinux)
+/// MaxFrames is clamped to [1, 3] (preserving 1 for 2X FG, 2 for 3X FG, 3 for 4X FG).
+/// With NvAPI_D3D12_SetFlipConfig stubbed on Linux, both Windows and Linux cleanly
+/// support single-frame 2X FG (MaxGeneratedFrames = 1) without artificial elevation.
+inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ = false)
 {
     if (configuredMaxFrames <= 0 || configuredMaxFrames > 3)
         configuredMaxFrames = 3;
-
-    if (onLinux && configuredMaxFrames == 1)
-        return 2;
 
     return configuredMaxFrames;
 }
@@ -44,6 +40,11 @@ constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562
 inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, uint32_t& outValue)
 {
     if (!onLinux || !mfgUnlockEnabled)
+        return false;
+
+    // Do not override maximum dynamic multi-frame count when configured for single-frame (<= 1),
+    // because Streamline requires dynamic max > 1 to enable Dynamic MFG.
+    if (settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID && configuredMaxFrames <= 1)
         return false;
 
     if (settingId == DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID ||

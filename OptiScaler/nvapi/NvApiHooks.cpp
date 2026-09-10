@@ -225,12 +225,19 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
     return result;
 }
 
+NvAPI_Status __stdcall NvApiHooks::hkNvAPI_D3D12_SetFlipConfig(void* pCommandQueue, NvU32 dwFlags, void* pParams)
+{
+    LOG_TRACE("hkNvAPI_D3D12_SetFlipConfig: pCommandQueue={:p}, dwFlags=0x{:X}, pParams={:p}", pCommandQueue, dwFlags, pParams);
+    return NVAPI_OK;
+}
+
 void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
 {
     // Native Reflex, flip metering, architecture/capability queries and driver
     // presets belong to the external FG owner in this mode. Returning null for
     // a Reflex query would disable it, so forward to the real function table.
-    // However, NvAPI_DRS_GetSetting is intercepted to permit multi-frame count overrides.
+    // However, NvAPI_DRS_GetSetting is intercepted to permit multi-frame count overrides,
+    // and NvAPI_D3D12_SetFlipConfig is stubbed if the driver does not implement it (e.g. DXVK-NVAPI on Linux).
     if (State::Instance().externalFrameGeneration)
     {
         if (InterfaceId == GET_ID(NvAPI_DRS_GetSetting))
@@ -238,6 +245,16 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
             if (o_NvAPI_QueryInterface && !o_NvAPI_DRS_GetSetting)
                 o_NvAPI_DRS_GetSetting = reinterpret_cast<decltype(&NvAPI_DRS_GetSetting)>(o_NvAPI_QueryInterface(InterfaceId));
             return &hkNvAPI_DRS_GetSetting;
+        }
+
+        if (InterfaceId == GET_ID(NvAPI_D3D12_SetFlipConfig) || InterfaceId == 0xf3148c42)
+        {
+            void* realFunc = o_NvAPI_QueryInterface ? o_NvAPI_QueryInterface(InterfaceId) : nullptr;
+            if (realFunc)
+                return realFunc;
+
+            LOG_INFO("hkNvAPI_QueryInterface: NvAPI_D3D12_SetFlipConfig is unimplemented by driver; providing stub returning NVAPI_OK");
+            return reinterpret_cast<void*>(&hkNvAPI_D3D12_SetFlipConfig);
         }
 
         return DlssNrNative::WrapNvapi(InterfaceId, o_NvAPI_QueryInterface ? o_NvAPI_QueryInterface(InterfaceId) : nullptr);
@@ -252,11 +269,22 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
     auto primaryGpu = IdentifyGpu::getPrimaryGpu();
 
     // Disable flip metering
-    if (InterfaceId == GET_ID(NvAPI_D3D12_SetFlipConfig) &&
+    if ((InterfaceId == GET_ID(NvAPI_D3D12_SetFlipConfig) || InterfaceId == 0xf3148c42) &&
         Config::Instance()->DisableFlipMetering.value_or(primaryGpu.vendorId != VendorId::Nvidia))
     {
-        LOG_INFO("FlipMetering is disabled!");
-        return nullptr;
+        LOG_INFO("FlipMetering is disabled (returning NVAPI_OK stub)");
+        return reinterpret_cast<void*>(&hkNvAPI_D3D12_SetFlipConfig);
+    }
+
+    if ((InterfaceId == GET_ID(NvAPI_D3D12_SetFlipConfig) || InterfaceId == 0xf3148c42) &&
+        (primaryGpu.usesVkd3dProton || State::Instance().isRunningOnLinux))
+    {
+        const auto functionPointer = o_NvAPI_QueryInterface ? o_NvAPI_QueryInterface(InterfaceId) : nullptr;
+        if (functionPointer)
+            return functionPointer;
+
+        LOG_INFO("hkNvAPI_QueryInterface: NvAPI_D3D12_SetFlipConfig unimplemented on Linux; providing stub returning NVAPI_OK");
+        return reinterpret_cast<void*>(&hkNvAPI_D3D12_SetFlipConfig);
     }
 
     if (InterfaceId == GET_ID(NvAPI_D3D_SetSleepMode) || InterfaceId == GET_ID(NvAPI_D3D_Sleep) ||
