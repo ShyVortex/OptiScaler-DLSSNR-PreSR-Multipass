@@ -216,7 +216,8 @@ if (-not $IncludeDlssFrameGeneration) {
 }
 
 $crossGenHash = 'E67DEE209320CDAFE0E93E45675D7AA34323A53ACC57A72B2E40A181581C989A'
-foreach ($requiredTextFile in @("$stage\README.md", "$stage\INSTALL-DLSSNR.md", "$stage\setup_windows.bat")) {
+# The README links to the setup guide; exact runtime hashes belong in the guide and installer.
+foreach ($requiredTextFile in @("$stage\INSTALL-DLSSNR.md", "$stage\setup_windows.bat")) {
     if ((Get-Content -LiteralPath $requiredTextFile -Raw).IndexOf($crossGenHash, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw "REFUSING: cross-generation runtime hash is missing from $requiredTextFile"
     }
