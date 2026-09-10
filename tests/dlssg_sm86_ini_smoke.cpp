@@ -131,6 +131,28 @@ int main()
         assert(ampereIni.find("Router=SM86") != std::string::npos);
     }
 
+    // 9. Single-Frame (2X) DLSS Frame Generation exact INI verification
+    {
+        std::string fg2x = FormatIniContent(1, "PTX", 0, "SM86", 1);
+        assert(fg2x.find("[FrameGeneration]\nMaxGeneratedFrames=1\n") != std::string::npos);
+        assert(fg2x.find("Router=SM86\n") != std::string::npos);
+        assert(fg2x.find("KernelImage=PTX\n") != std::string::npos);
+        assert(fg2x.find("HardwareBilinear=0\n") != std::string::npos);
+        assert(fg2x.find("Level=1\n") != std::string::npos);
+
+        std::string expected2x =
+            "; Native 0.2.3. Restart the game after changing this file.\n"
+            "[Compatibility]\n"
+            "Router=SM86\n"
+            "KernelImage=PTX\n"
+            "HardwareBilinear=0\n\n"
+            "[FrameGeneration]\n"
+            "MaxGeneratedFrames=1\n\n"
+            "[Logging]\n"
+            "Level=1\n";
+        assert(fg2x == expected2x);
+    }
+
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", true) == "PTX");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", false) == "Auto");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3070 Laptop GPU", false) == "PTX");
@@ -138,3 +160,4 @@ int main()
     std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture and environment routing)");
     return 0;
 }
+
