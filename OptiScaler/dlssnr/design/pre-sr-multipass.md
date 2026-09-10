@@ -3,9 +3,10 @@
 This experimental branch adds two opt-in controls to the `[DlssNr]` section:
 
 - `RunBeforeSR=true` runs Neural Rendering on the colour input immediately before Super Resolution.
-  The default is `false`, preserving the v0.2.0 post-upscale seam. Ray Reconstruction/DLSSD is
-  deliberately forced to remain post-upscale because its input contract is not compatible with the
-  PR #6 pre-SR path.
+  The default is `false`, preserving the v0.2.0 post-upscale seam. Originally Ray
+  Reconstruction/DLSSD was forced to stay post-upscale; the v0.7.4 unification lifted that, and
+  `RunBeforeSR` now applies to combined RR+SR too — see "Across-RR residual" below for why the
+  naive combination is weak and what `ResidualAcrossRR` does about it.
 - `Passes=N` selects one to three sequential model layers. The default is `1`.
 - `Pass2Preset`, `Pass2Style`, `Pass3Preset`, and `Pass3Style` optionally select a different built-in
   profile for later layers. `auto` inherits pass 1. These are profiles inside one model runtime, not
@@ -60,3 +61,35 @@ copies back instead of binding an illegal UAV.
 - Placement is part of the rebuild key even when pre/post surfaces happen to share dimensions and
   format (for example DLAA).
 - Working scales from 25% through 200% remain supported; the ping-pong resources use model-work size.
+
+## Across-RR residual (`ResidualAcrossRR`, experimental)
+
+The v0.7.4 NR unification let `RunBeforeSR` also apply to combined RR+SR. Running NR straight
+before RR wastes most of its edit: NR's contribution is high-frequency and un-accumulated, and
+RR's temporal denoiser removes exactly that. `ResidualAcrossRR=true` (only with `RunBeforeSR` +
+the game's RR both active) works around it:
+
+- The pre-SR seam runs the model but the resolve writes an owned scratch, not `DLSSD.Color`, so
+  RR+SR see the frame untouched (`FinishColor(false)` skips the copy-back).
+- The model's edit is `Δ = edited − original`. Its dominant term is `−n_t`, this frame's
+  ray-trace noise; adding that raw onto RR's already-denoised output just re-injects the noise
+  (an earlier additive prototype did exactly this and grain-flickered). `n_t` is temporally
+  uncorrelated and averages to zero; the useful `enhancement_t` term follows geometry and
+  persists. So a persistent render-res **enhancement layer** is kept, reprojected each frame by
+  the game's motion vectors (mode 8 + `dlssnr_residual.hlsl` Accumulate) and blended with the
+  new `Δ` at `ResidualAcrossRRBlend` (default `0.08`). Where the reprojection is invalid
+  (disocclusion, off-screen, non-finite MV) the layer takes the current `Δ` whole and rebuilds
+  over the next frames — it never carries stale content across a discontinuity. A camera cut
+  (`Reset`) drops the layer entirely.
+- The post-SR seam upscales the layer to output size and adds it onto the finished RR+SR frame
+  (`dlssnr_residual.hlsl` Apply, scaled by `TransferStrength`; strength `0` is byte-identical).
+
+`dlssnr_residual.hlsl` is a **separate blob and compute PSO** from `dlssnr.hlsl`, reusing this
+class's root signature. It exists so the main NR shader — which every path depends on — is never
+regenerated; a current `dxc` produces materially different DXIL from the committed
+`DlssNr_Shader.cso`.
+
+Known limits by construction: the enhancement lags on fast motion, fades briefly at
+disocclusions, and view-dependent detail (moving speculars) is smeared by the temporal mean.
+The ceiling is *complementary to* post-RR NR, not better than it — pre-SR NR and RR are
+overlapping neural reconstructors. DX12 only; native Vulkan wiring is a later change.

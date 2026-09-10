@@ -263,6 +263,15 @@ class Config
     // Generate NR before SR, upscale its signed contribution with a private DLSS feature,
     // and apply it after the game's upscaler. Takes precedence over RunBeforeSR; opt-in.
     CustomOptional<bool> DlssNrDeferredDlss { false };
+    // Experimental: with RunBeforeSR and the game's Ray Reconstruction both on, run NR before SR
+    // but leave the colour input untouched, then add the model's edit back onto the RR+SR output
+    // so it survives RR's denoise. v2 carries the edit as an MV-reprojected temporal accumulator
+    // (the per-frame ray-trace noise term averages to zero; the enhancement persists). Inert
+    // unless RunBeforeSR + RR are both active. Opt-in.
+    CustomOptional<bool> DlssNrResidualAcrossRr { false };
+    // v2 history blend rate for the accumulator above, 0.01..1. Lower = stabler but slower to
+    // appear; 1.0 = no accumulation (each frame's raw residual, which flickers). Default 0.08.
+    CustomOptional<float> DlssNrResidualAcrossRrBlend { 0.08f };
     CustomOptional<bool> DlssNrResidualFg { false };
     CustomOptional<uint32_t> DlssNrPrecision { 0 }; // 0 NVIDIA FP8 (default), 4 Experimental NVFP4 hybrid
     CustomOptional<bool> DlssNrResidualFgApproxCamera { false };

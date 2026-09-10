@@ -143,6 +143,20 @@ void RenderMenu(Config* config, float menuResScale)
 
         HelpMarker("On: apply NR before SR or combined RR+SR. Off: apply it afterward.\nBefore RR is experimental. Unsupported input layouts fall back after upscaling.");
 
+        bool residualAcrossRr = config->DlssNrResidualAcrossRr.value_or_default();
+        ImGui::BeginDisabled(deferredActive || !beforeSr);
+        if (ImGui::Checkbox("Carry the pre-SR edit across RR (experimental)", &residualAcrossRr))
+            config->DlssNrResidualAcrossRr = residualAcrossRr;
+        ImGui::EndDisabled();
+        HelpMarker("Only with Apply before Super Resolution on and the game's Ray Reconstruction active.\nRuns the model before SR but leaves the colour input untouched, then adds its edit back onto the RR+SR output so it survives RR's denoise.\nThe edit is carried as a motion-vector-reprojected temporal accumulator: the per-frame ray-trace noise averages out, the enhancement stays. Inert otherwise.");
+
+        ImGui::BeginDisabled(deferredActive || !beforeSr || !residualAcrossRr);
+        float residualBlend = config->DlssNrResidualAcrossRrBlend.value_or_default();
+        if (ImGui::SliderFloat("Detail accumulation rate", &residualBlend, 0.01f, 1.0f, "%.2f"))
+            config->DlssNrResidualAcrossRrBlend = std::clamp(residualBlend, 0.01f, 1.0f);
+        ImGui::EndDisabled();
+        HelpMarker("How fast the carried edit builds up. Lower = stabler but slower to appear; 1.0 = no accumulation (each frame's raw residual, which flickers). Default 0.08.");
+
         bool deferredDlss = config->DlssNrDeferredDlss.value_or_default();
         int precisionChoice = config->DlssNrPrecision.value_or_default() == 4 ? 1 : 0;
         const char* precisions[] = { "NVIDIA (FP8)", "Experimental (FP8+NVFP4 hybrid)" };

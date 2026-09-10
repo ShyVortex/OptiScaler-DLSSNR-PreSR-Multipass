@@ -98,6 +98,12 @@ struct DlssNrFrameInfo
     // Reset temporal history when switching between ordinary SR and Ray Reconstruction.
     bool RayReconstruction = false;
 
+    // ResidualAcrossRR (additive v1): this pre-SR evaluate must leave the game's Color untouched --
+    // the resolve writes an owned scratch, the model edit is captured as a signed residual, and the
+    // post-SR seam adds it back onto the RR+SR output. Only ever true on the before-upscale seam and
+    // only when RunBeforeSR + RayReconstruction are both active.
+    bool ResidualAcrossRr = false;
+
     // Submission epoch supplied by the caller. Native DX12 uses the wrapped swapchain Present count;
     // the DX11/Vulkan bridges use their successfully submitted frame counter. A feature created in an
     // epoch is never evaluated until this value changes.
@@ -233,6 +239,19 @@ struct alignas(256) DlssNrConstants
     float SkinColour;
     float EnvironmentDetail;
     float EnvironmentColour;
+
+    // ResidualAcrossRR v2 only (dlssnr_residual.hlsl). History blend rate for the MV-reprojected
+    // accumulator, 0..1. Read only by that separate shader; dlssnr.hlsl never declares it. Appended
+    // here rather than in a new struct so DispatchResidualPass reuses the existing constant upload --
+    // it lands inside the 256-byte alignas padding, so sizeof(DlssNrConstants) is unchanged.
+    float ResidualBlend;
+};
+
+// Local mode numbering for dlssnr_residual.hlsl (a separate blob / PSO from the DlssNrMode shader).
+enum DlssNrResidualMode : uint32_t
+{
+    DlssNrResidualMode_Accumulate = 0, // (edited - original) blended into the reprojected history
+    DlssNrResidualMode_Apply = 1,      // base + delta * TransferStrength, after RR+SR
 };
 
 class DlssNr_Common
