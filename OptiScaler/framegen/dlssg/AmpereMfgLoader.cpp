@@ -92,6 +92,18 @@ void TrySetup()
     if (!cfg->FGDLSSGAmpereMfgUnlock.value_or_default())
         return;
 
+    const auto& gpu = IdentifyGpu::getPrimaryGpu();
+    const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
+    const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+
+    if (ShouldFallbackToFsrFg(configuredFrames, onLinux, true))
+    {
+        s_status.Enabled = false;
+        s_status.ErrorMessage = "2X FG on Linux: Using OptiScaler internal FSR FG (dlssg_sm86 bypassed).";
+        LOG_INFO("AmpereMfgLoader: On Linux with 1 generated frame, falling back to OptiScaler internal FSR FG instead of sideloading dlssg_sm86");
+        return;
+    }
+
     s_status.Enabled = true;
 
     // Mutual exclusion: fail if Ada MFG unlock is also enabled

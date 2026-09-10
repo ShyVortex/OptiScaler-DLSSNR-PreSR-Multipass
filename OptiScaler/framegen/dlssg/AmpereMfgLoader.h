@@ -32,6 +32,13 @@ inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ =
     return configuredMaxFrames;
 }
 
+/// Returns true if single-frame 2X FG on Linux should fall back to OptiScaler's
+/// internal FSR FG pipeline (DLSSG input -> FSR FG output) instead of sideloading dlssg_sm86.
+inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled)
+{
+    return onLinux && mfgUnlockEnabled && (configuredMaxFrames == 1);
+}
+
 constexpr uint32_t DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID = 0x104D6667;
 constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562D0F;
 

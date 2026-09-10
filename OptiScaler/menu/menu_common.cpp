@@ -3059,7 +3059,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto config = ctx.config;
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (ampereActive)
+    const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
+    const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+    const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive);
+
+    if (ampereActive && !ampereFallbackToFsrFg)
     {
         external = true;
         ImGui::BeginDisabled();
@@ -3067,6 +3071,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::EndDisabled();
         ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
                        "To disable External FG, disable Ampere SM86 MFG below first.");
+    }
+    else if (ampereFallbackToFsrFg)
+    {
+        external = false;
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("External frame generation / MFG unlocker", &external);
+        ImGui::EndDisabled();
+        ShowHelpMarker("Bypassed because 2X FG on Linux falls back to OptiScaler internal FSR FG.\n"
+                       "To use Ampere external MFG, set MaxGeneratedFrames to 2 (3X) or 3 (4X) below.");
     }
     else
     {
@@ -3203,6 +3216,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
                            "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
                            "Save Settings and restart to apply.");
+        }
+
+        if (ampereFallbackToFsrFg)
+        {
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f),
+                               "Linux 2X FG: Falling back to OptiScaler internal FSR FG (DLSSG -> FSR FG).");
         }
 
         ImGui::Unindent();
