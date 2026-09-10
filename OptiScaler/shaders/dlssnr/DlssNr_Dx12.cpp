@@ -2900,7 +2900,11 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
     }
     DlssNrNative::SetPrecision(precision);
     if (!cfg.DlssNrEnabled.value_or_default() || !cfg.DlssNrDeferredDlss.value_or_default() || rayReconstruction)
+    {
         DeferredSr::Cancel();
+        if (rayReconstruction && cfg.DlssNrEnabled.value_or_default() && cfg.DlssNrDeferredDlss.value_or_default())
+            DeferredSr::Say("inactive: Ray Reconstruction; using ordinary before/after NR placement");
+    }
     else
     {
         if (cmdList != nullptr && params != nullptr)
