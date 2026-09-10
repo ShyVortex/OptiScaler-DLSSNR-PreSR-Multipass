@@ -21,6 +21,6 @@ This project uses [FreeType](https://gitlab.freedesktop.org/freetype/freetype), 
 
 ## Upstream sponsorship
 
-The original OptiScaler project credits [SignPath.io](https://signpath.io/) for Windows code signing and the [SignPath Foundation](https://signpath.org/) for its certificate. This does not mean this fork's binaries are signed by them.
+The original OptiScaler project credits [SignPath.io](https://signpath.io/) for Windows code signing and the [SignPath Foundation](https://signpath.org/) for its certificate.
 
 To support the original developers: [cdozdil on GitHub Sponsors](https://github.com/sponsors/cdozdil?frequency=one-time) and [nitec on Buy Me a Coffee](https://buymeacoffee.com/nitec).

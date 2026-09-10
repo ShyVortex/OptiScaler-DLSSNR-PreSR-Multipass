@@ -2,7 +2,7 @@
 
 A game mod that uses NVIDIA AI to change lighting, detail and colour. You can adjust the look and how much performance the effect costs.
 
-This is an experimental version of OptiScaler. Results vary, and it does not work with every game.
+This is an experimental community version of OptiScaler. Results and game support vary.
 
 **[Download the latest version](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/latest)** · [Setup guide](INSTALL-DLSSNR.md) · [What's new](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases)
 
@@ -18,7 +18,7 @@ This is an experimental version of OptiScaler. Results vary, and it does not wor
 
 An NVIDIA RTX 20, 30, 40 or 50-series GPU and a supported 64-bit game. Older cards can be much slower.
 
-You also need a separate NVIDIA model file, `nvngx_dlssnr.dll`. It is **not included**, and the file you need depends on your GPU. The [setup guide](INSTALL-DLSSNR.md#choose-the-correct-runtime) explains which one to use and how to check it.
+Download the NVIDIA model file, `nvngx_dlssnr.dll`, separately. The file you need depends on your GPU. The [setup guide](INSTALL-DLSSNR.md#choose-the-correct-runtime) explains which one to use and how to check it.
 
 ## Install on Windows
 
@@ -40,6 +40,6 @@ For frame generation, see the [setup notes](docs/DLSS-FRAME-GENERATION.md). For 
 
 ## Credits
 
-Built on [OptiScaler](https://github.com/optiscaler/OptiScaler) and [Dagherbou's Neural Rendering fork](https://github.com/Dagherbou/OptiScaler_DLSSNR), with colour processing from [RenoDX](https://github.com/clshortfuse/renodx). This is an unofficial mod, not an NVIDIA or game-developer release.
+Built on [OptiScaler](https://github.com/optiscaler/OptiScaler) and [Dagherbou's Neural Rendering fork](https://github.com/Dagherbou/OptiScaler_DLSSNR), with colour processing from [RenoDX](https://github.com/clshortfuse/renodx).
 
 [Full credits](docs/CREDITS.md) · [Licence](LICENSE) · [OptiScaler documentation](https://github.com/optiscaler/OptiScaler/wiki)
