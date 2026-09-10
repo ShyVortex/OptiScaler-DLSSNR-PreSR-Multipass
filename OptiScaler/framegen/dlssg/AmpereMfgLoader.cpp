@@ -10,6 +10,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <mutex>
 
 #ifndef NV_GPU_ARCHITECTURE_GA100
 #define NV_GPU_ARCHITECTURE_GA100 0x00000170
@@ -21,10 +22,12 @@ namespace
 {
 Status s_status;
 bool s_setupAttempted = false;
+std::recursive_mutex s_mutex;
 } // namespace
 
-const Status& LastStatus()
+Status LastStatus()
 {
+    std::lock_guard lock(s_mutex);
     return s_status;
 }
 
@@ -32,14 +35,7 @@ std::string ResolveAutoKernelImage()
 {
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
-    const bool is3080Ti = (gpu.name.find("3080 Ti") != std::string::npos || gpu.name.find("3080Ti") != std::string::npos);
-    const bool isTuring = IsTuringArch(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id)) ||
-                          (gpu.name.find("RTX 20") != std::string::npos || gpu.name.find("GTX 16") != std::string::npos);
-
-    if (onLinux || is3080Ti || isTuring)
-        return "PTX";
-
-    return "Auto";
+    return ResolveAutoKernelImage(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, onLinux);
 }
 
 std::string ResolveRouter()
@@ -79,6 +75,7 @@ std::string GenerateIniContent()
 
 void TrySetup()
 {
+    std::lock_guard lock(s_mutex);
     if (s_setupAttempted)
         return;
     s_setupAttempted = true;
@@ -121,16 +118,20 @@ void TrySetup()
 
     // Locate dlssg_sm86.dll
     auto basePath = Util::DllPath().parent_path();
-    auto dllPath = basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll";
-    if (!std::filesystem::exists(dllPath))
+    auto dllPath = std::filesystem::path(cfg->MainDllPath.value_or(basePath.wstring())) /
+                   L"dlssg_sm86" / L"dlssg_sm86.dll";
+    std::error_code fileError;
+    if (!std::filesystem::exists(dllPath, fileError))
+        dllPath = basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll";
+    if (!std::filesystem::exists(dllPath, fileError))
     {
         dllPath = basePath / L"dlssg_sm86" / L"dlssg_sm86.dll";
     }
-    if (!std::filesystem::exists(dllPath))
+    if (!std::filesystem::exists(dllPath, fileError))
     {
         // Fallback: check directly beside OptiScaler DLL
         auto fallbackPath = basePath / L"dlssg_sm86.dll";
-        if (std::filesystem::exists(fallbackPath))
+        if (std::filesystem::exists(fallbackPath, fileError))
         {
             dllPath = fallbackPath;
         }
@@ -159,6 +160,8 @@ void TrySetup()
         }
         iniFile << GenerateIniContent();
         iniFile.close();
+        if (!iniFile)
+            throw std::runtime_error("Could not finish writing dlssg_sm86.ini");
         s_status.IniWritten = true;
     }
     catch (const std::exception& ex)

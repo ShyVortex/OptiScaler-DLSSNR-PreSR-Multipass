@@ -11,12 +11,12 @@ on:
       include_ampere_mfg:
         description: 'Include RTX 20/30 (SM75/SM86) MFG (dlssg_sm86.dll)'
         required: false
-        default: true
+        default: false
         type: boolean
       accept_ampere_mfg_licenses:
         description: 'Accept RTX 20/30 (SM75/SM86) MFG Licenses'
         required: false
-        default: true
+        default: false
         type: boolean
       include_dlss_fg:
         description: 'Include DLSS Frame Generation runtime'
@@ -52,7 +52,11 @@ jobs:
       run: |
         if (-not (Test-Path "dlssg_for_sm86\version.dll")) {
             Write-Host "dlssg_for_sm86 not found in working copy; cloning from upstream..."
-            git clone --depth 1 https://github.com/sdli1995/dlssg_for_sm86.git dlssg_for_sm86
+            git init dlssg_for_sm86
+            git -C dlssg_for_sm86 remote add origin https://github.com/sdli1995/dlssg_for_sm86.git
+            git -C dlssg_for_sm86 fetch --depth 1 origin 1fb9ecbd980b1f191c092dce1b072b3cb9bd8984
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned Native 0.2.3 runtime' }
+            git -C dlssg_for_sm86 checkout --detach FETCH_HEAD
         }
         if (-not (Test-Path "dlssg_for_sm86\version.dll")) {
             Write-Error "Failed to acquire dlssg_for_sm86\version.dll"
@@ -62,9 +66,11 @@ jobs:
 
     - name: Run package_release.ps1
       shell: powershell
+      env:
+        PACKAGE_VERSION: ${{ inputs.version }}
       run: |
         $params = @{
-            Version = "${{ inputs.version }}"
+            Version = $env:PACKAGE_VERSION
         }
         if ("${{ inputs.include_ampere_mfg }}" -eq "true") {
             $params["IncludeAmpereMfg"] = $true

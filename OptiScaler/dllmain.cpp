@@ -1755,6 +1755,10 @@ DWORD WINAPI getGpuInfo(LPVOID hModuleVoid)
     if (hModuleVoid)
         IdentifyGpu::updateD3d12Capabilities();
 
+    // This existing worker runs after DLL_PROCESS_ATTACH has returned. GPU
+    // enumeration and loading another graphics proxy must not run in DllMain.
+    AmpereMfgLoader::TrySetup();
+
     return 0;
 }
 
@@ -1882,27 +1886,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         KernelBaseProxy::Init();
         Kernel32Proxy::Init();
 
-        // Ampere SM86 MFG: write INI, load DLL, then enter External FG mode.
-        if (Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default())
-        {
-            AmpereMfgLoader::TrySetup();
-
-            if (AmpereMfgLoader::LastStatus().DllLoaded && !State::Instance().externalFrameGeneration)
-            {
-                // The SM86 mod takes full control of DLSSG. Enter External FG mode
-                // so OptiScaler's Streamline/DLSSG hooks don't interfere.
-                State::Instance().externalFrameGeneration = true;
-                auto* cfg = Config::Instance();
-                cfg->FGInput.set_volatile_value(FGInput::NoFG);
-                cfg->FGOutput.set_volatile_value(FGOutput::NoFG);
-                cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
-                cfg->FGEnabled.set_volatile_value(false);
-                cfg->ForceXeLL.set_volatile_value(false);
-                cfg->UseFakenvapi.set_volatile_value(false);
-                cfg->FN_ForceReflex.set_volatile_value(ForceReflex::InGame);
-                LOG_INFO("Ampere SM86 MFG loaded: entering External FG mode");
-            }
-        }
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
         State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
         State::Instance().activeFgNvngx = Config::Instance()->FGNvngxReplacement.value_or_default();

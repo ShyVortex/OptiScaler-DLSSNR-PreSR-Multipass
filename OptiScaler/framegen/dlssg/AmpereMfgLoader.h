@@ -15,9 +15,9 @@ struct Status
     std::string ErrorMessage; // Human-readable error if anything failed
 };
 
-const Status& LastStatus();
+Status LastStatus();
 
-/// Called once at startup. Writes the INI and loads the DLL if enabled + Ampere GPU.
+/// Called after DLL initialization, once GPU/environment information is available.
 void TrySetup();
 
 /// Formats dlssg_sm86.ini content with Native 0.2.3 specification and strict clamping.
@@ -96,4 +96,13 @@ std::string GenerateIniContent();
 
 /// Resolves optimal kernel image format for current hardware/environment when Auto is requested.
 std::string ResolveAutoKernelImage();
+
+inline std::string ResolveAutoKernelImage(uint32_t archId, const std::string& name, bool onLinux)
+{
+    return onLinux || IsTuringArch(archId) || name.find("RTX 20") != std::string::npos ||
+                   name.find("GTX 16") != std::string::npos || name.find("3080 Ti") != std::string::npos ||
+                   name.find("3080Ti") != std::string::npos || name.find("Laptop") != std::string::npos ||
+                   name.find("Mobile") != std::string::npos
+               ? "PTX" : "Auto";
+}
 } // namespace AmpereMfgLoader

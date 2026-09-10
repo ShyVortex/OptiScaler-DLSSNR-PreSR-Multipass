@@ -131,6 +131,10 @@ int main()
         assert(ampereIni.find("Router=SM86") != std::string::npos);
     }
 
-    std::puts("PASS: dlssg_sm86_ini_smoke (FormatIniContent & Architecture Router resolution)");
+    assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", true) == "PTX");
+    assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", false) == "Auto");
+    assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3070 Laptop GPU", false) == "PTX");
+    assert(ResolveAutoKernelImage(0x160, "NVIDIA GeForce RTX 2080", false) == "PTX");
+    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture and environment routing)");
     return 0;
 }
