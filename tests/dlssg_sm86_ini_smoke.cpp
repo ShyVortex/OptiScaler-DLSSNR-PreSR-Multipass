@@ -153,11 +153,38 @@ int main()
         assert(fg2x == expected2x);
     }
 
+    // 10. ResolveMaxGeneratedFrames: Linux Dynamic MFG 2X elevation vs Windows exact preservation
+    {
+        // Windows (onLinux = false): exact values 1, 2, 3 must be preserved
+        assert(ResolveMaxGeneratedFrames(1, false) == 1);
+        assert(ResolveMaxGeneratedFrames(2, false) == 2);
+        assert(ResolveMaxGeneratedFrames(3, false) == 3);
+
+        // Linux (onLinux = true): 2X FG (maxFrames = 1) must elevate to 2 to bypass unimplemented SetFlipConfig
+        assert(ResolveMaxGeneratedFrames(1, true) == 2);
+        // Multi-frame modes (2, 3) must remain unchanged on Linux
+        assert(ResolveMaxGeneratedFrames(2, true) == 2);
+        assert(ResolveMaxGeneratedFrames(3, true) == 3);
+
+        // Out-of-bounds fallbacks (defaults to 3)
+        assert(ResolveMaxGeneratedFrames(0, false) == 3);
+        assert(ResolveMaxGeneratedFrames(4, false) == 3);
+        assert(ResolveMaxGeneratedFrames(-1, true) == 3);
+
+        // Verify INI content produced for Windows 2X vs Linux 2X
+        std::string winIni = FormatIniContent(ResolveMaxGeneratedFrames(1, false), "PTX", 0, "SM86", 1);
+        assert(winIni.find("[FrameGeneration]\nMaxGeneratedFrames=1\n") != std::string::npos);
+
+        std::string linuxIni = FormatIniContent(ResolveMaxGeneratedFrames(1, true), "PTX", 0, "SM86", 1);
+        assert(linuxIni.find("[FrameGeneration]\nMaxGeneratedFrames=2\n") != std::string::npos);
+    }
+
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", true) == "PTX");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", false) == "Auto");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3070 Laptop GPU", false) == "PTX");
     assert(ResolveAutoKernelImage(0x160, "NVIDIA GeForce RTX 2080", false) == "PTX");
-    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture and environment routing)");
+    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture, environment routing and Linux 2X elevation)");
     return 0;
 }
+
 

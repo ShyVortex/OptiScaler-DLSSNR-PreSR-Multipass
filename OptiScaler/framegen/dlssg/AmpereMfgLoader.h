@@ -20,6 +20,22 @@ Status LastStatus();
 /// Called after DLL initialization, once GPU/environment information is available.
 void TrySetup();
 
+/// Resolves the companion INI MaxGeneratedFrames setting.
+/// On Windows, maxFrames is clamped to [1, 3] (preserving native 1 for 2X FG).
+/// On Linux/Proton, when configured for 1 (2X FG), it is elevated to 2 so Streamline
+/// engages its stable Dynamic MFG presentation loop rather than falling back to
+/// single-frame hardware flip metering (NvAPI_D3D12_SetFlipConfig, unimplemented in DXVK-NVAPI).
+inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool onLinux)
+{
+    if (configuredMaxFrames <= 0 || configuredMaxFrames > 3)
+        configuredMaxFrames = 3;
+
+    if (onLinux && configuredMaxFrames == 1)
+        return 2;
+
+    return configuredMaxFrames;
+}
+
 /// Formats dlssg_sm86.ini content with Native 0.2.3 specification and strict clamping.
 inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg, int hwBilinear = 0, const std::string& router = "SM86", int logLevel = 1)
 {

@@ -47,7 +47,16 @@ std::string ResolveRouter()
 std::string GenerateIniContent()
 {
     auto* cfg = Config::Instance();
-    int maxFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+    const auto& gpu = IdentifyGpu::getPrimaryGpu();
+    const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
+    const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+    const int maxFrames = ResolveMaxGeneratedFrames(configuredFrames, onLinux);
+
+    if (onLinux && configuredFrames == 1)
+    {
+        LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1), elevating companion dlssg_sm86.ini "
+                 "MaxGeneratedFrames to 2 to bypass unimplemented SetFlipConfig in DXVK-NVAPI while clamping runtime MultiFrameCount to 1");
+    }
 
     std::string kernelImg = cfg->FGDLSSGAmpereMfgKernelImage.value_or("Auto");
     if (kernelImg != "PTX" && kernelImg != "Cubin")
