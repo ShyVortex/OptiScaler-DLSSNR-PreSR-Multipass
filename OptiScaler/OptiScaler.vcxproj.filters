@@ -776,6 +776,12 @@
     <ClInclude Include="framegen\dlssg\DLSSG_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="framegen\dlssg\MfgUnlock.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="framegen\dlssg\AmpereMfgLoader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shaders\hud_copy\precompile\HudCopy_Shader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1374,6 +1380,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="framegen\dlssg\DLSSG_Dx12.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="framegen\dlssg\MfgUnlock.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="framegen\dlssg\AmpereMfgLoader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="OptiTypes.cpp">

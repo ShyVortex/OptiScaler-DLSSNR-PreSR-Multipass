@@ -1,0 +1,101 @@
+name: Package Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package Version Tag'
+        required: true
+        default: 'v0.1.0-dlssnr'
+        type: string
+      include_ampere_mfg:
+        description: 'Include RTX 20/30 (SM75/SM86) MFG (dlssg_sm86.dll)'
+        required: false
+        default: false
+        type: boolean
+      accept_ampere_mfg_licenses:
+        description: 'Accept RTX 20/30 (SM75/SM86) MFG Licenses'
+        required: false
+        default: false
+        type: boolean
+      include_dlss_fg:
+        description: 'Include DLSS Frame Generation runtime'
+        required: false
+        default: false
+        type: boolean
+      accept_nvidia_licenses:
+        description: 'Accept NVIDIA Licenses (if Include DLSS FG is checked)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        submodules: 'true'
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Ensure RTX 20/30 (SM75/SM86) files are present
+      if: ${{ inputs.include_ampere_mfg }}
+      shell: powershell
+      run: |
+        if (-not (Test-Path "dlssg_for_sm86\version.dll")) {
+            Write-Host "dlssg_for_sm86 not found in working copy; cloning from upstream..."
+            git init dlssg_for_sm86
+            git -C dlssg_for_sm86 remote add origin https://github.com/sdli1995/dlssg_for_sm86.git
+            git -C dlssg_for_sm86 fetch --depth 1 origin 1fb9ecbd980b1f191c092dce1b072b3cb9bd8984
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned Native 0.2.3 runtime' }
+            git -C dlssg_for_sm86 checkout --detach FETCH_HEAD
+        }
+        if (-not (Test-Path "dlssg_for_sm86\version.dll")) {
+            Write-Error "Failed to acquire dlssg_for_sm86\version.dll"
+            exit 1
+        }
+        Write-Host "dlssg_for_sm86 ready."
+
+    - name: Run package_release.ps1
+      shell: powershell
+      env:
+        PACKAGE_VERSION: ${{ inputs.version }}
+      run: |
+        $params = @{
+            Version = $env:PACKAGE_VERSION
+        }
+        if ("${{ inputs.include_ampere_mfg }}" -eq "true") {
+            $params["IncludeAmpereMfg"] = $true
+        }
+        if ("${{ inputs.accept_ampere_mfg_licenses }}" -eq "true") {
+            $params["AcceptAmpereMfgLicenses"] = $true
+        }
+        if ("${{ inputs.include_dlss_fg }}" -eq "true") {
+            $params["IncludeDlssFrameGeneration"] = $true
+        }
+        if ("${{ inputs.accept_nvidia_licenses }}" -eq "true") {
+            $params["AcceptNvidiaLicenses"] = $true
+        }
+
+        Write-Host "Executing package_release.ps1 with options:"
+        $params.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key): $($_.Value)" }
+
+        & .\package_release.ps1 @params
+        if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
+            exit $LASTEXITCODE
+        }
+
+    - name: Upload Release Archive
+      uses: actions/upload-artifact@v4
+      with:
+        name: OptiScaler-Release-Package-${{ inputs.version }}
+        path: release/*.zip
+        if-no-files-found: error

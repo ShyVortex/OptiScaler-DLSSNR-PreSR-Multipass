@@ -339,7 +339,9 @@ unsigned int RewriteBlackwellKernels(HMODULE module)
 
 void MfgUnlock::TryApply(HMODULE requestedModule)
 {
-    if (!Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() || State::Instance().externalFrameGeneration)
+    if (!Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
+        Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
+        State::Instance().externalFrameGeneration)
         return;
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     // The kernel retarget is Ada-specific. Do not patch Ampere/Turing or change Blackwell's working path.
@@ -407,6 +409,7 @@ unsigned int MfgUnlock::UnlockedMax()
 bool MfgUnlock::Pending()
 {
     if (!Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
+        Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
         State::Instance().externalFrameGeneration || g_status.ModuleFound)
         return false;
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
