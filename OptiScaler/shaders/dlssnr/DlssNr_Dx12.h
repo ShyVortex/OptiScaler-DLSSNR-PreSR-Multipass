@@ -58,6 +58,12 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     uint32_t _numThreadsX = 8;
     uint32_t _numThreadsY = 8;
 
+    // ResidualAcrossRR v2: a second compute PSO built from dlssnr_residual.hlsl's own blob,
+    // reusing this class's root signature and descriptor table. Kept separate so the main
+    // dlssnr.hlsl blob is never regenerated (a current dxc produces materially different DXIL
+    // from the committed one). Null on backends/builds where the residual shader is absent.
+    ID3D12PipelineState* _residualPipelineState = nullptr;
+
   public:
     DlssNr_Dx12(std::string InName, ID3D12Device* InDevice);
     ~DlssNr_Dx12();
@@ -86,4 +92,12 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
                   // table keeps its shape -- not evidence that temporal accumulation exists.
                   ID3D12Resource* InPrevEdit, ID3D12Resource* OutTarget,
                   ID3D12Resource* OutKeep);
+
+    // One compute pass of the ResidualAcrossRR v2 shader (dlssnr_residual.hlsl). Same descriptor
+    // table shape as DispatchPass; binds _residualPipelineState instead of _pipelineState. t4/u1
+    // are bound with a stand-in for parity. Returns false (no-op) if the residual PSO is absent.
+    bool DispatchResidualPass(ID3D12GraphicsCommandList* InCmdList, const DlssNrConstants& InConstants,
+                              ID3D12Resource* InSource, ID3D12Resource* InModel,
+                              ID3D12Resource* InOriginal, ID3D12Resource* InMotion,
+                              ID3D12Resource* OutTarget);
 };

@@ -3,9 +3,10 @@
 This experimental branch adds two opt-in controls to the `[DlssNr]` section:
 
 - `RunBeforeSR=true` runs Neural Rendering on the colour input immediately before Super Resolution.
-  The default is `false`, preserving the v0.2.0 post-upscale seam. Ray Reconstruction/DLSSD is
-  deliberately forced to remain post-upscale because its input contract is not compatible with the
-  PR #6 pre-SR path.
+  The default is `false`, preserving the v0.2.0 post-upscale seam. Originally Ray
+  Reconstruction/DLSSD was forced to stay post-upscale; the v0.7.4 unification lifted that, and
+  `RunBeforeSR` now applies to combined RR+SR too — see "Across-RR residual" below for why the
+  naive combination is weak and what `ResidualAcrossRR` does about it.
 - `Passes=N` selects one to three sequential model layers. The default is `1`.
 - `Pass2Preset`, `Pass2Style`, `Pass3Preset`, and `Pass3Style` optionally select a different built-in
   profile for later layers. `auto` inherits pass 1. These are profiles inside one model runtime, not
@@ -60,3 +61,7 @@ copies back instead of binding an illegal UAV.
 - Placement is part of the rebuild key even when pre/post surfaces happen to share dimensions and
   format (for example DLAA).
 - Working scales from 25% through 200% remain supported; the ping-pong resources use model-work size.
+
+## Across-RR residual (experimental)
+
+See [the maintained integration notes](../../../docs/RESIDUAL-ACROSS-RR.md) for the private colour resolve, signed temporal history, guarded post-RR composition, and validation limits.

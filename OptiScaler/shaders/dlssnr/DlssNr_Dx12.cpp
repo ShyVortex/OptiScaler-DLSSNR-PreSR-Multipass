@@ -30,6 +30,8 @@
 #include <algorithm>
 #include <cstring>
 #include "precompile/DlssNr_Shader.h"
+#include "precompile/dlssnr_residual_Shader.h"
+#include "DlssNr_ResidualPair.h"
 #include "../output_scaling/OS_Dx12.h"
 
 namespace
@@ -256,6 +258,26 @@ struct NrState
     ID3D12Resource* outputNative = nullptr;
     OS_Dx12* superDown = nullptr;
     Scaler nrScaler = Scaler::Count;
+
+    // ResidualAcrossRR v2 (design/pre-sr-multipass.md "Across-RR residual"). With RunBeforeSR + the
+    // game's Ray Reconstruction both on, the pre-SR seam runs the model but leaves Color untouched:
+    // the resolve writes residualEdited instead of the game buffer
+    // and dlssnr_residual.hlsl's Accumulate samples the game's active motion-vector rectangle
+    // layer by those MVs and blends (residualEdited - hdrCopy) in at ResidualBlend -> the new
+    // residualHistory. The per-frame ray-trace noise term of that delta averages to zero; the
+    // enhancement persists. The post-SR shader samples the signed history at output resolution.
+    // residualPair binds the result to its command list, parameters and output; every new pre
+    // seam invalidates the old result. residualHistoryIndex ping-pongs the two history textures.
+    ID3D12Resource* residualEdited = nullptr;      // resolve output on the pre-SR seam (render size)
+    ID3D12Resource* residualHistory[2] = {};       // accumulated enhancement layer, ping-pong (render size)
+    ID3D12Resource* residualComposed = nullptr;    // Apply output = RR frame + delta (output size)
+    unsigned int residualHistoryIndex = 0;         // which residualHistory holds the latest layer
+    bool residualHistoryPrimed = false;            // false -> take the current delta whole (post-reset)
+    bool residualStoreValid = false;
+    bool residualModeActive = false;
+    unsigned residualOutputWidth = 0, residualOutputHeight = 0;
+    DXGI_FORMAT residualOutputFormat = DXGI_FORMAT_UNKNOWN;
+    DlssNrResidualPair residualPair;
 
     // Frame hold (design/frame-hold.md): a persistent copy of the output taken on hold-on and restored
     // over the live output before the encode reads it while held, so a setting change re-renders the
@@ -786,8 +808,13 @@ void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed)
 
     for (ID3D12Resource** r :
          { &g_nr.output, &g_nr.passScratch, &g_nr.colorCopy, &g_nr.hdrCopy, &g_nr.colorSmall,
-           &g_nr.outputNative, &g_nr.activeColor })
+           &g_nr.outputNative, &g_nr.activeColor, &g_nr.residualEdited,
+           &g_nr.residualHistory[0], &g_nr.residualHistory[1],
+           &g_nr.residualComposed })
         ParkNrResource(*r);
+    g_nr.residualStoreValid = false;
+    g_nr.residualHistoryPrimed = false;
+    g_nr.residualHistoryIndex = 0;
 
     g_nr.passScratchFailed = false;
 
@@ -1488,6 +1515,15 @@ DlssNr_Dx12::DlssNr_Dx12(std::string InName, ID3D12Device* InDevice)
         return;
     }
 
+    // Second PSO for the ResidualAcrossRR v2 accumulator (its own blob, same root signature).
+    // A failure here is not fatal to the class -- only that experimental mode goes unavailable.
+    if (!CreateComputePipeline(InDevice, &_residualPipelineState, dlssnr_residual_cso,
+                               sizeof(dlssnr_residual_cso), nullptr))
+    {
+        _residualPipelineState = nullptr;
+        LOG_WARN("[{0}] ResidualAcrossRR compute pipeline unavailable", _name);
+    }
+
     _init = InitHeaps(InDevice, _frameHeaps, DLSSNR_NUM_OF_HEAPS);
 }
 
@@ -1558,6 +1594,63 @@ DlssNr_Dx12::~DlssNr_Dx12()
             buffer = nullptr;
         }
     }
+
+    if (_residualPipelineState != nullptr)
+    {
+        _residualPipelineState->Release();
+        _residualPipelineState = nullptr;
+    }
+}
+
+bool DlssNr_Dx12::DispatchResidualPass(ID3D12GraphicsCommandList* InCmdList,
+                                       const DlssNrConstants& InConstants, ID3D12Resource* InSource,
+                                       ID3D12Resource* InModel, ID3D12Resource* InOriginal,
+                                       ID3D12Resource* InMotion, ID3D12Resource* OutTarget)
+{
+    if (!_init || _residualPipelineState == nullptr || InCmdList == nullptr || _device == nullptr ||
+        InSource == nullptr || OutTarget == nullptr)
+        return false;
+
+    const uint32_t slot = _heapIndex;
+    _heapIndex = (_heapIndex + 1) % DLSSNR_NUM_OF_HEAPS;
+
+    FrameDescriptorHeap& currentHeap = _frameHeaps[slot];
+
+    // Same table shape as DispatchPass: the residual shader reads t0..t3 + u0, and t4/u1 get the
+    // source as a stand-in so no descriptor in the table is left unbound.
+    ID3D12Resource* const srvs[kSrvCount] = {
+        InSource,
+        InModel != nullptr ? InModel : InSource,
+        InOriginal != nullptr ? InOriginal : InSource,
+        InMotion != nullptr ? InMotion : InSource,
+        InSource,
+    };
+
+    for (uint32_t i = 0; i < kSrvCount; ++i)
+        CreateShaderResourceView(_device, srvs[i], currentHeap.GetSrvCPU(i));
+
+    ID3D12Resource* const uavs[kUavCount] = { OutTarget, OutTarget };
+
+    for (uint32_t i = 0; i < kUavCount; ++i)
+        CreateUnorderedAccessView(_device, uavs[i], currentHeap.GetUavCPU(i), 0);
+
+    if (!CreateConstantsBuffer(_device, _constantBuffers[slot], InConstants, currentHeap.GetCbvCPU(0)))
+    {
+        LOG_ERROR("[{0}] Failed to create a constants buffer", _name);
+        return false;
+    }
+
+    ID3D12DescriptorHeap* heaps[] = { currentHeap.GetHeapCSU() };
+    InCmdList->SetDescriptorHeaps(_countof(heaps), heaps);
+    InCmdList->SetComputeRootSignature(_rootSignature);
+    InCmdList->SetPipelineState(_residualPipelineState);
+    InCmdList->SetComputeRootDescriptorTable(0, currentHeap.GetTableGPUStart());
+
+    const UINT dispatchWidth = (InConstants.Width + _numThreadsX - 1) / _numThreadsX;
+    const UINT dispatchHeight = (InConstants.Height + _numThreadsY - 1) / _numThreadsY;
+    InCmdList->Dispatch(dispatchWidth, dispatchHeight, 1);
+
+    return true;
 }
 
 
@@ -1633,6 +1726,9 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     const bool targetSupportsUav =
         cropColor || (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0;
 
+    // Resource/dispatch failures in this mode must preserve Color for RR.
+    const bool residualAcrossRr = frame.ResidualAcrossRr && frame.BeforeUpscale;
+
     const auto guideDesc = depth->GetDesc();
     const auto motionDesc = motion->GetDesc();
     const auto guides = DlssNr::ResolveGuideRegions(
@@ -1666,6 +1762,9 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     if (frame.Reset)
     {
         g_nr.reset = true;
+        // Drop the accumulated enhancement layer: a cut invalidates the reprojection history.
+        g_nr.residualHistoryPrimed = false;
+        g_nr.residualStoreValid = false;
 
         static unsigned long long resets = 0;
         ++resets;
@@ -1764,6 +1863,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // never called, which is why every one of these controls appeared to do nothing until something
     // else -- a resolution change -- happened to force a rebuild by accident.
     const bool tuningChanged = !TuningMatchesFeature(cfg, requestedPasses);
+    if (tuningChanged)
+        g_nr.residualHistoryPrimed = false;
 
     if (g_nr.feature != nullptr && (resolutionChanged || tuningChanged || placementChanged))
     {
@@ -1794,6 +1895,13 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
             ParkNrResource(g_nr.colorSmall);
             ParkNrResource(g_nr.outputNative);
             ParkNrResource(g_nr.activeColor);
+            ParkNrResource(g_nr.residualEdited);
+            ParkNrResource(g_nr.residualHistory[0]);
+            ParkNrResource(g_nr.residualHistory[1]);
+            ParkNrResource(g_nr.residualComposed);
+            g_nr.residualStoreValid = false;
+            g_nr.residualHistoryIndex = 0;
+            g_nr.residualHistoryPrimed = false;
             g_nr.passScratchFailed = false;
         }
     }
@@ -1816,6 +1924,36 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
         LOG_ERROR("DLSS-NR unavailable: {}", g_nr.reason);
         device->Release();
         return;
+    }
+
+    // All carriers rest in NPSR, including their first use. CreateScratch starts
+    // in UAV, so transition only newly allocated resources here.
+    if (residualAcrossRr)
+    {
+        auto ensureReadable = [&](ID3D12Resource*& resource, DXGI_FORMAT format, unsigned w, unsigned h)
+        {
+            if (resource == nullptr)
+            {
+                resource = CreateScratch(device, format, w, h);
+                if (resource)
+                    Barrier(cmdList, resource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            }
+            return resource != nullptr;
+        };
+        if (_residualPipelineState == nullptr ||
+            !ensureReadable(g_nr.residualEdited, desc.Format, width, height) ||
+            !ensureReadable(g_nr.residualHistory[0], DXGI_FORMAT_R16G16B16A16_FLOAT, width, height) ||
+            !ensureReadable(g_nr.residualHistory[1], DXGI_FORMAT_R16G16B16A16_FLOAT, width, height) ||
+            !ensureReadable(g_nr.residualComposed, g_nr.residualOutputFormat,
+                            g_nr.residualOutputWidth, g_nr.residualOutputHeight))
+        {
+            ReportSkipOnce("RR residual resources unavailable; preserving the game's colour");
+            g_nr.residualStoreValid = false;
+            g_nr.residualHistoryPrimed = false;
+            device->Release();
+            return;
+        }
     }
 
     if (requestedPasses == 1)
@@ -2726,10 +2864,19 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
         // Pre-SR Color is not guaranteed to have UAV support. Write directly when legal; otherwise
         // resolve into hdrCopy while the original Color remains readable, then copy the result back.
-        ID3D12Resource* resolveOriginal = targetSupportsUav ? g_nr.hdrCopy : target;
-        ID3D12Resource* resolveTarget = targetSupportsUav ? target : g_nr.hdrCopy;
+        // ResidualAcrossRR overrides both: the resolve goes to an owned scratch and nothing is
+        // written back to Color -- the edit is carried to the after-SR seam as a residual instead.
+        ID3D12Resource* resolveOriginal =
+            residualAcrossRr ? g_nr.hdrCopy : (targetSupportsUav ? g_nr.hdrCopy : target);
+        ID3D12Resource* resolveTarget =
+            residualAcrossRr ? g_nr.residualEdited : (targetSupportsUav ? target : g_nr.hdrCopy);
 
-        if (targetSupportsUav)
+        if (residualAcrossRr)
+        {
+            Barrier(cmdList, g_nr.residualEdited, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        }
+        else if (targetSupportsUav)
         {
             TransitionTarget(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
@@ -2739,10 +2886,42 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
 
-        DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer, resolveOriginal, motionIn,
-                     exposureTex, resolveTarget, nullptr);
+        // Apply the shared strength once, at the post-RR seam.
+        if (residualAcrossRr)
+            resolveParams.TransferStrength = 1.0f;
+        const bool resolved = DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer,
+                                           resolveOriginal, motionIn, exposureTex, resolveTarget, nullptr);
 
-        if (!targetSupportsUav)
+        if (residualAcrossRr)
+        {
+            Barrier(cmdList, g_nr.residualEdited, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            const unsigned prev = g_nr.residualHistoryIndex & 1u;
+            const unsigned cur = prev ^ 1u;
+            Barrier(cmdList, g_nr.residualHistory[cur], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            DlssNrConstants accum {};
+            accum.Mode = DlssNrResidualMode_Accumulate;
+            accum.Width = width;
+            accum.Height = height;
+            accum.ResidualBlend = std::clamp(cfg.DlssNrResidualAcrossRrBlend.value_or_default(), 0.01f, 1.0f);
+            accum.ResidualHistoryValid = g_nr.residualHistoryPrimed ? 1u : 0u;
+            accum.GuideWidth = motionWidth;
+            accum.GuideHeight = motionHeight;
+            accum.ResidualMotionBaseX = motionBaseX;
+            accum.ResidualMotionBaseY = motionBaseY;
+            accum.MvScaleX = frame.MvScaleX / (float) width;
+            accum.MvScaleY = frame.MvScaleY / (float) height;
+            const bool accumulated = resolved && DispatchResidualPass(cmdList, accum, g_nr.hdrCopy,
+                g_nr.residualEdited, g_nr.residualHistory[prev], motionIn, g_nr.residualHistory[cur]);
+            Barrier(cmdList, g_nr.residualHistory[cur], D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            g_nr.residualHistoryPrimed = accumulated;
+            g_nr.residualStoreValid = accumulated;
+            if (accumulated)
+                g_nr.residualHistoryIndex = cur;
+        }
+        else if (!targetSupportsUav)
         {
             Barrier(cmdList, g_nr.hdrCopy, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -2800,7 +2979,8 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     // Failed evaluations leave the game's original image intact. A successful copy-back writes
     // only the active rectangle and restores both resources before DLSS consumes the image.
-    FinishColor(result == NVSDK_NGX_Result_Success);
+    // ResidualAcrossRR never copies back -- Color must reach RR untouched.
+    FinishColor(result == NVSDK_NGX_Result_Success && !residualAcrossRr);
     if (result == NVSDK_NGX_Result_Success)
         ++g_nr.successfulDispatches;
 
@@ -2879,6 +3059,67 @@ void RetryAfterFailure()
 
 }
 
+// Consume only the residual produced by this exact CPU evaluate. Dispatch failures
+// leave the RR output untouched, and every exit restores the caller's bindings.
+void ApplyResidualAcrossRr(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params)
+{
+    auto* output = GetResource(params, NVSDK_NGX_Parameter_Output, "DLSSD.Output");
+    const bool paired = g_nr.residualPair.Take(cmdList, params, output);
+    const bool ready = g_nr.residualStoreValid;
+    g_nr.residualStoreValid = false;
+    if (!paired || !ready || !g_compose || !output || !g_nr.residualComposed)
+    {
+        g_nr.residualHistoryPrimed = false;
+        return;
+    }
+    const auto& cfg = *Config::Instance();
+    const float strength = cfg.DlssNrTransferStrength.value_or_default();
+    if (!cfg.DlssNrApplyModel.value_or_default() || !std::isfinite(strength) || strength <= 0.0f)
+    {
+        g_nr.residualHistoryPrimed = false;
+        return;
+    }
+    if ((cfg.RestoreComputeSignature.value_or_default() || cfg.RestoreGraphicSignature.value_or_default()) &&
+        !D3D12Hooks::CanRestoreRootSignature(cmdList))
+        return;
+    ScopedNrStateEnvelope stateEnvelope(cmdList);
+    const auto desc = output->GetDesc();
+    const auto carrier = g_nr.residualComposed->GetDesc();
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
+        desc.Width != carrier.Width || desc.Height != carrier.Height || desc.Format != carrier.Format ||
+        desc.DepthOrArraySize != 1 || desc.MipLevels != 1)
+        return;
+    auto arrival = cfg.OutputResourceBarrier.has_value()
+        ? (D3D12_RESOURCE_STATES) cfg.OutputResourceBarrier.value() : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    Barrier(cmdList, output, arrival, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    Barrier(cmdList, g_nr.residualComposed, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    DlssNrConstants apply {};
+    apply.Mode = DlssNrResidualMode_Apply;
+    apply.Width = (unsigned) desc.Width;
+    apply.Height = desc.Height;
+    apply.TransferStrength = std::clamp(strength, 0.0f, 1.0f);
+    const bool composed = g_compose->DispatchResidualPass(cmdList, apply, output,
+        g_nr.residualHistory[g_nr.residualHistoryIndex & 1u], nullptr, nullptr, g_nr.residualComposed);
+    if (composed)
+    {
+        Barrier(cmdList, g_nr.residualComposed, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_COPY_SOURCE);
+        Barrier(cmdList, output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+        cmdList->CopyResource(output, g_nr.residualComposed);
+        Barrier(cmdList, output, D3D12_RESOURCE_STATE_COPY_DEST, arrival);
+        Barrier(cmdList, g_nr.residualComposed, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+    else
+    {
+        Barrier(cmdList, output, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, arrival);
+        Barrier(cmdList, g_nr.residualComposed, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        g_nr.residualHistoryPrimed = false;
+    }
+}
+
 // Reads the game's parameter block and runs the pass on what it finds.
 //
 // This is the call site's job, not the pass's. A caller that has the resources in hand -- a
@@ -2890,6 +3131,23 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
 {
     std::lock_guard<std::recursive_mutex> nrLock(g_nrMutex);
     const Config& cfg = *Config::Instance();
+    if (beforeUpscale)
+    {
+        // Even a disabled/skipped pre pass must invalidate the previous result.
+        if (g_nr.residualStoreValid)
+            g_nr.residualHistoryPrimed = false;
+        g_nr.residualPair.Cancel();
+        g_nr.residualStoreValid = false;
+    }
+    const bool residualMode = cfg.DlssNrEnabled.value_or_default() &&
+        cfg.DlssNrRunBeforeSr.value_or_default() && cfg.DlssNrResidualAcrossRr.value_or_default() && rayReconstruction;
+    if (residualMode != g_nr.residualModeActive)
+    {
+        g_nr.residualPair.Cancel();
+        g_nr.residualHistoryPrimed = false;
+        g_nr.residualStoreValid = false;
+        g_nr.residualModeActive = residualMode;
+    }
     static unsigned lastPrecision=0;
     const unsigned precision=cfg.DlssNrPrecision.value_or_default();
     if(lastPrecision!=precision)
@@ -2986,6 +3244,39 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
 
     const bool configuredBefore = cfg.DlssNrRunBeforeSr.value_or_default() &&
                                   preSrCompatible;
+
+    // ResidualAcrossRR: with RunBeforeSR + the game's Ray Reconstruction both on, run
+    // the model before SR but leave Color untouched, then add its captured residual back after RR+SR.
+    // Unlike every other placement this needs BOTH seams of one evaluate -- the before-upscale seam
+    // falls through to the normal pre-SR body (which captures the residual and skips the copy-back),
+    // and the after-upscale seam is handled here. If it is requested but the pre-SR path is not
+    // compatible, configuredBefore is false and the normal gate runs plain post-SR NR instead.
+    const bool residualAcrossRr =
+        cfg.DlssNrResidualAcrossRr.value_or_default() && configuredBefore && rayReconstruction;
+
+    if (residualAcrossRr && beforeUpscale &&
+        (cfg.DlssNrHoldFrame.value_or_default() || cfg.DlssNrDebugView.value_or_default() != 0 ||
+         cfg.DlssNrCompare.value_or_default() != 0 || cfg.DlssNrShowSkinMask.value_or_default()))
+    {
+        g_nr.residualHistoryPrimed = false;
+        ReportSkipOnce("disable Hold frame, Compare and Debug view for residual-across-RR");
+        return;
+    }
+
+    if (residualAcrossRr && !beforeUpscale)
+    {
+        ApplyResidualAcrossRr(cmdList, params);
+
+        static bool announcedResidualAcrossRr = false;
+        if (!announcedResidualAcrossRr)
+        {
+            announcedResidualAcrossRr = true;
+            LOG_INFO("DLSS-NR: residual-across-RR active -- MV-reprojected accumulator, blend {:.2f}",
+                     std::clamp(cfg.DlssNrResidualAcrossRrBlend.value_or_default(), 0.01f, 1.0f));
+        }
+        return;
+    }
+
     if (configuredBefore != beforeUpscale)
         return;
 
@@ -3045,6 +3336,25 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
     }
     frame.BeforeUpscale = beforeUpscale;
     frame.RayReconstruction = rayReconstruction;
+    frame.ResidualAcrossRr = residualAcrossRr; // only reaches here on the before-upscale seam
+    if (residualAcrossRr)
+    {
+        if (!output)
+            return;
+        const auto outDesc = output->GetDesc();
+        if (outDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || outDesc.SampleDesc.Count != 1 ||
+            outDesc.DepthOrArraySize != 1 || outDesc.MipLevels != 1)
+            return;
+        if (g_nr.residualOutputWidth != outDesc.Width || g_nr.residualOutputHeight != outDesc.Height ||
+            g_nr.residualOutputFormat != outDesc.Format)
+        {
+            ParkNrResource(g_nr.residualComposed);
+            g_nr.residualHistoryPrimed = false;
+            g_nr.residualOutputWidth = (unsigned) outDesc.Width;
+            g_nr.residualOutputHeight = outDesc.Height;
+            g_nr.residualOutputFormat = outDesc.Format;
+        }
+    }
     frame.SubmissionEpoch = timingQueue != nullptr ? submissionEpoch : State::Instance().frameCount;
 
     // Color and Output may use different formats even though DLSS treats them as the same frame colour
@@ -3208,6 +3518,8 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
     }
 
     g_compose->Dispatch(cmdList, target, depth, motion, target, frame, timingQueue);
+    if (residualAcrossRr && g_nr.residualStoreValid)
+        g_nr.residualPair.Arm(cmdList, params, output);
 }
 
 void EvaluateAfterUpscale(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* params,
@@ -3472,6 +3784,18 @@ void Shutdown()
         delete g_nr.superDown;
         g_nr.superDown = nullptr;
     }
+
+    for (ID3D12Resource** r : { &g_nr.residualEdited, &g_nr.residualHistory[0],
+                               &g_nr.residualHistory[1], &g_nr.residualComposed })
+        if (*r != nullptr)
+        {
+            (*r)->Release();
+            *r = nullptr;
+        }
+    g_nr.residualPair.Cancel();
+    g_nr.residualStoreValid = false;
+    g_nr.residualHistoryPrimed = false;
+    g_nr.residualHistoryIndex = 0;
 
     if (g_nr.outputNative != nullptr)
     {
