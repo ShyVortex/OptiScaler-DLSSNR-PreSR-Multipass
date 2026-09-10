@@ -64,6 +64,10 @@ jobs:
         }
         Write-Host "dlssg_for_sm86 ready."
 
+    - name: Acquire verified hybrid kernels
+      shell: powershell
+      run: .\get_hybrid_assets.ps1 -Destination "$env:RUNNER_TEMP\hybrid-assets"
+
     - name: Run package_release.ps1
       shell: powershell
       env:
@@ -71,6 +75,7 @@ jobs:
       run: |
         $params = @{
             Version = $env:PACKAGE_VERSION
+            HybridAssetsDirectory = "$env:RUNNER_TEMP\hybrid-assets"
         }
         if ("${{ inputs.include_ampere_mfg }}" -eq "true") {
             $params["IncludeAmpereMfg"] = $true

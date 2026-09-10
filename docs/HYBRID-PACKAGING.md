@@ -1,0 +1,5 @@
+The hybrid status shows whether replacement kernels are active. Loading can pause the game and look like a freeze; please wait. Release packages include the precompiled hybrid assets, so users do not need CUDA or a kernel build.
+
+For local packaging, run `./get_hybrid_assets.ps1 -Destination <new-directory>`, then pass that directory to `package_release.ps1 -HybridAssetsDirectory <directory>`. The release workflow does this automatically and verifies the source archive's SHA-256. The helper accepts `-Archive <zip>` to use a previously downloaded copy of the same pinned release. Missing or modified archives fail packaging instead of silently dropping the kernels.
+
+The pinned v0.7.5 source bundle contains 15 assets matching the current runtime's expected hashes, including the split-half candidate files. Update the pinned source and verify these expectations together whenever the hybrid kernels change. A correctly packaged bundle can still be inactive for unsupported hardware/model shapes or an allocation failure; failure details are retained in the log while the menu shows active/inactive.
