@@ -28,7 +28,7 @@ The upstream fork already provided experimental direct access to NVIDIA DLSS Neu
 
 Downloads:
 
-- [Latest release - v0.7.5](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/tag/v0.7.5-nr-fixes) - DXVK/Proton NR startup fix, deferred NR flashing fix, and clearer control tooltips. Retains unified SR/RR controls; NR before RR remains experimental.
+- [Latest release - v0.7.6](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/tag/v0.7.6) - Safer RR/bridge routing, opt-in residual-across-RR and RTX 20/30 MFG integration, and simpler hybrid status with verified kernel packaging. [Release notes](docs/RELEASE-v0.7.6.md).
 
 - [Previous release - v0.7.3](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass/releases/tag/v0.7.3-kcd2) - KCD2 presentation fixes, corrected NR motion-vector metadata, two model options, and the Streamline 2.14.1 downloader. See [KCD2 setup](docs/DLSS-FRAME-GENERATION.md#kingdom-come-deliverance-ii).
 
