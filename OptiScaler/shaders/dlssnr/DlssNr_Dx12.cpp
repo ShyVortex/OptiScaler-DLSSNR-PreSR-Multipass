@@ -2,6 +2,8 @@
 #include <dlssnr/PassProfiles.h>
 
 #include <set>
+#include <wrl/client.h>
+#include <resource_tracking/ResTrack_Dx12.h>
 
 #include <dlssnr/DlssNr.h>
 #include <dlssnr/DlssNrNative.h>
@@ -25,12 +27,14 @@
 #include <proxies/NVNGX_Proxy.h>
 #include <hooks/D3D12_Hooks.h>
 #include <gpu_time/GpuTime_Dx12.h>
+#include "DlssNr_GpuTime.h"
 
 #include <mutex>
 #include <algorithm>
 #include <cstring>
 #include "precompile/DlssNr_Shader.h"
 #include "precompile/dlssnr_residual_Shader.h"
+#include "precompile/dlssnr_finished_color_Shader.h"
 #include "DlssNr_ResidualPair.h"
 #include "../output_scaling/OS_Dx12.h"
 
@@ -408,7 +412,7 @@ NrState g_nr;
 std::unique_ptr<DlssNr_Dx12> g_compose;
 
 // What the pass costs on the GPU, for the breakdown in the overlay.
-std::unique_ptr<GpuTime_Dx12> g_gpuTime;
+std::unique_ptr<DlssNrGpuTime> g_gpuTime;
 
 // A second timer, around the model's evaluate and nothing else.
 //
@@ -421,7 +425,7 @@ std::unique_ptr<GpuTime_Dx12> g_gpuTime;
 //
 // Splitting them says how much of the pass is the model and how much is ours -- and ours is the half
 // we can actually do something about.
-std::unique_ptr<GpuTime_Dx12> g_ngxTime;
+std::unique_ptr<DlssNrGpuTime> g_ngxTime;
 std::optional<double> g_lastNgxTime;
 std::optional<double> g_lastGpuTime;
 
@@ -1586,6 +1590,8 @@ bool DlssNr_Dx12::DispatchPass(ID3D12GraphicsCommandList* InCmdList, const DlssN
 
 DlssNr_Dx12::~DlssNr_Dx12()
 {
+    if (_finishedColorPipelineState)
+        _finishedColorPipelineState->Release();
     for (auto& buffer : _constantBuffers)
     {
         if (buffer != nullptr)
@@ -1605,9 +1611,13 @@ DlssNr_Dx12::~DlssNr_Dx12()
 bool DlssNr_Dx12::DispatchResidualPass(ID3D12GraphicsCommandList* InCmdList,
                                        const DlssNrConstants& InConstants, ID3D12Resource* InSource,
                                        ID3D12Resource* InModel, ID3D12Resource* InOriginal,
-                                       ID3D12Resource* InMotion, ID3D12Resource* OutTarget)
+                                       ID3D12Resource* InMotion, ID3D12Resource* OutTarget, bool finishedColor)
 {
-    if (!_init || _residualPipelineState == nullptr || InCmdList == nullptr || _device == nullptr ||
+    if (finishedColor && !_finishedColorPipelineState && _init)
+        CreateComputePipeline(_device, &_finishedColorPipelineState, dlssnr_finished_color_cso,
+                              sizeof(dlssnr_finished_color_cso), nullptr);
+    auto* pipeline = finishedColor ? _finishedColorPipelineState : _residualPipelineState;
+    if (!_init || pipeline == nullptr || InCmdList == nullptr || _device == nullptr ||
         InSource == nullptr || OutTarget == nullptr)
         return false;
 
@@ -1643,7 +1653,7 @@ bool DlssNr_Dx12::DispatchResidualPass(ID3D12GraphicsCommandList* InCmdList,
     ID3D12DescriptorHeap* heaps[] = { currentHeap.GetHeapCSU() };
     InCmdList->SetDescriptorHeaps(_countof(heaps), heaps);
     InCmdList->SetComputeRootSignature(_rootSignature);
-    InCmdList->SetPipelineState(_residualPipelineState);
+    InCmdList->SetPipelineState(pipeline);
     InCmdList->SetComputeRootDescriptorTable(0, currentHeap.GetTableGPUStart());
 
     const UINT dispatchWidth = (InConstants.Width + _numThreadsX - 1) / _numThreadsX;
@@ -1688,7 +1698,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // readable. Track every transition so both paths return the resource exactly as their caller gave
     // it to us; a pre-SR resource without UAV support is written through a scratch-and-copy fallback.
     const D3D12_RESOURCE_STATES outputArrival =
-        frame.BeforeUpscale
+        frame.FinishedPicture ? (D3D12_RESOURCE_STATES) frame.OutputArrivalState : frame.BeforeUpscale
             ? (!frame.PrivateColorCopy && Config::Instance()->ColorResourceBarrier.has_value()
                    ? (D3D12_RESOURCE_STATES) Config::Instance()->ColorResourceBarrier.value()
                    : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
@@ -2264,11 +2274,12 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
     // represent -- it exists precisely because the proxy is meant to clip. Normalising the highlights
     // away first leaves it nothing to give back.
 
+    ResTrack_Dx12::HookLateNrQueue(device);
     if (g_gpuTime == nullptr)
-        g_gpuTime = std::make_unique<GpuTime_Dx12>(device);
+        g_gpuTime = std::make_unique<DlssNrGpuTime>(device, "total");
 
     if (g_ngxTime == nullptr)
-        g_ngxTime = std::make_unique<GpuTime_Dx12>(device);
+        g_ngxTime = std::make_unique<DlssNrGpuTime>(device, "model");
 
     if (g_gpuTime != nullptr)
         g_gpuTime->Start(cmdList);
@@ -2355,7 +2366,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
     g_nr.gamePreExposure = frame.PreExposure;
 
-    float whitePoint = ResolveWhitePoint(cfg, isHdrBuffer);
+    float whitePoint = frame.WhitePointOverride > 0.0f ? frame.WhitePointOverride : ResolveWhitePoint(cfg, isHdrBuffer);
 
     // Zero-latency exposure (D3D12, source 1): when the game hands us a live exposure texture, the
     // white point is recomputed in-shader every frame from it (ExposurePreMul / exposure) instead of
@@ -3016,7 +3027,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
                 lastSplitLog = g_frames;
                 const double total = g_lastGpuTime.value();
                 const double ngx = g_lastNgxTime.value();
-                LOG_INFO("DLSS-NR cost: {:.2f} ms total = {:.2f} ms model + {:.2f} ms ours ({:.0f}% ours)",
+                LOG_INFO("DLSS-NR elapsed: {:.2f} ms total, {:.2f} ms model, {:.2f} ms surrounding work ({:.0f}%; intervals may include other GPU work)",
                          total, ngx, total - ngx, total > 0.0 ? 100.0 * (total - ngx) / total : 0.0);
             }
         }
@@ -3048,6 +3059,7 @@ void DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* c
 
 namespace DlssNr
 {
+namespace Late { bool CaptureResidual(ID3D12GraphicsCommandList*, ID3D12Resource*, ID3D12Resource*, float, bool); }
 #include "DlssNr_DeferredSr.inl"
 std::string DeferredDlssStatus() { return SynchronousDeferredDlssStatus(); }
 
@@ -3120,6 +3132,8 @@ void ApplyResidualAcrossRr(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Paramet
     }
 }
 
+#include "DlssNr_Late.inl"
+
 // Reads the game's parameter block and runs the pass on what it finds.
 //
 // This is the call site's job, not the pass's. A caller that has the resources in hand -- a
@@ -3131,6 +3145,58 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
 {
     std::lock_guard<std::recursive_mutex> nrLock(g_nrMutex);
     const Config& cfg = *Config::Instance();
+    static unsigned lastPrecision=0;
+    const unsigned precision=cfg.DlssNrPrecision.value_or_default();
+    if(lastPrecision!=precision)
+    {
+        RetryAfterFailure();
+        DeferredSr::Cancel();
+        lastPrecision = precision;
+    }
+    DlssNrNative::SetPrecision(precision);
+    const unsigned finishedMode = !cfg.DlssNrFinishedPicture.value_or_default() ? 0u :
+        (cfg.DlssNrRunBeforeSr.value_or_default() || cfg.DlssNrDeferredDlss.value_or_default()) ? 2u : 1u;
+    static unsigned lastFinishedMode = 0;
+    if (lastFinishedMode != finishedMode)
+    {
+        g_nr.reset = true;
+        if (g_gpuTime) g_gpuTime->ClearLast();
+        if (g_ngxTime) g_ngxTime->ClearLast();
+        g_lastGpuTime.reset();
+        g_lastNgxTime.reset();
+        Late::Cancel();
+        DeferredSr::Cancel();
+        lastFinishedMode = finishedMode;
+    }
+    if (finishedMode)
+    {
+        g_nr.residualPair.Cancel();
+        g_nr.residualStoreValid = false;
+        g_nr.residualHistoryPrimed = false;
+        if (!cfg.DlssNrEnabled.value_or_default())
+        { DeferredSr::Cancel(); Late::Cancel(); return; }
+        if (timingQueue || State::Instance().swapchainInteropApi != SwapchainInteropApi::None)
+        { DeferredSr::Cancel(); Late::Cancel(); Late::Say("This option needs a native DirectX 12 game."); return; }
+        if (finishedMode == 2)
+        {
+            if (rayReconstruction)
+            { DeferredSr::Cancel(); Late::Cancel(); Late::Say("Running the model before SR with this option does not support Ray Reconstruction."); return; }
+            if (cmdList && params)
+            {
+                const auto submitted = State::Instance().frameCount;
+                const auto epoch = g_nrSeamClock.AtSeam(beforeUpscale, false, submitted);
+                if (beforeUpscale) DeferredSr::Before(cmdList, params, epoch, submitted, nullptr);
+                else DeferredSr::After(cmdList, params, epoch);
+            }
+        }
+        else
+        {
+            DeferredSr::Cancel();
+            if (beforeUpscale) Late::Capture(cmdList, params, rayReconstruction);
+        }
+        return;
+    }
+    Late::Cancel();
     if (beforeUpscale)
     {
         // Even a disabled/skipped pre pass must invalidate the previous result.
@@ -3148,15 +3214,6 @@ void EvaluateInternal(ID3D12GraphicsCommandList* cmdList, NVSDK_NGX_Parameter* p
         g_nr.residualStoreValid = false;
         g_nr.residualModeActive = residualMode;
     }
-    static unsigned lastPrecision=0;
-    const unsigned precision=cfg.DlssNrPrecision.value_or_default();
-    if(lastPrecision!=precision)
-    {
-        RetryAfterFailure();
-        DeferredSr::Cancel();
-        lastPrecision = precision;
-    }
-    DlssNrNative::SetPrecision(precision);
     if (!cfg.DlssNrEnabled.value_or_default() || !cfg.DlssNrDeferredDlss.value_or_default() || rayReconstruction)
     {
         DeferredSr::Cancel();

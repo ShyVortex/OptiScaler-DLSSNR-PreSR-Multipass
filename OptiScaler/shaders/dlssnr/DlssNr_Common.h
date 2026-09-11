@@ -94,6 +94,9 @@ struct DlssNrFrameInfo
     bool BeforeUpscale = false;
     // Owned copy, not the game's Color: always arrives/returns NON_PIXEL_SHADER_RESOURCE.
     bool PrivateColorCopy = false;
+    bool FinishedPicture = false;
+    uint32_t OutputArrivalState = 0;
+    float WhitePointOverride = 0.0f;
     bool IndependentCommands = false; // owned command list, no game root signature to restore
     // Reset temporal history when switching between ordinary SR and Ray Reconstruction.
     bool RayReconstruction = false;

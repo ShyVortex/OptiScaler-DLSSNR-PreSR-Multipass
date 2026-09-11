@@ -536,6 +536,9 @@ static void EvaluateAtSeamVk(VkCommandBuffer cmdBuffer, NVSDK_NGX_Parameter* par
         return;
     }
 
+    if (cfg.DlssNrFinishedPicture.value_or_default())
+        return; // finished-picture composition requires a native D3D12 swapchain
+
     if (!cfg.DlssNrEnabled.value_or_default())
         return;
 

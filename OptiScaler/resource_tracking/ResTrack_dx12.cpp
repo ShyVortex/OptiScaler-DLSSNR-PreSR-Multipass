@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include <dlssnr/DlssNr_ExposureScan.h>
+#include <dlssnr/DlssNr.h>
 
 #include "ResTrack_dx12.h"
 
@@ -111,6 +112,15 @@ static PFN_DrawInstanced o_DrawInstanced = nullptr;
 static PFN_DrawIndexedInstanced o_DrawIndexedInstanced = nullptr;
 static PFN_ExecuteBundle o_ExecuteBundle = nullptr;
 static PFN_Close o_Close = nullptr;
+using PFN_LateReset = HRESULT(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12CommandAllocator*, ID3D12PipelineState*);
+static PFN_LateReset o_LateReset = nullptr;
+static HRESULT STDMETHODCALLTYPE hkLateReset(ID3D12GraphicsCommandList* cmd, ID3D12CommandAllocator* allocator,
+                                             ID3D12PipelineState* pipeline)
+{
+    const auto result = o_LateReset(cmd, allocator, pipeline);
+    if (SUCCEEDED(result)) DlssNr::FinishedPictureResetCommandList(cmd);
+    return result;
+}
 
 static PFN_ExecuteCommandLists o_ExecuteCommandLists = nullptr;
 static PFN_Release o_Release = nullptr;
@@ -696,6 +706,7 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
         if (!found.empty())
         {
             o_ExecuteCommandLists(This, NumCommandLists, ppCommandLists);
+            DlssNr::FinishedPictureSubmitted(This, NumCommandLists, ppCommandLists);
 
             for (size_t i = 0; i < found.size(); i++)
             {
@@ -709,6 +720,7 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
     LOG_TRACK("Done NumCommandLists: {}", NumCommandLists);
 
     o_ExecuteCommandLists(This, NumCommandLists, ppCommandLists);
+    DlssNr::FinishedPictureSubmitted(This, NumCommandLists, ppCommandLists);
 }
 
 #pragma region Heap hooks
@@ -1873,6 +1885,32 @@ void ResTrack_Dx12::HookCommandList(ID3D12Device* InDevice)
     }
 }
 
+void ResTrack_Dx12::HookLateNrQueue(ID3D12Device* device)
+{
+    static std::mutex hookMutex;
+    std::lock_guard<std::mutex> lock(hookMutex);
+    HookToQueue(device);
+    if (o_LateReset) return;
+    ID3D12CommandAllocator* allocator = nullptr;
+    ID3D12GraphicsCommandList* cmd = nullptr;
+    if (SUCCEEDED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator))))
+    {
+        if (SUCCEEDED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator, nullptr, IID_PPV_ARGS(&cmd))))
+        {
+            ID3D12GraphicsCommandList* real = nullptr;
+            if (!CheckForRealObject(__FUNCTION__, cmd, (IUnknown**)&real)) real = cmd;
+            o_LateReset = (PFN_LateReset)(*(void***)real)[10];
+            DetourTransactionBegin();
+            DetourUpdateThread(GetCurrentThread());
+            DetourAttach(&(PVOID&)o_LateReset, hkLateReset);
+            if (DetourTransactionCommit() != NO_ERROR) o_LateReset = nullptr;
+            cmd->Close();
+            cmd->Release();
+        }
+        allocator->Release();
+    }
+}
+
 void ResTrack_Dx12::HookToQueue(ID3D12Device* InDevice)
 {
     if (o_ExecuteCommandLists != nullptr)
@@ -2052,6 +2090,9 @@ void ResTrack_Dx12::ReleaseDeviceHooks()
     if (o_Dispatch != nullptr)
         DetourDetach(&(PVOID&) o_Dispatch, hkDispatch);
 
+    if (o_LateReset != nullptr)
+        DetourDetach(&(PVOID&) o_LateReset, hkLateReset);
+
     if (o_Close != nullptr)
         DetourDetach(&(PVOID&) o_Close, hkClose);
 
@@ -2088,6 +2129,7 @@ void ResTrack_Dx12::ReleaseDeviceHooks()
         o_DrawInstanced = nullptr;
         o_Dispatch = nullptr;
         o_Close = nullptr;
+        o_LateReset = nullptr;
         o_ExecuteBundle = nullptr;
 
         // Resource
@@ -2155,6 +2197,9 @@ void ResTrack_Dx12::ReleaseHooks()
     if (o_Dispatch != nullptr)
         DetourDetach(&(PVOID&) o_Dispatch, hkDispatch);
 
+    if (o_LateReset != nullptr)
+        DetourDetach(&(PVOID&) o_LateReset, hkLateReset);
+
     if (o_Close != nullptr)
         DetourDetach(&(PVOID&) o_Close, hkClose);
 
@@ -2175,6 +2220,7 @@ void ResTrack_Dx12::ReleaseHooks()
         o_DrawInstanced = nullptr;
         o_Dispatch = nullptr;
         o_Close = nullptr;
+        o_LateReset = nullptr;
         o_ExecuteBundle = nullptr;
     }
 }

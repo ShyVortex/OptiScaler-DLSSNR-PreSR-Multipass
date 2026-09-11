@@ -11,6 +11,7 @@ This is an experimental community version of OptiScaler. Results and game suppor
 - Adjust the strength, lighting, detail and colour of the effect.
 - Use separate settings for skin and scenery.
 - Run the effect before or after the game's upscaling.
+- Apply NR to the finished picture to help with green noise. Works with frame generation on or off in native DirectX 12 games, including HDR.
 - Apply it more than once, with different settings each time. Extra passes cost more performance.
 - Lower the model resolution to reduce the performance cost.
 

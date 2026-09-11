@@ -10,7 +10,7 @@
 
 param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
-    [string]$Version = "v0.7.6",
+    [string]$Version = "v0.7.7",
     [switch]$SkipBuild,
     [switch]$IncludeDlssFrameGeneration,
     [switch]$AcceptNvidiaLicenses,
@@ -197,7 +197,7 @@ if ($on) {
 
 Write-Host "ini verified: nothing switched on by default"
 
-foreach ($key in @('DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AdaMfgUnlock', 'AmpereMfgUnlock')) {
+foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AdaMfgUnlock', 'AmpereMfgUnlock')) {
     if ($ini -match "(?mi)^$key=true\s*$") {
         throw "REFUSING: experimental option $key is enabled in the portable package"
     }
