@@ -343,6 +343,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
             DlssNrEnabled.set_from_config(readBool("DlssNr", "Enabled"));
             DlssNrRunBeforeSr.set_from_config(readBool("DlssNr", "RunBeforeSR"));
+            DlssNrFinishedPicture.set_from_config(readBool("DlssNr", "FinishedPicture"));
             DlssNrDeferredDlss.set_from_config(readBool("DlssNr", "DeferredDLSS"));
             DlssNrResidualAcrossRr.set_from_config(readBool("DlssNr", "ResidualAcrossRR"));
             DlssNrResidualAcrossRrBlend.set_from_config(readFloat("DlssNr", "ResidualAcrossRRBlend"));
@@ -1275,6 +1276,7 @@ bool Config::SaveIni()
 
     // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
     ini.SetValue("DlssNr", "Enabled", GetBoolValue(Instance()->DlssNrEnabled.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "FinishedPicture", GetBoolValue(Instance()->DlssNrFinishedPicture.value_for_config()).c_str());
     ini.SetValue("DlssNr", "RunBeforeSR",
                  GetBoolValue(Instance()->DlssNrRunBeforeSr.value_for_config()).c_str());
     ini.SetValue("DlssNr", "DeferredDLSS",

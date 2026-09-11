@@ -63,6 +63,7 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     // dlssnr.hlsl blob is never regenerated (a current dxc produces materially different DXIL
     // from the committed one). Null on backends/builds where the residual shader is absent.
     ID3D12PipelineState* _residualPipelineState = nullptr;
+    ID3D12PipelineState* _finishedColorPipelineState = nullptr;
 
   public:
     DlssNr_Dx12(std::string InName, ID3D12Device* InDevice);
@@ -99,5 +100,5 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     bool DispatchResidualPass(ID3D12GraphicsCommandList* InCmdList, const DlssNrConstants& InConstants,
                               ID3D12Resource* InSource, ID3D12Resource* InModel,
                               ID3D12Resource* InOriginal, ID3D12Resource* InMotion,
-                              ID3D12Resource* OutTarget);
+                              ID3D12Resource* OutTarget, bool finishedColor = false);
 };

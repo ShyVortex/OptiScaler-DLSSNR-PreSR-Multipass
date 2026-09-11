@@ -1,6 +1,7 @@
 #pragma once
 
 #include <d3d12.h>
+#include <dxgi1_4.h>
 #include <string>
 
 #include <shaders/dlssnr/DlssNr_Common.h>
@@ -59,6 +60,13 @@ void RenderMenu(::Config* config, float menuResScale);
 
 // Clears the session failure latch, so a failure caused by transient thrash does not cost a restart.
 void RetryAfterFailure();
+
+std::string FinishedPictureStatus();
+bool WaitForFinishedPicture();
+void FinishedPictureResetCommandList(ID3D12CommandList* cmd);
+void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
+void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue);
+void FinishedPictureColorSpace(IDXGISwapChain* swapchain, DXGI_COLOR_SPACE_TYPE colorSpace);
 
 
 // Asks the model whether it will work on Direct3D 11 at all, once, and logs the answer.

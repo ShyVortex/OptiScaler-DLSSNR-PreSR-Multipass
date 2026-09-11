@@ -293,7 +293,7 @@ void Before(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* source,
     if (cfg.DlssNrUseProxy.value_or_default() || cfg.DlssNrHoldFrame.value_or_default() ||
         cfg.DlssNrDebugView.value_or_default() != 0 || cfg.DlssNrCompare.value_or_default() != 0 ||
         cfg.DlssNrShowSkinMask.value_or_default() ||
-        !cfg.DlssNrApplyModel.value_or_default())
+        (!cfg.DlssNrApplyModel.value_or_default() && !cfg.DlssNrFinishedPicture.value_or_default()))
     {
         Say("inactive: disable proxy backend, frame hold/debug/compare, and enable Apply model");
         return;
@@ -309,7 +309,8 @@ void Before(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* source,
     auto* output = GetResource(source, NVSDK_NGX_Parameter_Output, "DLSSD.Output");
     auto* depth = GetResource(source, NVSDK_NGX_Parameter_Depth, "DLSSD.Depth");
     auto* motion = GetResource(source, NVSDK_NGX_Parameter_MotionVectors, "DLSSD.MotionVectors");
-    const bool wantsHalf = cfg.DlssNrResidualFg.value_or_default() && !privateJob;
+    const bool wantsHalf = cfg.DlssNrResidualFg.value_or_default() && !privateJob &&
+                           !cfg.DlssNrFinishedPicture.value_or_default();
     const bool sampleAndHold = wantsHalf && motion == nullptr;
     if (!color || !output || !depth || (!motion && !sampleAndHold) || color == output)
     {
@@ -490,7 +491,17 @@ void Before(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* source,
         Barrier(cmd, color, arrival, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         DlssNrConstants encode {}; encode.Mode = DlssNrMode_EncodeResidual;
         encode.Width = g.w; encode.Height = g.h; encode.ExposurePreMul = frame.PreExposure;
-        const bool ok = g.codec->DispatchPass(cmd, encode, color, g.edited, nullptr, nullptr, nullptr, g.residualInput, nullptr);
+        bool ok;
+        if (cfg.DlssNrFinishedPicture.value_or_default())
+        {
+            encode.Mode = 5; // finished-colour shader: encode relative changes before FP16 storage
+            encode.WhitePoint = frame.PreExposure;
+            encode.TransferStrength = frame.ColourIsLinearHdr ? 1.0f : 0.0f;
+            encode.MaxRatio = std::clamp(cfg.DlssNrMaxRatio.value_or_default(), 1.0f, 8.0f);
+            ok = g.codec->DispatchResidualPass(cmd, encode, color, g.edited, nullptr, nullptr, g.residualInput, true);
+        }
+        else
+            ok = g.codec->DispatchPass(cmd, encode, color, g.edited, nullptr, nullptr, nullptr, g.residualInput, nullptr);
         Barrier(cmd, color, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, arrival);
         Barrier(cmd, g.residualInput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         g.smallReadable = true;
@@ -582,6 +593,16 @@ void After(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* source, unsigned
     else
         LOG_TRACE("DLSS-NR deferred: After applied epoch {} skipNr {} half {}", epoch, pair.skipNr, pair.half);
     g.reset = false;
+    if (cfg.DlssNrFinishedPicture.value_or_default())
+    {
+        const bool sceneLinear = (UInt(source, NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags) &
+            NVSDK_NGX_DLSS_Feature_Flags_IsHDR) != 0 && FormatCanHoldLinearHdr(g.outputFormat);
+        if (Late::CaptureResidual(cmd, pair.output, g.residualOutput, pair.scale, sceneLinear))
+            Say("running: model before SR; changes saved for the finished picture");
+        else { g.reset = true; Say("waiting to save the upscaled changes for the finished picture"); }
+        return; // Keep the game's SR output clean: no early composition and no second NR evaluation.
+    }
+
     Barrier(cmd, g.residualOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     bool half = pair.half && g.half && !g.half->failed;
     if (half && !pair.skipNr)

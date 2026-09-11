@@ -132,33 +132,57 @@ void RenderMenu(Config* config, float menuResScale)
 
         HelpMarker("Enhance lighting and material appearance with the NR model. Placement selects before or after upscaling.\nRequires nvngx_dlssnr.dll plus the included nvngx.dll_dlssnr.dll helper.");
 
-        bool beforeSr = config->DlssNrRunBeforeSr.value_or_default();
+        bool finishedPicture = config->DlssNrFinishedPicture.value_or_default();
+        if (ImGui::Checkbox("Apply NR to the finished picture", &finishedPicture))
+        {
+            config->DlssNrFinishedPicture = finishedPicture;
+            DlssNr::RetryAfterFailure();
+        }
+        HelpMarker("Apply NR after the game has finished its lighting and effects. This may help with green noise.\nWorks with frame generation on or off in native DirectX 12 games, including SDR, HDR10 and scRGB.\nIt can also change the HUD and menus. Enable Run the model before Super Resolution to generate the changes earlier.");
+        if (finishedPicture && enabled)
+        {
+            const auto feature = State::Instance().currentFeature;
+            if (feature && (feature->Api() != API::DX12 || feature->IsWithDx12()))
+                ImGui::TextWrapped("This option needs a native DirectX 12 game.");
+            else
+                ImGui::TextWrapped("%s", DlssNr::FinishedPictureStatus().c_str());
+        }
+
+        bool beforeSr = config->DlssNrRunBeforeSr.value_or_default() ||
+                        (finishedPicture && config->DlssNrDeferredDlss.value_or_default());
         const auto activeFeature = State::Instance().currentFeature;
         const bool rayReconstruction = activeFeature && activeFeature->GetUpscalerType() == Upscaler::DLSSD;
-        const bool deferredActive = config->DlssNrDeferredDlss.value_or_default() && !rayReconstruction;
+        const bool deferredActive = !finishedPicture && config->DlssNrDeferredDlss.value_or_default() && !rayReconstruction;
         if (deferredActive)
             ImGui::BeginDisabled();
-        if (ImGui::Checkbox("Apply before Super Resolution", &beforeSr))
+        if (ImGui::Checkbox(finishedPicture ? "Run the model before Super Resolution" : "Apply before Super Resolution", &beforeSr))
+        {
             config->DlssNrRunBeforeSr = beforeSr;
+            if (finishedPicture) config->DlssNrDeferredDlss = false;
+        }
         if (deferredActive)
             ImGui::EndDisabled();
 
-        HelpMarker("On: apply NR before SR or combined RR+SR. Off: apply it afterward.\nBefore RR is experimental. Unsupported input layouts fall back after upscaling.");
+        HelpMarker(finishedPicture ? "Run the model at the smaller input size, upscale its changes with DLSS, then apply them to the finished picture.\nExperimental: the colour transfer is approximate and may look different. Requires DLSS SR; does not support RR." :
+            "On: apply NR before SR or combined RR+SR. Off: apply it afterward.\nBefore RR is experimental. Unsupported input layouts fall back after upscaling.");
 
-        bool residualAcrossRr = config->DlssNrResidualAcrossRr.value_or_default();
-        ImGui::BeginDisabled(deferredActive || !beforeSr);
-        if (ImGui::Checkbox("Carry the pre-SR edit across RR (experimental)", &residualAcrossRr))
-            config->DlssNrResidualAcrossRr = residualAcrossRr;
-        ImGui::EndDisabled();
-        HelpMarker("Only with Apply before Super Resolution on and the game's Ray Reconstruction active.\nRuns the model before SR but leaves the colour input untouched, then adds its edit back onto the RR+SR output so it survives RR's denoise.\nThe edit is carried as a motion-vector-reprojected temporal accumulator: the per-frame ray-trace noise averages out, the enhancement stays. Inert otherwise.");
+        if (!finishedPicture)
+        {
+            bool residualAcrossRr = config->DlssNrResidualAcrossRr.value_or_default();
+            ImGui::BeginDisabled(deferredActive || !beforeSr);
+            if (ImGui::Checkbox("Carry the pre-SR edit across RR (experimental)", &residualAcrossRr))
+                config->DlssNrResidualAcrossRr = residualAcrossRr;
+            ImGui::EndDisabled();
+            HelpMarker("Only with Apply before Super Resolution on and the game's Ray Reconstruction active.\nRuns the model before SR but leaves the colour input untouched, then adds its edit back onto the RR+SR output so it survives RR's denoise.\nThe edit is carried as a motion-vector-reprojected temporal accumulator: the per-frame ray-trace noise averages out, the enhancement stays. Inert otherwise.");
 
-        ImGui::BeginDisabled(deferredActive || !beforeSr || !residualAcrossRr);
-        float residualBlend = config->DlssNrResidualAcrossRrBlend.value_or_default();
-        if (ImGui::SliderFloat("Detail accumulation rate", &residualBlend, 0.01f, 1.0f, "%.2f"))
-            config->DlssNrResidualAcrossRrBlend = std::clamp(residualBlend, 0.01f, 1.0f);
-        ImGui::EndDisabled();
-        HelpMarker("How fast the carried edit builds up. Lower = stabler but slower to appear; 1.0 = no accumulation (each frame's raw residual, which flickers). Default 0.08.");
+            ImGui::BeginDisabled(deferredActive || !beforeSr || !residualAcrossRr);
+            float residualBlend = config->DlssNrResidualAcrossRrBlend.value_or_default();
+            if (ImGui::SliderFloat("Detail accumulation rate", &residualBlend, 0.01f, 1.0f, "%.2f"))
+                config->DlssNrResidualAcrossRrBlend = std::clamp(residualBlend, 0.01f, 1.0f);
+            ImGui::EndDisabled();
+            HelpMarker("How fast the carried edit builds up. Lower = stabler but slower to appear; 1.0 = no accumulation (each frame's raw residual, which flickers). Default 0.08.");
 
+        }
         bool deferredDlss = config->DlssNrDeferredDlss.value_or_default();
         int precisionChoice = config->DlssNrPrecision.value_or_default() == 4 ? 1 : 0;
         const char* precisions[] = { "NVIDIA (FP8)", "Experimental (FP8+NVFP4 hybrid)" };
@@ -182,24 +206,30 @@ void RenderMenu(Config* config, float menuResScale)
         }
         else
             lastHybridWarning.clear();
-        if (ImGui::Checkbox("Generate before SR, apply after SR (DLSS)", &deferredDlss))
-            config->DlssNrDeferredDlss = deferredDlss;
-        HelpMarker("Compute NR at input resolution, upscale its changes with DLSS, then apply them after SR.\nExperimental: may flicker and adds GPU cost. Requires DLSS on DX12 or its bridges; does not support RR.\nOverrides Apply before Super Resolution. Disable Hold frame, Compare and Debug view.");
-        if (deferredDlss && rayReconstruction)
-            ImGui::TextWrapped("Generate before / apply after is unavailable with RR. Apply before Super Resolution "
-                               "controls NR placement.");
-        else if (deferredDlss)
-            ImGui::TextWrapped("Residual DLSS: %s", DlssNr::DeferredDlssStatus().c_str());
-        ImGui::BeginDisabled(!deferredDlss || rayReconstruction);
-        bool residualFg = config->DlssNrResidualFg.value_or_default();
-        if (ImGui::Checkbox("NR every second frame (NVIDIA FG, experimental)", &residualFg))
-            config->DlssNrResidualFg = residualFg;
-        HelpMarker("Run NR every other rendered frame and use NVIDIA FG to interpolate its changes.\nRequires the option above. Adds one rendered frame of latency and may misalign effects or UI.\nIf motion vectors are unavailable, each NR result is reused for two frames.");
-        bool approxCamera = config->DlssNrResidualFgApproxCamera.value_or_default();
-        if (ImGui::Checkbox("Allow approximate FG camera guides (experimental)", &approxCamera))
-            config->DlssNrResidualFgApproxCamera = approxCamera;
-        HelpMarker("Use estimated camera data when the game does not provide it. May cause artifacts during camera movement.");
-        ImGui::EndDisabled();
+        if (!finishedPicture)
+        {
+            if (ImGui::Checkbox("Generate before SR, apply after SR (DLSS)", &deferredDlss))
+                config->DlssNrDeferredDlss = deferredDlss;
+            HelpMarker("Compute NR at input resolution, upscale its changes with DLSS, then apply them after SR.\nExperimental: may flicker and adds GPU cost. Requires DLSS on DX12 or its bridges; does not support RR.\nOverrides Apply before Super Resolution. Disable Hold frame, Compare and Debug view.");
+            if (deferredDlss && rayReconstruction)
+                ImGui::TextWrapped("Generate before / apply after is unavailable with RR. Apply before Super Resolution "
+                                   "controls NR placement.");
+            else if (deferredDlss)
+                ImGui::TextWrapped("Residual DLSS: %s", DlssNr::DeferredDlssStatus().c_str());
+            ImGui::BeginDisabled(finishedPicture || !deferredDlss || rayReconstruction);
+            bool residualFg = config->DlssNrResidualFg.value_or_default();
+            if (ImGui::Checkbox("NR every second frame (NVIDIA FG, experimental)", &residualFg))
+                config->DlssNrResidualFg = residualFg;
+            HelpMarker("Run NR every other rendered frame and use NVIDIA FG to interpolate its changes.\nRequires the option above. Adds one rendered frame of latency and may misalign effects or UI.\nIf motion vectors are unavailable, each NR result is reused for two frames.");
+            bool approxCamera = config->DlssNrResidualFgApproxCamera.value_or_default();
+            if (ImGui::Checkbox("Allow approximate FG camera guides (experimental)", &approxCamera))
+                config->DlssNrResidualFgApproxCamera = approxCamera;
+            HelpMarker("Use estimated camera data when the game does not provide it. May cause artifacts during camera movement.");
+            ImGui::EndDisabled();
+
+        }
+        else if (beforeSr)
+            ImGui::TextWrapped("Pre-SR changes: %s", DlssNr::DeferredDlssStatus().c_str());
 
         // The toggle can be bound to a key, and nobody would think to look for it under Keybinds
         // unless told. Dimmed, because it is a note rather than a setting.
@@ -253,7 +283,7 @@ void RenderMenu(Config* config, float menuResScale)
         }
         else
         {
-            // The cost belongs here rather than only in the upscaler's breakdown: that tooltip needs
+            // The elapsed time belongs here rather than only in the upscaler's breakdown: that tooltip needs
             // OptiScaler's own upscaler to have run, and with native DLSS passing through there is
             // nothing in it to hang this off.
             // Either backend's timer. They measure the same thing by different means, and only one
@@ -261,13 +291,13 @@ void RenderMenu(Config* config, float menuResScale)
             const auto ms = vulkan ? DlssNr::LastGpuTimeVk() : DlssNr::LastGpuTime();
 
             // With "Apply the model" off the pass STILL RUNS (so Hold-frame A/B can toggle its edit on
-            // a frozen frame) -- it only outputs the clean frame. So the cost is real, and saying so
-            // stops the reading looking like a bug. Enable Neural Rendering off is what zeroes it.
+            // a frozen frame) -- it only outputs the clean frame.
+            // Enable Neural Rendering off stops the work.
             const char* runSuffix =
                 !config->DlssNrApplyModel.value_or_default() ? "  (model running, edit hidden)" : "";
 
             if (ms.has_value())
-                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Running%s - %.2f ms per frame%s",
+                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Running%s - %.2f ms elapsed%s",
                                    vulkan ? " natively on Vulkan" : "", ms.value(), runSuffix);
             else if (vulkan)
                 // Measured but not yet read: the first few frames are still in the query ring.
@@ -279,7 +309,9 @@ void RenderMenu(Config* config, float menuResScale)
             ImGui::SameLine();
             ImGui::TextDisabled("(?)");
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("Total NR GPU time, including model processing, copies and composition.\nCompare with overall frame time to judge its cost.");
+                ImGui::SetTooltip("Time between the start and end of NR on the GPU, including delays while other work runs.\nCompare FPS to check the effect on game performance.");
+            if (finishedPicture)
+                ImGui::TextDisabled("Includes time shared with other GPU work.");
         }
 
         ImGui::Spacing();

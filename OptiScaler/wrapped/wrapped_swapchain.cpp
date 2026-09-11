@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "wrapped_swapchain.h"
+#include <dlssnr/DlssNr.h>
 #include <hooks/DxgiSwapchainSizing.h>
 
 #include <Util.h>
@@ -370,6 +371,9 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         // Tick feature to let it know if it's frozen
         if (auto currentFeature = State::Instance().currentFeature; currentFeature != nullptr)
             currentFeature->TickFrozenCheck();
+
+        if (cq && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
+            DlssNr::ApplyToFinishedPicture(pSwapChain, cq);
 
         // Draw overlay
         MenuOverlayDx::Present(pSwapChain, SyncInterval, Flags, pPresentParameters, pDevice, hWnd, isUWP);
@@ -750,6 +754,8 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::GetDesc(DXGI_SWAP_CHAIN_DESC* 
 HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount, UINT Width, UINT Height,
                                                                 DXGI_FORMAT NewFormat, UINT SwapChainFlags)
 {
+    if (!DlssNr::WaitForFinishedPicture())
+        return DXGI_ERROR_WAS_STILL_DRAWING;
     LOG_DEBUG("");
 
 #ifdef USE_LOCAL_MUTEX
@@ -923,6 +929,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
                 if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
                 {
                     result = _real3->SetColorSpace1(hdrCS);
+                    if (SUCCEEDED(result)) DlssNr::FinishedPictureColorSpace(_real3, hdrCS);
 
                     if (result != S_OK)
                     {
@@ -1164,7 +1171,10 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::SetColorSpace1(DXGI_COLOR_SPAC
 
     LOG_INFO("DLSS-NR: swapchain colour space {} -- {} ({})", (int) ColorSpace, name, meaning);
 
-    return _real3->SetColorSpace1(ColorSpace);
+    const auto result = _real3->SetColorSpace1(ColorSpace);
+    if (SUCCEEDED(result))
+        DlssNr::FinishedPictureColorSpace(_real3, ColorSpace);
+    return result;
 }
 
 HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCount, UINT Width, UINT Height,
@@ -1172,6 +1182,8 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
                                                                  const UINT* pCreationNodeMask,
                                                                  IUnknown* const* ppPresentQueue)
 {
+    if (!DlssNr::WaitForFinishedPicture())
+        return DXGI_ERROR_WAS_STILL_DRAWING;
     LOG_DEBUG("");
 
 #ifdef USE_LOCAL_MUTEX
@@ -1373,6 +1385,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
                 if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
                 {
                     result = _real3->SetColorSpace1(hdrCS);
+                    if (SUCCEEDED(result)) DlssNr::FinishedPictureColorSpace(_real3, hdrCS);
 
                     if (result != S_OK)
                     {
