@@ -3169,7 +3169,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             if (ampereFallbackToFsrFg)
             {
-                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Linux 2x FG FSR Fallback ON");
+                ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "Linux 2x FG FSR Fallback ON");
                 ShowHelpMarker("On Linux/Proton with 1 generated frame (2X FG), native dlssg_sm86 driver hooks\n"
                                "are replaced by OptiScaler's internal FSR FG pipeline (DLSSG -> FSR FG)\n"
                                "for crash-free, flicker-free presentation.\n"
@@ -3180,7 +3180,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 // Status display
                 const auto& status = AmpereMfgLoader::LastStatus();
                 if (!status.ErrorMessage.empty())
-                    ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Error: %s", status.ErrorMessage.c_str());
+                    ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s", status.ErrorMessage.c_str());
                 else
                 {
                     std::string routerStr = AmpereMfgLoader::ResolveRouter();
