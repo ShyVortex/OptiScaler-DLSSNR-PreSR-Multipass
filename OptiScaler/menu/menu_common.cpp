@@ -1258,8 +1258,15 @@ void MenuCommon::UpdateRenderTiming(RenderMenuContext& ctx)
     }
     else
     {
-        if (state.activeFgInput == FGInput::NoFG || state.activeFgOutput == FGOutput::NoFG)
+        if (state.activeFgInput == FGInput::NoFG || state.activeFgOutput == FGOutput::NoFG ||
+            state.isRunningOnLinux || state.menuOverlayIsVulkan || IdentifyGpu::getPrimaryGpu().usesDxvk)
+        {
             MenuCommon::Present();
+        }
+        else if (_handle != nullptr)
+        {
+            UpdateManualInput(_handle);
+        }
 
         frameTime = lastFrameTime;
         frameRate = 1000.0 / frameTime;
