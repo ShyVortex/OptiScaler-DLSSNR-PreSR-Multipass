@@ -98,8 +98,9 @@ void TrySetup()
 
     if (ShouldFallbackToFsrFg(configuredFrames, onLinux, true))
     {
-        s_status.Enabled = false;
-        s_status.ErrorMessage = "2X FG on Linux: Using OptiScaler internal FSR FG (dlssg_sm86 bypassed).";
+        s_status.Enabled = true;
+        s_status.FsrFallbackActive = true;
+        s_status.ErrorMessage.clear();
         LOG_INFO("AmpereMfgLoader: On Linux with 1 generated frame, falling back to OptiScaler internal FSR FG instead of sideloading dlssg_sm86");
         return;
     }

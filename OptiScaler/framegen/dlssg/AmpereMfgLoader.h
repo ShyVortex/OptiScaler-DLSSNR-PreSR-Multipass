@@ -12,6 +12,7 @@ struct Status
     bool DllFound = false;    // dlssg_sm86.dll found in OptiScaler/dlssg_sm86/
     bool IniWritten = false;  // dlssg_sm86.ini generated and written
     bool DllLoaded = false;   // LoadLibrary succeeded
+    bool FsrFallbackActive = false; // 2X FG on Linux: internal FSR FG active
     std::string ErrorMessage; // Human-readable error if anything failed
 };
 

@@ -3071,7 +3071,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
     const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive);
 
-    if (ampereActive && !ampereFallbackToFsrFg)
+    if (ampereActive)
     {
         external = true;
         ImGui::BeginDisabled();
@@ -3079,15 +3079,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::EndDisabled();
         ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
                        "To disable External FG, disable Ampere SM86 MFG below first.");
-    }
-    else if (ampereFallbackToFsrFg)
-    {
-        external = false;
-        ImGui::BeginDisabled();
-        ImGui::Checkbox("External frame generation / MFG unlocker", &external);
-        ImGui::EndDisabled();
-        ShowHelpMarker("Bypassed because 2X FG on Linux falls back to OptiScaler internal FSR FG.\n"
-                       "To use Ampere external MFG, set MaxGeneratedFrames to 2 (3X) or 3 (4X) below.");
     }
     else
     {
@@ -3097,7 +3088,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                        "\nNR and NGX upscaling remain available. Save Settings and restart."
                        "\nDoes not install an unlocker or enable FG in unsupported games.");
     }
-    if (external != state.externalFrameGeneration)
+    if (external != state.externalFrameGeneration && !ampereFallbackToFsrFg)
         ImGui::TextWrapped("Save Settings and restart to change frame-generation ownership.");
 
     auto& menuResScale = ctx.menuResScale;
@@ -3176,18 +3167,29 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         if (ampereUnlock)
         {
-            // Status display
-            const auto& status = AmpereMfgLoader::LastStatus();
-            if (!status.ErrorMessage.empty())
-                ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Error: %s", status.ErrorMessage.c_str());
+            if (ampereFallbackToFsrFg)
+            {
+                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Linux 2x FG FSR Fallback ON");
+                ShowHelpMarker("On Linux/Proton with 1 generated frame (2X FG), native dlssg_sm86 driver hooks\n"
+                               "are replaced by OptiScaler's internal FSR FG pipeline (DLSSG -> FSR FG)\n"
+                               "for crash-free, flicker-free presentation.\n"
+                               "To use native Ampere MFG instead, set Max Generated Frames to 2 (3X) or 3 (4X).");
+            }
             else
             {
-                std::string routerStr = AmpereMfgLoader::ResolveRouter();
-                ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s",
-                                   status.DllFound ? "found" : "missing",
-                                   routerStr.c_str(),
-                                   status.IniWritten ? "written" : "not written",
-                                   status.DllLoaded ? "yes" : "no");
+                // Status display
+                const auto& status = AmpereMfgLoader::LastStatus();
+                if (!status.ErrorMessage.empty())
+                    ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Error: %s", status.ErrorMessage.c_str());
+                else
+                {
+                    std::string routerStr = AmpereMfgLoader::ResolveRouter();
+                    ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s",
+                                       status.DllFound ? "found" : "missing",
+                                       routerStr.c_str(),
+                                       status.IniWritten ? "written" : "not written",
+                                       status.DllLoaded ? "yes" : "no");
+                }
             }
 
             // MaxGeneratedFrames slider
@@ -3225,18 +3227,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Save Settings and restart to apply.");
         }
 
-        if (ampereFallbackToFsrFg)
-        {
-            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f),
-                               "Linux 2X FG: Falling back to OptiScaler internal FSR FG (DLSSG -> FSR FG).");
-        }
-
         ImGui::Unindent();
     }
 
-    if (state.externalFrameGeneration)
+    if (state.externalFrameGeneration || ampereFallbackToFsrFg)
     {
-        ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
+        if (state.externalFrameGeneration)
+            ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
+        else if (ampereFallbackToFsrFg)
+            ImGui::TextWrapped("Linux 2x FG FSR Fallback is active. Multiplier is controlled via Max Generated Frames above or in-game settings.");
         return;
     }
 
