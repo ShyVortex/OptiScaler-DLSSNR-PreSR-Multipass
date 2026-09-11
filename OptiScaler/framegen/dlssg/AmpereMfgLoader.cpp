@@ -115,7 +115,6 @@ void TrySetup()
     }
 
     // GPU guard: verify Nvidia Turing or Ampere architecture
-    const auto& gpu = IdentifyGpu::getPrimaryGpu();
     if (gpu.vendorId != VendorId::Nvidia)
     {
         s_status.ErrorMessage = "SM86/SM75 MFG requires an NVIDIA GPU.";
