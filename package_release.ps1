@@ -325,7 +325,10 @@ $checksumLines = Get-ChildItem -LiteralPath $stage -Recurse -File |
 [IO.File]::WriteAllLines("$stage\SHA256SUMS.txt", $checksumLines, [Text.UTF8Encoding]::new($false))
 Write-Host "checksums: $($checksumLines.Count) files"
 
-Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
+Push-Location $stage
+& 7z a -tzip -mx=9 -mcu=on $zip . | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+Pop-Location
 
 Write-Host ""
 Write-Host "staged at $stage"
