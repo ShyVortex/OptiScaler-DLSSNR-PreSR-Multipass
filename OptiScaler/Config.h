@@ -261,21 +261,17 @@ class Config
     // Off preserves the v0.2.0 post-upscale placement.
     CustomOptional<bool> DlssNrRunBeforeSr { false };
     CustomOptional<bool> DlssNrFinishedPicture { false };
-    // Generate NR before SR, upscale its signed contribution with a private DLSS feature,
+    // Fit the scene-to-finished HDR luminance response for early-generated residuals. Opt-in.
+    CustomOptional<bool> DlssNrHdrTransfer { false };
+    // Generate NR before SR, upscale its signed contribution with a private SR feature,
     // and apply it after the game's upscaler. Takes precedence over RunBeforeSR; opt-in.
     CustomOptional<bool> DlssNrDeferredDlss { false };
-    // Experimental: with RunBeforeSR and the game's Ray Reconstruction both on, run NR before SR
-    // but leave the colour input untouched, then add the model's edit back onto the RR+SR output
-    // so it survives RR's denoise. v2 carries the edit as an MV-reprojected temporal accumulator
-    // (the per-frame ray-trace noise term averages to zero; the enhancement persists). Inert
-    // unless RunBeforeSR + RR are both active. Opt-in.
+    // Private carrier only: 0 DLSS (legacy default), 1 FSR 2.2, 2 FidelityFX runtime, 3 XeSS.
+    CustomOptional<int> DlssNrPrivateUpscaler { 0 };
+    // Legacy INI alias: with RunBeforeSR, enables the same private SR edit path as DeferredDLSS.
     CustomOptional<bool> DlssNrResidualAcrossRr { false };
-    // v2 history blend rate for the accumulator above, 0.01..1. Lower = stabler but slower to
-    // appear; 1.0 = no accumulation (each frame's raw residual, which flickers). Default 0.08.
+    // RR residual history blend before private upscaling; v0.7.7 default, clamped to 0.01..1.
     CustomOptional<float> DlssNrResidualAcrossRrBlend { 0.08f };
-    CustomOptional<bool> DlssNrResidualFg { false };
-    CustomOptional<uint32_t> DlssNrPrecision { 0 }; // 0 NVIDIA FP8 (default), 4 Experimental NVFP4 hybrid
-    CustomOptional<bool> DlssNrResidualFgApproxCamera { false };
     // Toggles the pass in game. Unbound by default -- a key that does something unexpected is worse
     // than one that does nothing.
     CustomOptional<int> DlssNrToggleKey { UnboundKey };
@@ -347,8 +343,8 @@ class Config
     // light source, whatever the model returns.
     CustomOptional<float> DlssNrMaxRatio { 2.0f };
 
-    // How a model that worked below the frame's size is brought back. 0 classic, 1 matched
-    // residual. Only has an effect when Model resolution is under 100%.
+    // Below 100%: 0 classic, 1 spatial matched residual, 2 private DLSS SR matched residual.
+    // Mode 2 requires post-upscale processing through DX12 (including finished-picture NR).
     CustomOptional<uint32_t> DlssNrTransfer { 1 };
 
     // Measure the white point from the frame instead of taking it from the slider. On a frame the
@@ -368,13 +364,6 @@ class Config
     // Off by default until it has been seen to work in more than one game.
     CustomOptional<bool> DlssNrWhitePointFromExposure { true };
 
-    // Ask the model, once, whether it will run on Direct3D 11 without the bridge.
-    //
-    // Off by default and deliberately so. Everything else this pass does reads memory it already owns;
-    // this one initialises an NVIDIA subsystem on the game's live D3D11 device, in a process where the
-    // D3D12 NGX instance is already running. It should return an error code and nothing more, but
-    // "should" is doing work in that sentence and it ships into games nobody can test first.
-    CustomOptional<bool> DlssNrProbeD3D11 { false };
 
     // 0 off, 1 the picture the model was shown, 2 its raw answer, 3 what it changed, amplified.
     CustomOptional<uint32_t> DlssNrDebugView { 0 };
@@ -411,27 +400,6 @@ class Config
     // so NR and Output Scaling can run different filters at once. Lanczos3 is the sharp default.
     CustomOptional<Scaler> DlssNrScalingDownscaler { Scaler::Lanczos3 };
 
-    // Ask the driver's own nvngx.dll whether it will dispatch Neural Rendering, once per session.
-    //
-    // Everything here drives the model's DLL directly through a forwarder, because the model refuses
-    // callers whose module path does not contain "nvngx.dll". But the model ships inside the driver
-    // store, and NVIDIA does not ship a feature DLL that no dispatcher can reach -- so the driver's
-    // nvngx.dll may well know feature 18 already. If it does, the forwarder is unnecessary, the
-    // signature question disappears, and users stop needing a 165 MB copy in every game folder.
-    //
-    // Off by default: it is a diagnostic, not a feature.
-    CustomOptional<bool> DlssNrProxyProbe { false };
-
-    // Run Neural Rendering through the driver's own nvngx.dll rather than through the forwarder.
-    //
-    // This is how DLSS itself is called. The forwarder exists only because driving the model
-    // directly trips its caller check, and a probe showed the driver dispatches feature 18 already:
-    // asking for 18 answers differently from asking for a feature that does not exist. OptiScaler
-    // also already tells the driver where to look, since NVNGX_FeatureInfo_Paths carries the game
-    // and OptiScaler folders into Init_Ext.
-    //
-    // Off until it is shown to produce the same picture. If it does, the forwarder can go.
-    CustomOptional<bool> DlssNrUseProxy { false };
 
     // Look for the exposure the game computed but never handed to the upscaler.
     //
@@ -909,6 +877,9 @@ class Config
     CustomOptional<bool> FGXeFGForceBorderless { false };
 
     // DLSSG
+#if defined(OPTISCALER_RTX40_MFG)
+    CustomOptional<bool> FGDLSSGAdaMfgUnlock { false }; // RTX 40 only; restart required
+#endif
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance
     CustomOptional<bool> FGDLSSGUseGamesReflexMarkers { true };
     CustomOptional<int, NoDefault>

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "SysUtils.h"
 
@@ -12,11 +12,11 @@ class OS_Vk : public Shader_Vk
 {
     bool _upsample = false;
 
-    // Scaler::Count means "no override -- read the global OutputScalingDownscaler and size from the
-    // current feature", i.e. exactly the Output Scaling / Magnifier behaviour. Neural Rendering passes
-    // its own DlssNrScalingDownscaler, which also switches Dispatch to sizing from the passed images.
+    // Scaler::Count uses the global filter. Explicit filters belong to the calling pass.
     Scaler _scalerOverride;
     Scaler ActiveScaler() const;
+    bool DispatchWithSize(VkCommandBuffer commandList, const VkImageInfo& source, const VkImageInfo& output,
+                          uint32_t sourceWidth, uint32_t sourceHeight, uint32_t outputWidth, uint32_t outputHeight);
 
   public:
     OS_Vk(std::string InName, VkDevice InDevice, VkPhysicalDevice InPhysicalDevice, bool InUpsample);
@@ -37,4 +37,5 @@ class OS_Vk : public Shader_Vk
     }
 
     bool Dispatch(VkCommandBuffer InCmdList, const VkImageInfo& InResourceView, const VkImageInfo& OutResourceView);
+    bool DispatchResources(VkCommandBuffer commandList, const VkImageInfo& source, const VkImageInfo& output);
 };

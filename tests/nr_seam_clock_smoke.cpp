@@ -1,10 +1,30 @@
-// Headless sequence regression for PR #11; no game or NVIDIA runtime is loaded.
+﻿// Headless sequence regression for PR #11; no game or NVIDIA runtime is loaded.
 #include "../OptiScaler/shaders/dlssnr/DlssNr_SeamClock.h"
+#include "../OptiScaler/dlssnr/DlssNr_Placement.h"
 #include <cassert>
 #include <cstdio>
 
 int main()
 {
+    // One deferred option selects private SR regardless of whether the game uses RR.
+    struct Case { bool before, deferred, legacy, finished, wantsBefore, wantsDeferred; };
+    const Case cases[] = {
+        { false, false, false, false, false, false },
+        { true, false, false, false, true, false },
+        { false, true, false, false, true, true },
+        { false, true, false, true, true, true },
+        { false, false, false, true, false, false },
+        { true, false, false, true, true, true },
+        { true, false, true, false, true, true },
+        { true, false, true, true, true, true },
+        { false, false, true, false, false, false },
+    };
+    for (const auto& c : cases)
+    {
+        const auto p = DlssNr::ResolvePlacement(c.before, c.deferred, c.legacy, c.finished);
+        assert(p.beforeUpscale == c.wantsBefore && p.deferred == c.wantsDeferred && p.finished == c.finished);
+    }
+    std::puts("PASS: unified early-edit routing, final-picture composition and legacy INI alias");
     DlssNrSeamClock clock;
     assert(clock.AtSeam(true, false, 10) == 10);
     // Present ticks between the paired calls: keep identity, then advance once next frame.

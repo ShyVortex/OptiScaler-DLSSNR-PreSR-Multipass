@@ -1,8 +1,7 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include "IFeature_Dx11wDx12.h"
 #include "NgxOptionalDx12Inputs.h"
 
-#include <dlssnr/DlssNr.h>
 
 #include <Config.h>
 
@@ -11,6 +10,8 @@
 #include <misc/IdentifyGpu.h>
 
 #include <with_dx12/with_dx12.h>
+
+using Microsoft::WRL::ComPtr;
 
 void IFeature_Dx11wDx12::ResourceBarrier(ID3D12GraphicsCommandList* commandList, ID3D12Resource* resource,
                                          D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES afterState)
@@ -366,60 +367,41 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
     getOriginalNgxResource(InParameters, NVSDK_NGX_Parameter_ExposureTexture, &restoreParamExposure);
     getOriginalNgxResource(InParameters, NVSDK_NGX_Parameter_DLSS_Input_Bias_Current_Color_Mask, &restoreParamReactive);
 
-    ID3D11ShaderResourceView* restoreSRVs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
-    ID3D11SamplerState* restoreSamplerStates[D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
-    ID3D11Buffer* restoreCBVs[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT] = {};
-    ID3D11UnorderedAccessView* restoreUAVs[D3D11_1_UAV_SLOT_COUNT] = {};
-    ID3D11RenderTargetView* restoreRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-    ID3D11DepthStencilView* restoreDSV = nullptr;
+    ComPtr<ID3D11ShaderResourceView> restoreSRVs[D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT] = {};
+    ComPtr<ID3D11SamplerState> restoreSamplerStates[D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
+    ComPtr<ID3D11Buffer> restoreCBVs[D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT] = {};
+    ComPtr<ID3D11UnorderedAccessView> restoreUAVs[D3D11_1_UAV_SLOT_COUNT] = {};
+    ComPtr<ID3D11RenderTargetView> restoreRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+    ID3D11RenderTargetView* rawRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+    ComPtr<ID3D11DepthStencilView> restoreDSV = nullptr;
 
     // backup compute shader resources
     for (UINT i = 0; i < D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT; i++)
     {
-        restoreSRVs[i] = nullptr;
-        InDeviceContext->CSGetShaderResources(i, 1, &restoreSRVs[i]);
-
-        if (restoreSRVs[i] != nullptr)
-            restoreSRVs[i]->Release();
+        InDeviceContext->CSGetShaderResources(i, 1, restoreSRVs[i].GetAddressOf());
     }
 
     for (UINT i = 0; i < D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT; i++)
     {
-        restoreSamplerStates[i] = nullptr;
-        InDeviceContext->CSGetSamplers(i, 1, &restoreSamplerStates[i]);
-
-        if (restoreSamplerStates[i] != nullptr)
-            restoreSamplerStates[i]->Release();
+        InDeviceContext->CSGetSamplers(i, 1, restoreSamplerStates[i].GetAddressOf());
     }
 
     for (UINT i = 0; i < D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT; i++)
     {
-        restoreCBVs[i] = nullptr;
-        InDeviceContext->CSGetConstantBuffers(i, 1, &restoreCBVs[i]);
-
-        if (restoreCBVs[i] != nullptr)
-            restoreCBVs[i]->Release();
+        InDeviceContext->CSGetConstantBuffers(i, 1, restoreCBVs[i].GetAddressOf());
     }
 
     for (UINT i = 0; i < D3D11_1_UAV_SLOT_COUNT; i++)
     {
-        restoreUAVs[i] = nullptr;
-        InDeviceContext->CSGetUnorderedAccessViews(i, 1, &restoreUAVs[i]);
-
-        if (restoreUAVs[i] != nullptr)
-            restoreUAVs[i]->Release();
+        InDeviceContext->CSGetUnorderedAccessViews(i, 1, restoreUAVs[i].GetAddressOf());
     }
 
-    InDeviceContext->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, restoreRTVs, &restoreDSV);
+    InDeviceContext->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rawRTVs, restoreDSV.GetAddressOf());
 
-    for (UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; i++)
+    for (UINT i = 0; i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
     {
-        if (restoreRTVs[i] != nullptr)
-            restoreRTVs[i]->Release();
+        restoreRTVs[i].Attach(rawRTVs[i]);
     }
-
-    if (restoreDSV != nullptr)
-        restoreDSV->Release();
 
     // Unbind RenderTargets
     ID3D11RenderTargetView* nullRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
@@ -452,9 +434,7 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
                               Config::Instance()->DisableReactiveMask.value_or(false));
 
         LOG_DEBUG("Dispatch!!");
-        DlssNr::EvaluateBeforeUpscale(cmdList, InParameters, Dx12CommandQueue, _frameCount,
-                                      dx12Feature->GetUpscalerType() == Upscaler::DLSSD);
-        dx12EvalResult = dx12Feature->Evaluate(cmdList, InParameters);
+        dx12EvalResult = dx12Feature->Evaluate(cmdList, InParameters, Dx12CommandQueue, _frameCount);
 
         // DLSS 5 Neural Rendering rides the bridge: at this moment the block carries the D3D12 copies
         // of every input, the list is still recording, and the model's edit lands on the D3D12 output
@@ -468,19 +448,6 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
             LOG_INFO("DLSS-NR: the D3D11 bridge reached the hand-off (upscale ok: {}, enabled: {})",
                      dx12EvalResult, Config::Instance()->DlssNrEnabled.value_or_default());
 
-        }
-
-        if (dx12EvalResult && Config::Instance()->DlssNrEnabled.value_or_default())
-        {
-            DlssNr::EvaluateAfterUpscale(cmdList, InParameters, Dx12CommandQueue,
-                                         dx12Feature->GetUpscalerType() == Upscaler::DLSSD,
-                                         _frameCount);
-
-            // Asked only after the D3D12 path has had its turn. Probing first would have made a D3D11
-            // init the very first thing to ever touch the snippet, and if that had left its core
-            // holding a D3D11 device the D3D12 create would have failed -- killing the feature in
-            // exactly the games the probe was written to help. Off by default regardless.
-            DlssNr::ProbeD3D11(Dx11Device);
         }
 
     } while (false);
@@ -555,25 +522,29 @@ bool IFeature_Dx11wDx12::Evaluate(ID3D11DeviceContext* InDeviceContext, NVSDK_NG
     // restore compute shader resources
     for (UINT i = 0; i < D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT; i++)
     {
-        InDeviceContext->CSSetShaderResources(i, 1, &restoreSRVs[i]);
+        auto raw = restoreSRVs[i].Get();
+        InDeviceContext->CSSetShaderResources(i, 1, &raw);
     }
 
     for (UINT i = 0; i < D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT; i++)
     {
-        InDeviceContext->CSSetSamplers(i, 1, &restoreSamplerStates[i]);
+        auto raw = restoreSamplerStates[i].Get();
+        InDeviceContext->CSSetSamplers(i, 1, &raw);
     }
 
     for (UINT i = 0; i < D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT; i++)
     {
-        InDeviceContext->CSSetConstantBuffers(i, 1, &restoreCBVs[i]);
+        auto raw = restoreCBVs[i].Get();
+        InDeviceContext->CSSetConstantBuffers(i, 1, &raw);
     }
 
     for (UINT i = 0; i < D3D11_1_UAV_SLOT_COUNT; i++)
     {
-        InDeviceContext->CSSetUnorderedAccessViews(i, 1, &restoreUAVs[i], 0);
+        auto raw = restoreUAVs[i].Get();
+        InDeviceContext->CSSetUnorderedAccessViews(i, 1, &raw, 0);
     }
 
-    InDeviceContext->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, restoreRTVs, restoreDSV);
+    InDeviceContext->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, rawRTVs, restoreDSV.Get());
 
     return evalResult;
 }

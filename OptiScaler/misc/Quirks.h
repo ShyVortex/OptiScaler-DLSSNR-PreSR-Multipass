@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "SysUtils.h"
 
@@ -116,6 +116,10 @@ static const QuirkEntry quirkTable[] = {
     // Tainted Grail - Fall of Avalon
     QUIRK_ENTRY("fall of avalon.exe", GameQuirk::ForceAutoExposure),
 
+    // Granblue Fantasy Relink
+    // Disabled fakenvapi to fix broken rendering
+    QUIRK_ENTRY("granblue_fantasy_relink.exe", GameQuirk::DisableFakenvapi),
+
     // Path of Exile 2
     QUIRK_ENTRY("pathofexile.exe", GameQuirk::LoadD3D12Manually, GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("pathofexile_x64.exe", GameQuirk::LoadD3D12Manually, GameQuirk::DisableDxgiSpoofing),
@@ -172,7 +176,7 @@ static const QuirkEntry quirkTable[] = {
     //
     // Kunitsu-Gami: Path of the Goddess, Monster Hunter Wilds, MONSTER HUNTER RISE, Dead Rising Deluxe Remaster
     // (including the demo), Dragon's Dogma 2, PRAGMATA Demo, Resident Evil Requiem (+ demo)
-    // Monster Hunter Stories 3: Twisted, Reflection, PRAGMATA, Onimusha: Way of the Sword Demo
+    // Monster Hunter Stories 3: Twisted, Reflection, PRAGMATA, Onimusha: Way of the Sword (+ Demo)
     QUIRK_ENTRY("kunitsugami.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("kunitsugamidemo.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("monsterhunterwilds.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing,
@@ -183,7 +187,7 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("dd2ccs.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing,
                 GameQuirk::DisableHudfix),
     QUIRK_ENTRY("dd2.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing,
-                GameQuirk::DisableHudfix),
+                GameQuirk::DisableHudfix, GameQuirk::RestoreComputeSigOnNvidia, GameQuirk::PregmataFixDLSSModes),
     QUIRK_ENTRY("pragmata_sketchbook.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing,
                 GameQuirk::RestoreComputeSigOnNvidia, GameQuirk::AllowedFrameAhead2, GameQuirk::PregmataFixDLSSModes),
     QUIRK_ENTRY("re9.exe", GameQuirk::RestoreComputeSigOnNonNvidia, GameQuirk::DisableDxgiSpoofing,
@@ -492,7 +496,7 @@ static const QuirkEntry quirkTable[] = {
 
     // Disable FSR2/3 inputs due to crashing/custom implementations
     //
-    // Forgive Me Father 2, Revenge of the Savage Planet, F1 22, Metal Eden, Until Dawn, Bloomand Rage, 171, Microsoft
+    // Forgive Me Father 2, Revenge of the Savage Planet, F1 22, Metal Eden, Until Dawn, Bloom and Rage, 171, Microsoft
     // Flight Simulator (2020) - MSFS2020, Banishers: Ghosts of New Eden,Rune Factory Guardians of Azuma, Supraworld, F1
     // Manager 2024, Keeper (+ WinGDK PaganIdol version), Assetto Corsa Rally
     QUIRK_ENTRY_UE(fmf2, GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs),

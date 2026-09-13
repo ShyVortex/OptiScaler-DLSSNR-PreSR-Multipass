@@ -1,8 +1,10 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "LibraryLoad_Hooks.h"
+#if defined(OPTISCALER_RTX40_MFG)
+#include <framegen/dlssg/MfgUnlock.h>
+#endif
 
 #include <Config.h>
-#include <framegen/dlssg/MfgUnlock.h>
 #include <DllNames.h>
 
 #include <proxies/Ntdll_Proxy.h>
@@ -118,7 +120,8 @@ HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibF
             LOG_ERROR("Trying to load dll: {}", libNameA);
     }
 
-    // Optional Ada unlock before NGX caches capabilities. External FG already returned above.
+    // Patch a supported Ada snippet before NGX reads and caches its capabilities.
+#if defined(OPTISCALER_RTX40_MFG)
     if (std::filesystem::path(normalizedPath).filename() == L"nvngx_dlssg.dll" && MfgUnlock::Pending())
     {
         auto snippet = NtdllProxy::LoadLibraryExW_Ldr(lpLibFullPath, NULL, 0);
@@ -126,6 +129,7 @@ HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibF
             MfgUnlock::TryApply(snippet);
         return snippet;
     }
+#endif
 
     // NGX OTA
     // Try to catch something like this:

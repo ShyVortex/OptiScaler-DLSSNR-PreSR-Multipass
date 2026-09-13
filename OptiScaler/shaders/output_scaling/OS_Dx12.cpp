@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "OS_Dx12.h"
 
 #include "OS_Common.h"
@@ -53,6 +53,26 @@ void OS_Dx12::SetBufferState(ID3D12GraphicsCommandList* InCommandList, D3D12_RES
 
 bool OS_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, ID3D12Resource* InResource, ID3D12Resource* OutResource)
 {
+    auto* feature = State::Instance().currentFeature;
+    if (!feature)
+        return false;
+    return DispatchWithSize(InCmdList, InResource, OutResource, feature->TargetWidth(), feature->TargetHeight(),
+                            feature->DisplayWidth(), feature->DisplayHeight());
+}
+
+bool OS_Dx12::DispatchResources(ID3D12GraphicsCommandList* commandList, ID3D12Resource* source, ID3D12Resource* output)
+{
+    if (!source || !output)
+        return false;
+    const auto inputSize = source->GetDesc();
+    const auto outputSize = output->GetDesc();
+    return DispatchWithSize(commandList, source, output, (uint32_t) inputSize.Width, inputSize.Height,
+                            (uint32_t) outputSize.Width, outputSize.Height);
+}
+
+bool OS_Dx12::DispatchWithSize(ID3D12GraphicsCommandList* InCmdList, ID3D12Resource* InResource,
+                              ID3D12Resource* OutResource, uint32_t srcW, uint32_t srcH, uint32_t dstW, uint32_t dstH)
+{
     if (!_init || _device == nullptr || InCmdList == nullptr || InResource == nullptr || OutResource == nullptr)
         return false;
 
@@ -66,16 +86,6 @@ bool OS_Dx12::Dispatch(ID3D12GraphicsCommandList* InCmdList, ID3D12Resource* InR
 
     CreateShaderResourceView(_device, InResource, currentHeap.GetSrvCPU(0));
     CreateUnorderedAccessView(_device, OutResource, currentHeap.GetUavCPU(0), 0);
-
-    // The work is sized by the resources actually passed in. For the usual Output Scaling chain these
-    // match the current feature's target/display sizes; for any other caller only the resources are
-    // the truth.
-    const auto srcDesc = InResource->GetDesc();
-    const auto dstDesc = OutResource->GetDesc();
-    const auto srcW = (uint32_t) srcDesc.Width;
-    const auto srcH = (uint32_t) srcDesc.Height;
-    const auto dstW = (uint32_t) dstDesc.Width;
-    const auto dstH = (uint32_t) dstDesc.Height;
 
     FsrEasuCon(fsr1Constants.const0, fsr1Constants.const1, fsr1Constants.const2, fsr1Constants.const3, srcW, srcH,
                srcW, srcH, dstW, dstH);

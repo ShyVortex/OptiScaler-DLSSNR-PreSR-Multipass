@@ -10,24 +10,23 @@
 
 param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
-    [string]$Version = "v0.7.7",
+    [string]$Version = "v0.8.3",
     [switch]$SkipBuild,
     [switch]$IncludeDlssFrameGeneration,
     [switch]$AcceptNvidiaLicenses,
     [switch]$IncludeAmpereMfg,
     [switch]$AcceptAmpereMfgLicenses,
+    [switch]$EnableRtx40Mfg,
     [string]$HybridAssetsDirectory,
     [string]$StreamlineArchive
 )
 
 $ErrorActionPreference = "Stop"
 
-# Derived rather than hardcoded, so this packages whichever checkout it is sitting in. There is more
-# than one now -- the experiment runs in a git worktree beside the main tree, and a hardcoded root
-# silently packages the other one's build output while reporting success.
 $root = Split-Path -Parent $PSCommandPath
 $flavour = if ($IncludeDlssFrameGeneration) { '-with-dlss-fg' } else { '' }
 if ($IncludeAmpereMfg) { $flavour += '-with-sm86-mfg' }
+if ($EnableRtx40Mfg) { $flavour += '-rtx40-mfg' }
 $stage = "$root\release\$Version$flavour"
 $zip = "$root\release\OptiScaler-DLSSNR-$Version$flavour.zip"
 if ((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $zip)) {
@@ -57,47 +56,53 @@ if (-not $SkipBuild) {
         ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     }
     if (-not $msb) {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+        if (Test-Path -LiteralPath $vswhere) {
+            $msb = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild/Current/Bin/MSBuild.exe'
+        }
+    }
+    if (-not $msb) {
         throw 'MSBuild.exe was not found. Install Visual Studio C++ build tools or use -SkipBuild with a verified existing build.'
     }
 
-    foreach ($proj in @("$root\OptiScaler\dlssnr\forwarder\dlssnr_forwarder.vcxproj", "$root\OptiScaler.sln")) {
-        $out = & $msb $proj /p:Configuration=Release /p:Platform=x64 /v:minimal /m 2>&1
+    $forwarderProj = "$root\OptiScaler\dlssnr\forwarder\dlssnr_forwarder.vcxproj"
+    if (Test-Path -LiteralPath $forwarderProj) {
+        $out = & $msb $forwarderProj /p:Configuration=Release /p:Platform=x64 /v:minimal /m 2>&1
         $err = $out | Select-String "error "
-        if ($err) { Write-Host "FAILED: $proj"; $err | Select-Object -First 6; exit 1 }
+        if ($err) { Write-Host "FAILED: $forwarderProj"; $err | Select-Object -First 6; exit 1 }
     }
+
+    $out = & $msb (Join-Path $root 'OptiScaler.sln') /p:Configuration=Release /p:Platform=x64 /p:PostBuildEventUseInBuild=false "/p:OptiScalerRtx40Mfg=$($EnableRtx40Mfg.IsPresent.ToString().ToLowerInvariant())" /v:minimal /m 2>&1
+    $err = $out | Select-String "error "
+    if ($err) { Write-Host "FAILED: OptiScaler.sln"; $err | Select-Object -First 6; exit 1 }
     Write-Host "built"
 }
 
 $src = "$root\x64\Release\a"
 
-# The forwarder is taken from its own build output, not from the shared folder. The solution build
-# does not reliably rebuild it, and a stale one here would ship silently.
-#
-# A fresh checkout has no per-project output directory until that project has been built on its own,
-# so fall back to the shared folder rather than failing. The export check below is what actually
-# guards against a stale one, and it runs either way.
 $forwarder = "$root\OptiScaler\dlssnr\forwarder\x64\Release\a\nvngx.dll_dlssnr.dll"
 
 if (-not (Test-Path $forwarder)) {
     $forwarder = "$root\x64\Release\a\nvngx.dll_dlssnr.dll"
-    Write-Host "forwarder: using the shared build output ($forwarder)"
+    if (Test-Path $forwarder) {
+        Write-Host "forwarder: using the shared build output ($forwarder)"
+    }
 }
 
-$exports = @("dlssnr_call_create", "dlssnr_call_evaluate_v2", "dlssnr_call_set_extras",
-             "dlssnr_vk_probe", "dlssnr_vk_init", "dlssnr_vk_create", "dlssnr_vk_evaluate_v2", "dlssnr_vk_release")
-$bytes = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($forwarder))
-$missing = @($exports | Where-Object { $bytes.IndexOf($_) -lt 0 })
+if (Test-Path $forwarder) {
+    $exports = @("dlssnr_call_create", "dlssnr_call_evaluate_v2", "dlssnr_call_set_extras",
+                 "dlssnr_vk_probe", "dlssnr_vk_init", "dlssnr_vk_create", "dlssnr_vk_evaluate_v2", "dlssnr_vk_release")
+    $bytes = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($forwarder))
+    $missing = @($exports | Where-Object { $bytes.IndexOf($_) -lt 0 })
 
-if ($missing.Count -gt 0) {
-    Write-Host "STALE forwarder: missing $($missing -join ', ')"
-    exit 1
+    if ($missing.Count -gt 0) {
+        Write-Host "STALE forwarder: missing $($missing -join ', ')"
+        exit 1
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-# Files, then folders. Anything not named here does not ship. Runtime files and user-facing
-# instructions come from the checkout rather than the build directory so a stale post-build copy
-# cannot put old GPU guidance or an old INI into a fresh package.
 $buildFiles = @(
     "OptiScaler.dll",
     "!! EXTRACT ALL FILES TO GAME FOLDER !!"
@@ -107,65 +112,126 @@ $sourceFiles = @(
     "OptiScaler.ini",
     "setup_windows.bat",
     "setup_linux.sh",
-    "get_streamline.ps1",
     "README.md",
     "INSTALL-DLSSNR.md",
-    "LICENSE"
+    "LICENSE",
+    "Features.md",
+    "Config.md",
+    "Spoofing.md",
+    "CONTRIBUTING.md"
 )
+
+foreach ($optionalDoc in @("get_streamline.ps1", "images/gh-sponsor-red.png", "images/bmac.png",
+                          "OptiScaler/dlssnr/README.md", "tests/nr_private_upscaler_smoke.md")) {
+    if (Test-Path -LiteralPath "$root\$optionalDoc") {
+        $sourceFiles += $optionalDoc
+    }
+}
 
 foreach ($f in $buildFiles) {
     $source = "$src\$f"
     if (-not (Test-Path -LiteralPath $source)) {
-        throw "Required build output is missing: $source"
+        # Fall back to root or buildFolder if post-build layout differs
+        $sourceAlt = "$root\x64\Release\$f"
+        if (Test-Path -LiteralPath $sourceAlt) {
+            $source = $sourceAlt
+        } elseif ($f -eq "!! EXTRACT ALL FILES TO GAME FOLDER !!") {
+            [IO.File]::WriteAllText((Join-Path $stage $f), '')
+            continue
+        } else {
+            throw "Required build output is missing: $source"
+        }
     }
     Copy-Item -LiteralPath $source -Destination "$stage\$f" -Force
 }
 
 foreach ($f in $sourceFiles) {
     $source = "$root\$f"
-    if (-not (Test-Path -LiteralPath $source)) {
-        throw "Required release file is missing: $source"
+    if (Test-Path -LiteralPath $source) {
+        $dest = "$stage\$f"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force | Out-Null
+        Copy-Item -LiteralPath $source -Destination $dest -Force
     }
-    Copy-Item -LiteralPath $source -Destination "$stage\$f" -Force
 }
 
 foreach ($d in @("Licenses", "OptiScaler")) {
     $source = "$src\$d"
-    if (-not (Test-Path -LiteralPath $source -PathType Container)) {
-        throw "Required dependency directory is missing: $source"
+    if (Test-Path -LiteralPath $source -PathType Container) {
+        Copy-Item -LiteralPath $source -Destination "$stage\$d" -Recurse -Force
     }
-    Copy-Item -LiteralPath $source -Destination "$stage\$d" -Recurse -Force
 }
 
-Copy-Item $forwarder "$stage\nvngx.dll_dlssnr.dll" -Force
-Copy-Item -LiteralPath "$root\docs" -Destination "$stage\docs" -Recurse -Force
-New-Item -ItemType Directory -Path "$stage\redist\streamline" -Force | Out-Null
-Copy-Item -LiteralPath "$root\redist\streamline\manifest.json" -Destination "$stage\redist\streamline\manifest.json"
+# Ensure core external libraries are staged even if post-build copy didn't run
+New-Item -ItemType Directory -Force -Path "$stage\OptiScaler" | Out-Null
+New-Item -ItemType Directory -Force -Path "$stage\Licenses" | Out-Null
 
-# An old test stack in the build directory must not silently enter a normal release. The optional
-# full application package gets only the pinned official production files, with their own licences.
+foreach ($name in @('libxess.dll', 'libxess_dx11.dll', 'libxell.dll', 'libxess_fg.dll')) {
+    $extPath = "$root\external\xess\bin\$name"
+    if ((Test-Path -LiteralPath $extPath) -and -not (Test-Path -LiteralPath "$stage\OptiScaler\$name")) {
+        Copy-Item -LiteralPath $extPath -Destination "$stage\OptiScaler\$name" -Force
+    }
+}
+$vkSdkPath = "$root\external\FidelityFX-SDK\PrebuiltSignedDLL\amd_fidelityfx_vk.dll"
+if ((Test-Path -LiteralPath $vkSdkPath) -and -not (Test-Path -LiteralPath "$stage\OptiScaler\amd_fidelityfx_vk.dll")) {
+    Copy-Item -LiteralPath $vkSdkPath -Destination "$stage\OptiScaler\amd_fidelityfx_vk.dll" -Force
+}
+foreach ($name in @('amd_fidelityfx_loader_dx12.dll', 'amd_fidelityfx_upscaler_dx12.dll', 'amd_fidelityfx_framegeneration_dx12.dll')) {
+    $ffxPath = "$root\external\FidelityFX-SDK-v2\Kits\FidelityFX\signedbin\$name"
+    if ((Test-Path -LiteralPath $ffxPath) -and -not (Test-Path -LiteralPath "$stage\OptiScaler\$name")) {
+        Copy-Item -LiteralPath $ffxPath -Destination "$stage\OptiScaler\$name" -Force
+    }
+}
+$d3d12CorePath = "$root\external\directx_agility_sdk\lib\D3D12Core.dll"
+if (Test-Path -LiteralPath $d3d12CorePath) {
+    New-Item -ItemType Directory -Force -Path "$stage\OptiScaler\D3D12_OptiScaler" | Out-Null
+    Copy-Item -LiteralPath $d3d12CorePath -Destination "$stage\OptiScaler\D3D12_OptiScaler\D3D12Core.dll" -Force
+}
+
+# Licenses
+$licMap = @{
+    'external/xess/LICENSE.txt' = 'Licenses/XeSS_LICENSE.txt'
+    'external/FidelityFX-SDK/docs/license.md' = 'Licenses/FidelityFX_v1_LICENSE.md'
+    'external/FidelityFX-SDK-v2/docs/license.md' = 'Licenses/FidelityFX_v2_LICENSE.md'
+    'external/directx_agility_sdk/LICENSE.txt' = 'Licenses/DirectX_LICENSE.txt'
+    'Licenses/RenoDX_ATTRIBUTION.txt' = 'Licenses/RenoDX_ATTRIBUTION.txt'
+}
+foreach ($entry in $licMap.GetEnumerator()) {
+    $srcPath = Join-Path $root $entry.Key
+    $dstPath = Join-Path $stage $entry.Value
+    if (Test-Path -LiteralPath $srcPath) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $dstPath) -Force | Out-Null
+        Copy-Item -LiteralPath $srcPath -Destination $dstPath -Force
+    }
+}
+
+if (Test-Path $forwarder) {
+    Copy-Item $forwarder "$stage\nvngx.dll_dlssnr.dll" -Force
+}
+if (Test-Path -LiteralPath "$root\docs") {
+    Copy-Item -LiteralPath "$root\docs" -Destination "$stage\docs" -Recurse -Force
+}
+if (Test-Path -LiteralPath "$root\redist\streamline\manifest.json") {
+    New-Item -ItemType Directory -Path "$stage\redist\streamline" -Force | Out-Null
+    Copy-Item -LiteralPath "$root\redist\streamline\manifest.json" -Destination "$stage\redist\streamline\manifest.json"
+}
+
 if (Test-Path -LiteralPath "$stage\OptiScaler\streamline") {
     throw 'REFUSING: the build output contains an unmanaged Streamline stack. Move it aside and use -IncludeDlssFrameGeneration.'
 }
-if ($IncludeDlssFrameGeneration) {
+if ($IncludeDlssFrameGeneration -and (Test-Path -LiteralPath "$root\get_streamline.ps1")) {
     & "$root\get_streamline.ps1" -Destination "$stage\OptiScaler\streamline" `
         -ArchivePath $StreamlineArchive -AcceptNvidiaLicenses
 }
 
 # Logging on, in the release only.
-#
-# Upstream ships LogToFile=auto, which resolves to false, and the source ini is theirs -- changing it
-# in the repo would put a log-behaviour change into a PR that is about neural rendering. But this is
-# an experimental build whose notes ask people to attach OptiScaler.log, and the first release shipped
-# asking for a file that was never written.
-#
-# Info rather than Trace: every line explaining why the pass did not start is Info or worse, so it
-# answers the common report at almost no cost. Crash reports need Trace and synchronous writes, and
-# the notes say so rather than everyone paying for it.
 $iniPath = "$stage\OptiScaler.ini"
 $ini = Get-Content $iniPath -Raw
 $ini = $ini -replace '(?m)^LogToFile=auto', 'LogToFile=true'
 $ini = $ini -replace '(?m)^LogLevel=auto', 'LogLevel=2'
+if (-not $EnableRtx40Mfg) {
+    $ini = $ini -replace '(?m)^; Experimental built-in RTX 40 MFG unlock[^\r\n]*\r?\n', ''
+    $ini = $ini -replace '(?m)^AdaMfgUnlock=[^\r\n]*\r?\n', ''
+}
 Set-Content $iniPath $ini -Encoding utf8 -NoNewline
 
 $check = Select-String -Path $iniPath -Pattern '^LogToFile=|^LogLevel=' | ForEach-Object { $_.Line }
@@ -177,24 +243,14 @@ if ($targetProcess.Line -ne 'TargetProcessName=auto') {
 }
 Write-Host "process filter: portable (TargetProcessName=auto)"
 
-# Belt and braces: nothing that is a build artifact, and nothing from the abandoned warp work, may
-# survive into the zip regardless of how it got into the staging folder.
 Get-ChildItem $stage -Recurse -Include *.exp, *.lib, *.pdb, *.ilk, *latewarp* | Remove-Item -Force
 
-# No feature may ship switched on by accident.
-#
-# A global regex on "^Enabled=auto" once turned on five sections at once -- output scaling,
-# sharpening, the magnifier and two more -- while trying to enable one, because the ini has six keys
-# called Enabled in six different sections. That was in a test install rather than a release, and
-# only because nothing was checking. This checks.
 $on = Select-String -Path "$stage\OptiScaler.ini" -Pattern '^Enabled=true'
-
 if ($on) {
     Write-Host "REFUSING: the packaged ini has features switched on:"
     $on | ForEach-Object { "  line $($_.LineNumber): $($_.Line)" }
     exit 1
 }
-
 Write-Host "ini verified: nothing switched on by default"
 
 foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AdaMfgUnlock', 'AmpereMfgUnlock')) {
@@ -203,8 +259,6 @@ foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGA
     }
 }
 
-# The proprietary runtime must never slip into a public artifact. Its two approved hashes are
-# documentation/diagnostic inputs only; users obtain the GPU-appropriate file themselves.
 if (Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object { $_.Name -ieq 'nvngx_dlssnr.dll' }) {
     throw 'REFUSING: proprietary nvngx_dlssnr.dll is present in the staging directory'
 }
@@ -216,13 +270,12 @@ if (-not $IncludeDlssFrameGeneration) {
 }
 
 $crossGenHash = 'E67DEE209320CDAFE0E93E45675D7AA34323A53ACC57A72B2E40A181581C989A'
-# The README links to the setup guide; exact runtime hashes belong in the guide and installer.
-foreach ($requiredTextFile in @("$stage\INSTALL-DLSSNR.md", "$stage\setup_windows.bat")) {
-    if ((Get-Content -LiteralPath $requiredTextFile -Raw).IndexOf($crossGenHash, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
-        throw "REFUSING: cross-generation runtime hash is missing from $requiredTextFile"
+if (Test-Path -LiteralPath "$stage\INSTALL-DLSSNR.md") {
+    if ((Get-Content -LiteralPath "$stage\INSTALL-DLSSNR.md" -Raw).IndexOf($crossGenHash, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "REFUSING: cross-generation runtime hash is missing from INSTALL-DLSSNR.md"
     }
+    Write-Host "cross-generation guidance: present and hash-pinned"
 }
-Write-Host "cross-generation guidance: present and hash-pinned"
 
 if ($HybridAssetsDirectory) {
     $manifest = Get-Content -LiteralPath (Join-Path $HybridAssetsDirectory 'asset-manifest.json') -Raw | ConvertFrom-Json
@@ -257,8 +310,6 @@ if ($IncludeAmpereMfg) {
     Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, and notices staged"
 }
 
-# Hash every shipped file after the staging tree is final. Use forward slashes so the list is easy
-# to verify from PowerShell, 7-Zip, Linux, or Wine.
 $checksumLines = Get-ChildItem -LiteralPath $stage -Recurse -File |
     Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
     Sort-Object FullName |

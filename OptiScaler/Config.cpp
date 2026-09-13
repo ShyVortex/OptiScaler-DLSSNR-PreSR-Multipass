@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "Config.h"
 
@@ -238,8 +238,7 @@ bool Config::Reload(std::filesystem::path iniPath)
 
         {
             FGXeFGInterpolationCount.set_from_config(readInt("XeFG", "InterpolationCount"));
-            if (FGXeFGInterpolationCount.has_value() &&
-                (FGXeFGInterpolationCount.value() < 1 || FGXeFGInterpolationCount.value() > 3))
+            if (FGXeFGInterpolationCount.has_value() && FGXeFGInterpolationCount.value() < 1)
                 FGXeFGInterpolationCount.reset();
 
             FGXeFGIgnoreInitChecks.set_from_config(readBool("XeFG", "IgnoreInitChecks"));
@@ -252,6 +251,9 @@ bool Config::Reload(std::filesystem::path iniPath)
         }
 
         {
+#if defined(OPTISCALER_RTX40_MFG)
+            FGDLSSGAdaMfgUnlock.set_from_config(readBool("DLSSG", "AdaMfgUnlock"));
+#endif
             FGDLSSGInterpolationCount.set_from_config(readInt("DLSSG", "InterpolationCount"));
             if (FGDLSSGInterpolationCount.has_value() &&
                 (FGDLSSGInterpolationCount.value() < 1 || FGDLSSGInterpolationCount.value() > 6))
@@ -342,15 +344,16 @@ bool Config::Reload(std::filesystem::path iniPath)
 
             // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
             DlssNrEnabled.set_from_config(readBool("DlssNr", "Enabled"));
-            DlssNrRunBeforeSr.set_from_config(readBool("DlssNr", "RunBeforeSR"));
+            auto nrBeforeSr = readBool("DlssNr", "RunBeforeSR");
+            if (!nrBeforeSr.has_value())
+                nrBeforeSr = readBool("DlssNr", "BeforeUpscale");
+            DlssNrRunBeforeSr.set_from_config(nrBeforeSr);
             DlssNrFinishedPicture.set_from_config(readBool("DlssNr", "FinishedPicture"));
+            DlssNrHdrTransfer.set_from_config(readBool("DlssNr", "HdrTransfer"));
             DlssNrDeferredDlss.set_from_config(readBool("DlssNr", "DeferredDLSS"));
+            DlssNrPrivateUpscaler.set_from_config(readInt("DlssNr", "PrivateUpscaler"));
             DlssNrResidualAcrossRr.set_from_config(readBool("DlssNr", "ResidualAcrossRR"));
             DlssNrResidualAcrossRrBlend.set_from_config(readFloat("DlssNr", "ResidualAcrossRRBlend"));
-            DlssNrResidualFg.set_from_config(readBool("DlssNr", "ResidualFG"));
-            DlssNrPrecision.set_from_config(readUInt("DlssNr", "Precision"));
-            if (DlssNrPrecision.value_or_default() != 4) DlssNrPrecision = 0u;
-            DlssNrResidualFgApproxCamera.set_from_config(readBool("DlssNr", "ResidualFGApproxCamera"));
             DlssNrToggleKey.set_from_config(readInt("DlssNr", "ToggleKey"));
             DlssNrTransferStrength.set_from_config(readFloat("DlssNr", "TransferStrength"));
             DlssNrColourStrength.set_from_config(readFloat("DlssNr", "ColourStrength"));
@@ -358,7 +361,6 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrTransfer.set_from_config(readUInt("DlssNr", "Transfer"));
 
             DlssNrWhitePointFromExposure.set_from_config(readBool("DlssNr", "WhitePointFromExposure"));
-            DlssNrProbeD3D11.set_from_config(readBool("DlssNr", "ProbeD3D11"));
             DlssNrDebugView.set_from_config(readUInt("DlssNr", "DebugView"));
             DlssNrCompare.set_from_config(readUInt("DlssNr", "Compare"));
             DlssNrCompareSplit.set_from_config(readFloat("DlssNr", "CompareSplit"));
@@ -372,8 +374,6 @@ bool Config::Reload(std::filesystem::path iniPath)
                 DlssNrScalingDownscaler.set_from_config(*v);
             else
                 DlssNrScalingDownscaler.reset();
-            DlssNrProxyProbe.set_from_config(readBool("DlssNr", "ProxyProbe"));
-            DlssNrUseProxy.set_from_config(readBool("DlssNr", "UseProxy"));
             DlssNrScanExposure.set_from_config(readBool("DlssNr", "ScanExposure"));
             DlssNrWhitePointSource.set_from_config(readUInt("DlssNr", "WhitePointSource"));
 
@@ -1138,6 +1138,11 @@ bool Config::SaveIni()
     }
 
     {
+#if defined(OPTISCALER_RTX40_MFG)
+        ini.SetValue("DLSSG", "AdaMfgUnlock", GetBoolValue(Instance()->FGDLSSGAdaMfgUnlock.value_for_config()).c_str());
+#else
+        ini.Delete("DLSSG", "AdaMfgUnlock");
+#endif
         ini.SetValue("DLSSG", "InterpolationCount",
                      GetIntValue(Instance()->FGDLSSGInterpolationCount.value_for_config()).c_str());
         ini.SetValue("DLSSG", "UseGamesReflexMarkers",
@@ -1277,17 +1282,23 @@ bool Config::SaveIni()
     // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
     ini.SetValue("DlssNr", "Enabled", GetBoolValue(Instance()->DlssNrEnabled.value_for_config()).c_str());
     ini.SetValue("DlssNr", "FinishedPicture", GetBoolValue(Instance()->DlssNrFinishedPicture.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "HdrTransfer", GetBoolValue(Instance()->DlssNrHdrTransfer.value_for_config()).c_str());
     ini.SetValue("DlssNr", "RunBeforeSR",
                  GetBoolValue(Instance()->DlssNrRunBeforeSr.value_for_config()).c_str());
     ini.SetValue("DlssNr", "DeferredDLSS",
                  GetBoolValue(Instance()->DlssNrDeferredDlss.value_for_config()).c_str());
+    ini.SetValue("DlssNr", "PrivateUpscaler",
+                 GetIntValue(Instance()->DlssNrPrivateUpscaler.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ResidualAcrossRR",
                  GetBoolValue(Instance()->DlssNrResidualAcrossRr.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ResidualAcrossRRBlend",
                  GetFloatValue(Instance()->DlssNrResidualAcrossRrBlend.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "ResidualFG", GetBoolValue(Instance()->DlssNrResidualFg.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "Precision", GetIntValue(Instance()->DlssNrPrecision.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "ResidualFGApproxCamera", GetBoolValue(Instance()->DlssNrResidualFgApproxCamera.value_for_config()).c_str());
+    ini.Delete("DlssNr", "ResidualFG");
+    ini.Delete("DlssNr", "ResidualFGApproxCamera");
+    ini.Delete("DlssNr", "UseProxy");
+    ini.Delete("DlssNr", "ProxyProbe");
+    ini.Delete("DlssNr", "ProbeD3D11");
+    ini.Delete("DlssNr", "Precision"); // Remove the obsolete backend selector from saved configurations.
     {
         auto toggle = Instance()->DlssNrToggleKey.value_for_config();
         ini.SetValue("DlssNr", "ToggleKey", GetIntValue(toggle, toggle > 0).c_str());
@@ -1299,8 +1310,6 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "MaxRatio", GetFloatValue(Instance()->DlssNrMaxRatio.value_for_config()).c_str());
     ini.SetValue("DlssNr", "Transfer", GetIntValue(Instance()->DlssNrTransfer.value_for_config()).c_str());
 
-    ini.SetValue("DlssNr", "ProbeD3D11",
-                 GetBoolValue(Instance()->DlssNrProbeD3D11.value_for_config()).c_str());
     ini.SetValue("DlssNr", "WhitePointFromExposure",
                  GetBoolValue(Instance()->DlssNrWhitePointFromExposure.value_for_config()).c_str());
     ini.SetValue("DlssNr", "DebugView", GetIntValue(Instance()->DlssNrDebugView.value_for_config()).c_str());
@@ -1331,8 +1340,6 @@ bool Config::SaveIni()
     ini.SetValue("DlssNr", "ScanInverted", GetBoolValue(Instance()->DlssNrScanInverted.value_for_config()).c_str());
     ini.SetValue("DlssNr", "ScanMeter", GetBoolValue(Instance()->DlssNrScanMeter.value_for_config()).c_str());
     ini.SetValue("DlssNr", "Passes", GetIntValue(Instance()->DlssNrPasses.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "UseProxy", GetBoolValue(Instance()->DlssNrUseProxy.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "ProxyProbe", GetBoolValue(Instance()->DlssNrProxyProbe.value_for_config()).c_str());
     // ScanExposure is a developer override with no menu control; persist it so a set ini keeps it.
     ini.SetValue("DlssNr", "ScanExposure", GetBoolValue(Instance()->DlssNrScanExposure.value_for_config()).c_str());
     ini.SetValue("DlssNr", "WhitePointScale",

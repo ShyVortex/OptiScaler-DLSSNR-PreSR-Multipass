@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "D3D12_Hooks.h"
 #include <dlssnr/DlssNr_ExposureScan.h>
 
@@ -2384,6 +2384,8 @@ void D3D12Hooks::Unhook()
 }
 
 void D3D12Hooks::SetRootSignatureTracking(bool enable) { isUpscalerActive = !enable; }
+
+bool D3D12Hooks::IsRootSignatureTrackingEnabled() { return !isUpscalerActive; }
 
 bool D3D12Hooks::CanRestoreRootSignature(ID3D12GraphicsCommandList* cmdList)
 {

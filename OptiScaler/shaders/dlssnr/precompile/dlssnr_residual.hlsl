@@ -2,7 +2,7 @@
 //
 // Deliberately a SEPARATE shader from dlssnr.hlsl. Regenerating dlssnr.hlsl's blob with a current
 // dxc produces materially different DXIL from the committed one (older compiler), and that shader
-// carries every NR path -- post-SR, pre-SR, RR, DeferredDLSS, ResidualFG. These two experimental
+// carries every NR path -- post-SR, pre-SR, RR, DeferredDLSS. These two experimental
 // modes get their own tiny blob and a second compute PSO instead, so the battle-tested one is
 // never touched. The cbuffer and bindings mirror dlssnr.hlsl exactly so DlssNr_Dx12's existing
 // root signature and descriptor table are reused as-is; only gResidualBlend is appended, and it

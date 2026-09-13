@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Looking for the exposure the game computed but never handed over.
 //
@@ -80,9 +80,11 @@ unsigned int Examined();
 // right buffer or merely a moving one.
 float BestValue(int* outIndex = nullptr, float* outLowest = nullptr, float* outHighest = nullptr);
 
-// Called once per frame from the Neural Rendering pass, on its command list. Copies one value out of
-// each candidate and reads back the copies taken a few frames ago.
-void Tick(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList);
+// Called from the Neural Rendering pass. The shared scanner follows the first rendering device
+// until Shutdown; other devices are skipped. An epoch suppresses repeated passes/owners in one frame.
+// This is a frame identity, not evidence that GPU work has completed.
+void Tick(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList,
+          uint64_t submissionEpoch = UINT64_MAX);
 
 // What the scan has to say right now, in one line, for an indicator that can be read while playing.
 enum class Verdict
@@ -145,6 +147,7 @@ std::string SerializeAnchors();
 // Release the scan's references to captured resources (call at feature teardown -- see the .cpp).
 void ReleaseTrackedResources();
 
+// Call after the scanner's GPU copies have completed, before destroying its device.
 void Shutdown();
 
 } // namespace ExposureScan

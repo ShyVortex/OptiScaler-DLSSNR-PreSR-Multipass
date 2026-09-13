@@ -1,9 +1,10 @@
-#pragma once
+﻿#pragma once
 
 #include "SysUtils.h"
 #include "Util.h"
 #include "Config.h"
 #include "Logger.h"
+#include <dlssnr/DlssNr_NgxDiagnostics.h>
 
 #include <proxies/Ntdll_Proxy.h>
 #include <proxies/KernelBase_Proxy.h>
@@ -419,15 +420,26 @@ class NVNGXProxy
     inline static bool _dx11Inited = false;
     inline static bool _dx12Inited = false;
     inline static bool _vulkanInited = false;
+    inline static thread_local bool _traceFeatureCreation = false;
 
     inline static void LogCallback(const char* message, NVSDK_NGX_Logging_Level loggingLevel,
                                    NVSDK_NGX_Feature sourceComponent)
     {
         std::string logMessage(message);
-        LOG_DEBUG("NVSDK Feature {}: {}", (UINT) sourceComponent, logMessage);
+        if (_traceFeatureCreation)
+            LOG_INFO("NGX private feature creation [{}]: {}", (UINT) sourceComponent, logMessage);
+        else
+            LOG_DEBUG("NVSDK Feature {}: {}", (UINT) sourceComponent, logMessage);
     }
 
   public:
+    class ScopedFeatureCreationTrace
+    {
+        bool previous = _traceFeatureCreation;
+      public:
+        ScopedFeatureCreationTrace() { _traceFeatureCreation = true; }
+        ~ScopedFeatureCreationTrace() { _traceFeatureCreation = previous; }
+    };
     static void InitNVNGX(HMODULE nvngxModule = nullptr)
     {
         // if dll already loaded
@@ -639,6 +651,7 @@ class NVNGXProxy
             Config::Instance()->LogLevel < 2 ? NVSDK_NGX_LOGGING_LEVEL_VERBOSE : NVSDK_NGX_LOGGING_LEVEL_ON;
         fcInfo->LoggingInfo.LoggingCallback = LogCallback;
         fcInfo->LoggingInfo.DisableOtherLoggingSinks = true;
+        DlssNr::NgxDiagnostics::Install(fcInfo->LoggingInfo);
     }
 
     static HMODULE NVNGXModule() { return _module.dll; }
@@ -906,7 +919,7 @@ class NVNGXProxy
 
         _vulkanInited = (nvResult == NVSDK_NGX_Result_Success);
 
-        return true;
+        return _vulkanInited;
     }
 
     static void SetVulkanInited(bool value) { _vulkanInited = value; }

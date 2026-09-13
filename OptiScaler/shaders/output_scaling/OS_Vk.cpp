@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "OS_Vk.h"
 #include "OS_Common.h"
 #include <Config.h>
@@ -123,6 +123,22 @@ OS_Vk::OS_Vk(std::string InName, VkDevice InDevice, VkPhysicalDevice InPhysicalD
 }
 
 bool OS_Vk::Dispatch(VkCommandBuffer InCmdList, const VkImageInfo& InResourceView, const VkImageInfo& OutResourceView)
+{
+    auto* feature = State::Instance().currentFeature;
+    if (!feature)
+        return false;
+    return DispatchWithSize(InCmdList, InResourceView, OutResourceView, feature->TargetWidth(), feature->TargetHeight(),
+                            feature->DisplayWidth(), feature->DisplayHeight());
+}
+
+bool OS_Vk::DispatchResources(VkCommandBuffer commandList, const VkImageInfo& source, const VkImageInfo& output)
+{
+    return DispatchWithSize(commandList, source, output, source.Width, source.Height, output.Width, output.Height);
+}
+
+bool OS_Vk::DispatchWithSize(VkCommandBuffer InCmdList, const VkImageInfo& InResourceView,
+                            const VkImageInfo& OutResourceView, uint32_t srcW, uint32_t srcH,
+                            uint32_t dstW, uint32_t dstH)
 {
     if (!_init || InCmdList == VK_NULL_HANDLE)
         return false;

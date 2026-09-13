@@ -1,4 +1,4 @@
-// WARP executes the HDR conversion HLSL. No game or NVIDIA model is loaded.
+﻿// WARP executes the HDR conversion HLSL. No game or NVIDIA model is loaded.
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
@@ -181,6 +181,104 @@ try
     applied = run(c, std::vector<Pixel>(3,{1,1,1,1}), clean, ringing, clean);
     expect(closeFloat(applied[0].r,0.5f) && closeFloat(applied[1].r,2) && closeFloat(applied[2].r,1),
            "Carrier ringing escaped the symmetric gain bounds");
+    // Known, independent scene -> display transform. Compare the transferred edit with
+    // actually processing the edited scene through the transform (not with the shader's own formula).
+    constexpr unsigned samples = 1024;
+    std::vector<Pixel> scene(samples), display(samples), editedDisplay(samples), edits(samples);
+    const auto tone = [](float x) { return 12.5f * x / (1.0f + x); };
+    for (unsigned i = 0; i < samples; ++i)
+    {
+        float s = std::exp2(-10.0f + 20.0f * i / (samples - 1));
+        scene[i] = {s,s,s,0.4f};
+        display[i] = {tone(s),tone(s),tone(s),0.4f};
+        editedDisplay[i] = {tone(s*1.2f),tone(s*1.2f),tone(s*1.2f),0.4f};
+        float gain = 0.5f + std::log2(1.2f) / 8.0f;
+        edits[i] = {gain,gain,gain,1};
+    }
+    c = {}; c.Mode=6; c.Width=kDlssNrHdrCurveBins; c.Height=1; c.WhitePoint=1;
+    auto curve = run(c, display, scene, clean, clean);
+    expect(curve[28].b > 0.5f, "Known tone curve did not obtain a confident fit");
+    c.Mode=3; c.Width=samples; c.MaxRatio=2;
+    const auto oldTransfer = run(c, display, scene, edits, curve);
+    c.Mode=8;
+    const auto matched = run(c, display, scene, edits, curve);
+    double oldError=0, newError=0;
+    for (unsigned i=0; i<samples; ++i)
+    {
+        if (scene[i].r >= 0.1f && scene[i].r <= 64.0f)
+        {
+            oldError += std::abs(oldTransfer[i].r-editedDisplay[i].r);
+            newError += std::abs(matched[i].r-editedDisplay[i].r);
+        }
+        expect(std::isfinite(matched[i].r) && matched[i].a == display[i].a,
+               "Matched transfer changed alpha or produced invalid light");
+    }
+    printf("Known HDR shoulder: total absolute error %.5f -> %.5f\n",oldError,newError);
+    expect(newError < oldError * 0.2, "Response fitting did not substantially reduce highlight transfer error");
+    auto darkEdits=edits;
+    for(auto& p:darkEdits) p.r=p.g=p.b=0.5f+std::log2(0.8f)/8.0f;
+    auto darkMatch=run(c,display,scene,darkEdits,curve);
+    double darkOldError=0, darkNewError=0;
+    for(unsigned i=0;i<samples;++i)
+        if(scene[i].r>=0.1f && scene[i].r<=64.0f)
+        {
+            darkOldError+=std::abs(display[i].r*0.8f-tone(scene[i].r*0.8f));
+            darkNewError+=std::abs(darkMatch[i].r-tone(scene[i].r*0.8f));
+        }
+    expect(darkNewError<darkOldError*0.2,"Fitted transfer failed for darkening edits");
+    auto colourEdits=std::vector<Pixel>(samples,{0.625f,0.375f,0.5f,1});
+    auto colourMatch=run(c,display,scene,colourEdits,curve);
+    for(unsigned i=0;i<samples;++i)
+        expect(colourMatch[i].r<=display[i].r*2.0001f && colourMatch[i].g>=display[i].g*0.4999f,
+               "Luminance matching escaped the RGB gain bounds");
+    // Flat scenes cannot identify a curve: preserve the previous transfer exactly.
+    c.Mode=6; c.Width=kDlssNrHdrCurveBins;
+    auto flatCurve = run(c, clean, clean, clean, clean);
+    for (const auto& bin : flatCurve) expect(bin.b == 0, "Flat scene invented a response");
+    c.Mode=8; c.Width=samples;
+    auto fallback = run(c, display, scene, edits, flatCurve);
+    for (unsigned i=0; i<samples; ++i)
+        expect(closeFloat(fallback[i].r,oldTransfer[i].r), "Unreliable curve failed to use existing transfer");
+    // An overlay that does not match the scene-to-display fit must use local fallback.
+    auto overlay = display; overlay[samples/2] = {100,100,100,0.6f};
+    c.Mode=3; auto overlayOld=run(c,overlay,scene,edits,curve);
+    c.Mode=8; auto overlayNew=run(c,overlay,scene,edits,curve);
+    expect(closeFloat(overlayNew[samples/2].r,overlayOld[samples/2].r), "Mismatched overlay trusted the curve");
+    auto neutral = std::vector<Pixel>(samples,{0.5f,0.5f,0.5f,1});
+    auto unchanged=run(c,display,scene,neutral,curve);
+    for (unsigned i=0; i<samples; ++i)
+        expect(unchanged[i].r == display[i].r, "Zero edit was not an exact bypass");
+    // Pre-exposure changes the buffer's numbers, not the fitted physical response.
+    auto exposedScene=scene;
+    for (auto& p: exposedScene) {p.r*=4; p.g*=4; p.b*=4;}
+    c.Mode=6; c.Width=kDlssNrHdrCurveBins; c.WhitePoint=4;
+    auto exposedCurve=run(c,display,exposedScene,clean,clean);
+    c.Mode=8; c.Width=samples;
+    auto exposedMatch=run(c,display,exposedScene,edits,exposedCurve);
+    for (unsigned i=0; i<samples; ++i)
+        expect(std::abs(exposedMatch[i].r-matched[i].r)<0.002f, "Fitted transfer depended on pre-exposure");
+    // Consistent curve histories smooth; a large response change resets immediately.
+    auto historyCurve=curve;
+    for(auto& p:historyCurve) p.r+=0.1f;
+    c.Mode=6; c.Width=kDlssNrHdrCurveBins; c.WhitePoint=1; c.DebugView=1; c.ColourStrength=0.35f;
+    auto smoothed=run(c,display,scene,historyCurve,clean);
+    expect(std::abs(smoothed[28].r-(curve[28].r+0.065f))<0.002f,"Consistent fit history did not smooth");
+    for(auto& p:historyCurve) p.r+=3.0f;
+    auto resetCurve=run(c,display,scene,historyCurve,clean);
+    expect(closeFloat(resetCurve[28].r,curve[28].r),"Changed response retained stale history");
+    // Fit and apply to PQ samples too, using the same linear-light reference.
+    c={}; c.Mode=1; c.Width=samples; c.Height=1;
+    auto displayPq=run(c,display,scene,display,clean);
+    auto expectedPq=run(c,editedDisplay,scene,display,clean);
+    c.Mode=7; c.Width=kDlssNrHdrCurveBins; c.WhitePoint=1;
+    auto pqCurve=run(c,displayPq,scene,clean,clean);
+    c.Mode=9; c.Width=samples; c.MaxRatio=2;
+    auto matchedPq=run(c,displayPq,scene,edits,pqCurve);
+    double pqError=0;
+    for(unsigned i=0;i<samples;++i)
+        if(scene[i].r>=0.1f && scene[i].r<=64.0f) pqError+=std::abs(matchedPq[i].r-expectedPq[i].r);
+    expect(pqError < 1.0,"HDR10 fitted transfer did not follow the reference tone curve");
+    puts("PASS: fitted HDR shoulder, local/flat fallback, neutral bypass, exposure, history and PQ transfer");
     std::puts("PASS: PQ reference luminance, HDR10 round trip, wide gamut, alpha, 2000-nit highlight (WARP)");
     std::puts("PASS: pre-SR residual transfer in SDR/scRGB/HDR10, signed edits, neutral bypass, exposure, invalid input");
     return 0;

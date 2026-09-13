@@ -1,6 +1,9 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "DLSSG_Dx12.h"
+#if defined(OPTISCALER_RTX40_MFG)
+#include "MfgUnlock.h"
+#endif
 
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
@@ -8,7 +11,6 @@
 
 #include <hooks/Reflex_Hooks.h>
 #include <hooks/Streamline_Hooks.h>
-#include "MfgUnlock.h"
 #include <hooks/DxgiFactory_Hooks.h>
 
 #include <magic_enum.hpp>
@@ -124,11 +126,17 @@ bool DLSSG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
         return false;
     }
 
+#if defined(OPTISCALER_RTX40_MFG)
+    MfgUnlock::TryApply();
+#endif
     sl::DLSSGState dlssgState {};
     sl::DLSSGOptions dlssgOptions {};
     if (StreamlineProxy::DLSSGGetState()(viewport, dlssgState, &dlssgOptions) == sl::Result::eOk)
     {
-        _maxInterpolationCount = std::max(dlssgState.numFramesToGenerateMax, MfgUnlock::UnlockedMax());
+        _maxInterpolationCount = dlssgState.numFramesToGenerateMax;
+#if defined(OPTISCALER_RTX40_MFG)
+        _maxInterpolationCount = std::max(_maxInterpolationCount, static_cast<int>(MfgUnlock::UnlockedMax()));
+#endif
         LOG_INFO("Max supported interpolations: {}", dlssgState.numFramesToGenerateMax);
 
         _supportsDMFG = dlssgState.bIsDynamicMFGSupported == sl::Boolean::eTrue;
@@ -238,11 +246,17 @@ bool DLSSG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmd
         }
     }
 
+#if defined(OPTISCALER_RTX40_MFG)
+    MfgUnlock::TryApply();
+#endif
     sl::DLSSGState dlssgState {};
     sl::DLSSGOptions dlssgOptions {};
     if (StreamlineProxy::DLSSGGetState()(viewport, dlssgState, &dlssgOptions) == sl::Result::eOk)
     {
-        _maxInterpolationCount = std::max(dlssgState.numFramesToGenerateMax, MfgUnlock::UnlockedMax());
+        _maxInterpolationCount = dlssgState.numFramesToGenerateMax;
+#if defined(OPTISCALER_RTX40_MFG)
+        _maxInterpolationCount = std::max(_maxInterpolationCount, static_cast<int>(MfgUnlock::UnlockedMax()));
+#endif
         LOG_INFO("Max supported interpolations: {}", dlssgState.numFramesToGenerateMax);
 
         _supportsDMFG = dlssgState.bIsDynamicMFGSupported == sl::Boolean::eTrue;

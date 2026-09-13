@@ -1,6 +1,10 @@
-#include <pch.h>
+﻿#include <pch.h>
 
 #include "Streamline_Hooks.h"
+#if defined(OPTISCALER_RTX40_MFG)
+#include <framegen/dlssg/MfgUnlock.h>
+#endif
+#include <dlssnr/DlssNr_StreamlinePicture.h>
 
 #include <Util.h>
 #include <Config.h>
@@ -1147,26 +1151,23 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 
     if (dlssgPotentiallyActive && state.streamlineVersion >= feature_version { 2, 7, 1 })
     {
-        // Before the read, so the count this captures is the patched one. Five stays under the
-        // sanity bound below.
+#if defined(OPTISCALER_RTX40_MFG)
         MfgUnlock::TryApply();
-
-        // nvngx_dlssg.dll can load after this runs, and the ceiling read before it does is Ada's
-        // 1. Caching that holds it for the session and clamps the override to it. ModuleFound
-        // means the patches have been attempted, so from there the answer is final either way.
-        const bool unlockPending = MfgUnlock::Pending();
+        if (const auto maximum = MfgUnlock::UnlockedMax(); maximum > 0)
+            state.dlssgMfgMax = std::max(state.dlssgMfgMax.value_or(0), static_cast<int>(maximum));
+#endif
 
         // Populate dlssgMfgMax once
-        if (!state.dlssgMfgMax.has_value() && !unlockPending)
+        if (!state.dlssgMfgMax.has_value()
+#if defined(OPTISCALER_RTX40_MFG)
+            && !MfgUnlock::Pending()
+#endif
+        )
         {
             sl::DLSSGState localState {};
             sl::DLSSGOptions localOptions {};
             if (o_slDLSSGGetState(viewport, localState, &localOptions) == sl::Result::eOk)
             {
-                // A wrapper ahead of the snippet can answer a lower ceiling than the patched one.
-                if (auto unlockedMax = MfgUnlock::UnlockedMax(); unlockedMax > localState.numFramesToGenerateMax)
-                    localState.numFramesToGenerateMax = unlockedMax;
-
                 if (localState.numFramesToGenerateMax > 0 && localState.numFramesToGenerateMax < 6)
                 {
                     state.dlssgMfgMax = localState.numFramesToGenerateMax;
@@ -1216,11 +1217,11 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport, sl::DLSSGState& state,
                                               const sl::DLSSGOptions* options)
 {
-    // Ahead of every read of numFramesToGenerateMax, which is the value the patch raises.
-    MfgUnlock::TryApply();
-
     sl::Result result {};
 
+#if defined(OPTISCALER_RTX40_MFG)
+    MfgUnlock::TryApply();
+#endif
     const auto originalStructVersion = state.structVersion;
     if (originalStructVersion < 4)
     {
@@ -1240,12 +1241,6 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
             state.numFramesToGenerateMax = newState.numFramesToGenerateMax;
             state.bReserved4 = newState.bReserved4;
             state.bIsVsyncSupportAvailable = newState.bIsVsyncSupportAvailable;
-
-            // nvngx_dlssg.dll answers the real ceiling, but a Streamline wrapper between here and the
-            // snippet can carry a lower one of its own. Publish the unlocked count. Struct version 1
-            // ends ahead of this field, so the raise stays inside this branch.
-            if (auto unlockedMax = MfgUnlock::UnlockedMax(); unlockedMax > state.numFramesToGenerateMax)
-                state.numFramesToGenerateMax = unlockedMax;
         }
 
         if (originalStructVersion >= 3)
@@ -1263,11 +1258,13 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
         if (result != sl::Result::eOk)
             return result;
         State::Instance().dlssgGameDMFGSupported = state.bIsDynamicMFGSupported == sl::eTrue;
-
-        // The wrapper's ceiling, replaced by the unlocked count.
-        if (auto unlockedMax = MfgUnlock::UnlockedMax(); unlockedMax > state.numFramesToGenerateMax)
-            state.numFramesToGenerateMax = unlockedMax;
     }
+
+#if defined(OPTISCALER_RTX40_MFG)
+    // Version 1 has no maximum-count field: retain its ABI boundary.
+    if (originalStructVersion >= 2)
+        state.numFramesToGenerateMax = std::max(state.numFramesToGenerateMax, MfgUnlock::UnlockedMax());
+#endif
 
     if (!State::Instance().dlssgGameDMFGSupported)
     {
@@ -1275,22 +1272,23 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
     }
 
     auto& optiState = State::Instance();
+#if defined(OPTISCALER_RTX40_MFG)
+    if (const auto maximum = MfgUnlock::UnlockedMax(); maximum > 0)
+        optiState.dlssgMfgMax = std::max(optiState.dlssgMfgMax.value_or(0), static_cast<int>(maximum));
+#endif
 
     if (optiState.streamlineVersion >= feature_version { 2, 7, 1 })
     {
-        // Provisional until the snippet has been seen. See the note in hkslDLSSGSetOptions.
-        const bool unlockPending = MfgUnlock::Pending();
-
-        if (!optiState.dlssgMfgMax.has_value() && !unlockPending)
+        if (!optiState.dlssgMfgMax.has_value()
+#if defined(OPTISCALER_RTX40_MFG)
+            && !MfgUnlock::Pending()
+#endif
+        )
         {
             sl::DLSSGState localState {};
             sl::DLSSGOptions localOptions {};
             if (o_slDLSSGGetState(viewport, localState, &localOptions) == sl::Result::eOk)
             {
-                // A wrapper ahead of the snippet can answer a lower ceiling than the patched one.
-                if (auto unlockedMax = MfgUnlock::UnlockedMax(); unlockedMax > localState.numFramesToGenerateMax)
-                    localState.numFramesToGenerateMax = unlockedMax;
-
                 if (localState.numFramesToGenerateMax > 0 && localState.numFramesToGenerateMax < 6)
                 {
                     optiState.dlssgMfgMax = localState.numFramesToGenerateMax;
@@ -1439,6 +1437,8 @@ void* StreamlineHooks::hkdlss_slGetPluginFunction(const char* functionName)
 
 void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
 {
+    if (auto* hook = DlssNr::StreamlinePicture::Wrap(functionName, o_dlssg_slGetPluginFunction))
+        return hook;
     // LOG_DEBUG("{}", functionName);
 
     if (strcmp(functionName, "slOnPluginLoad") == 0)

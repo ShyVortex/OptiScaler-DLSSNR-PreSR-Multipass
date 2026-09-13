@@ -2,11 +2,13 @@
 
 This fork builds on [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR) and [OptiScaler](https://github.com/optiscaler/OptiScaler). OptiScaler began with [PotatoOfDoom's CyberFSR2](https://github.com/PotatoOfDoom/CyberFSR2).
 
-Colour processing is derived from [RenoDX by clshortfuse](https://github.com/clshortfuse/renodx). See the [RenoDX attribution and licence](../Licenses/RenoDX_ATTRIBUTION.txt) for details.
+Colour processing derives from [clshortfuse's RenoDX](https://github.com/clshortfuse/renodx); see [attribution/licence](../Licenses/RenoDX_ATTRIBUTION.txt).
+
+Integrations include hhkbble's multipass/composition, [y4my4my4m's Vulkan work](NR-VULKAN.md) and [cmh1448's motion metadata](NR-MOTION-METADATA.md). Linked notes identify source commits and test limits.
+
+This variant restores the built-in [Ada MFG work and attribution](RTX40-MFG.md), derived from y4my4my4m and the earlier fork under GPL-3.0.
 
 ## OptiScaler contributors
-
-These credits are retained from the original OptiScaler README:
 
 - @PotatoOfDoom for CyberFSR2.
 - @Artur for DLSS Enabler and help with the NVNGX API.
@@ -21,6 +23,6 @@ This project uses [FreeType](https://gitlab.freedesktop.org/freetype/freetype), 
 
 ## Upstream sponsorship
 
-The original OptiScaler project credits [SignPath.io](https://signpath.io/) for Windows code signing and the [SignPath Foundation](https://signpath.org/) for its certificate.
+Upstream credits [SignPath.io](https://signpath.io/) for Windows code signing and the [SignPath Foundation](https://signpath.org/) for its certificate.
 
-To support the original developers: [cdozdil on GitHub Sponsors](https://github.com/sponsors/cdozdil?frequency=one-time) and [nitec on Buy Me a Coffee](https://buymeacoffee.com/nitec).
+Support upstream: [cdozdil](https://github.com/sponsors/cdozdil?frequency=one-time) and [nitec](https://buymeacoffee.com/nitec).

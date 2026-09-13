@@ -207,12 +207,6 @@ if exist %selectedFilename% (
 
 REM Wine doesn't support powershell
 :checkWine
-if /i %selectedFilename%=="d3d12.dll" (
-    echo WARNING: This proxy has a reported Streamline conflict that can grey out
-    echo Cyberpunk's Ray Reconstruction option. Try dxgi.dll or another compatible
-    echo proxy if that happens. Back up existing ReShade or other loaders first.
-    echo See INSTALL-DLSSNR.md for the confirmed upstream report.
-)
 reg query HKEY_CURRENT_USER\Software\Wine\DllOverrides >nul 2>&1
 if %errorlevel%==0 (
     echo.
@@ -412,74 +406,24 @@ echo.
 
 set setupSuccess=true
 
-REM --- DLSS 5 Neural Rendering ---------------------------------------------------------------
-REM The proprietary model/runtime cannot be redistributed here, so the user has to supply either
-REM NVIDIA's original build or the GPU-compatible community build. Hashing it here catches the
-REM Blackwell-only runtime on an older card before the game fails without an obvious explanation.
-echo.
-echo  ------------------------------------------------------------------
-echo   DLSS 5 Neural Rendering
-echo  ------------------------------------------------------------------
-echo.
-set "dlssnrStockHash=E16BCF15E16E13F527491CDF7845B2FE6521A738D8F7C9C721866A8496E1FC8E"
-set "dlssnrCrossGenHash=E67DEE209320CDAFE0E93E45675D7AA34323A53ACC57A72B2E40A181581C989A"
-set "dlssnrHash="
-if exist "nvngx_dlssnr.dll" for /f "skip=1 tokens=*" %%H in ('certutil -hashfile "nvngx_dlssnr.dll" SHA256') do if not defined dlssnrHash set "dlssnrHash=%%H"
-set "dlssnrHash=!dlssnrHash: =!"
-if exist "nvngx_dlssnr.dll" (
-    echo   nvngx_dlssnr.dll found here.
-    echo   SHA-256: !dlssnrHash!
+REM Neural Rendering is optional; install the model separately as documented in INSTALL-DLSSNR.md.
+if "%setupSuccess%"=="true" (
     echo.
-    if /i "!dlssnrHash!"=="!dlssnrCrossGenHash!" (
-        echo   ShortFuse cross-generation runtime detected.
-        echo   This build supports RTX 20, 30, 40, and 50 series GPUs.
-    ) else if /i "!dlssnrHash!"=="!dlssnrStockHash!" (
-        echo   Original NVIDIA 310.8 runtime detected.
-        echo   This file is for RTX 50. RTX 20, 30, and 40 users must replace
-        echo   it with ShortFuse's pinned cross-generation compatibility runtime.
-    ) else (
-        echo   WARNING: This runtime hash is not one documented by this release.
-        echo   Do not assume that it supports your GPU or came from a trusted source.
-    )
-) else (
-    echo   nvngx_dlssnr.dll was NOT found in this folder.
-    echo.
-    echo   Neural Rendering needs it, but it cannot be redistributed here.
-    echo   Copy the GPU-appropriate 310.8 runtime into THIS folder - the
-    echo   same one holding the game executable and the renamed OptiScaler.
-    echo.
-    echo   One copy per game. There is no shared or system-wide location.
+    echo Neural Rendering is off by default. See INSTALL-DLSSNR.md for the model runtime
+    echo and enable it in the OptiScaler overlay when the ordinary upscaler works.
+    echo NR uses OptiScaler, your nvngx_dlssnr.dll, and the installed NVIDIA driver.
+    echo No separate NR helper DLL is required or supplied.
 )
-echo.
-echo   Two similarly named files matter here, one character apart:
-echo.
-echo     nvngx.dll_dlssnr.dll   ships in this package  ^(about 13 KB^)
-echo     nvngx_dlssnr.dll       you supply it          ^(about 165 MB^)
-echo.
-echo   Runtime required by GPU:
-echo     RTX 50          original NVIDIA 310.8
-echo                     !dlssnrStockHash!
-echo     RTX 20/30/40    ShortFuse cross-generation 310.8
-echo                     !dlssnrCrossGenHash!
-echo.
-echo   Obtain the compatibility runtime only from ShortFuse's pinned thread
-echo   in the RenoDX Discord: https://discord.com/invite/renodx
-echo   Channel: dlss5-forum ^> Patched DLSS-NR for RTX20, RTX30, and RTX40
-echo.
-echo   The compatibility DLL is modified, so its NVIDIA signature does not
-echo   validate. Keep security protection on and verify the exact hash above.
-echo.
-echo   Neural Rendering is OFF by default. Turn it on in the OptiScaler
-echo   overlay under "DLSS Neural Rendering", or set Enabled=true under
-echo   the DlssNr section of OptiScaler.ini.
-echo.
-echo   RTX 20, 30, 40, and 50 are supported with the correct runtime.
-echo   Driver 616.56 or newer is required. Start with one pass on RTX 20/30.
-echo.
 
 :end
 pause
-exit /b 0
+
+if "%setupSuccess%"=="true" (
+    del "setup_linux.sh"
+    del "%~nx0"
+)
+
+exit /b
 
 :create_uninstaller
 setlocal DisableDelayedExpansion

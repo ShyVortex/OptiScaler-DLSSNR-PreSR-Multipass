@@ -1,8 +1,11 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "DlssNr_Vk.h"
+#include <dlssnr/DlssNrFeature_Vk.h>
 
 #include "precompile/DlssNr_Shader_Vk.h"
+#include "precompile/dlssnr_finished_color_Shader_Vk.h"
+#include <dlssnr/DlssNrFinished_Vk.h>
 
 #include <algorithm>
 #include <cstring>
@@ -95,12 +98,17 @@ DlssNr_Vk::DlssNr_Vk(std::string InName, VkDevice InDevice, VkPhysicalDevice InP
         return;
     }
 
+    std::vector<char> finishedCode(dlssnr_finished_color_spv, dlssnr_finished_color_spv + sizeof(dlssnr_finished_color_spv));
+    CreateComputePipeline(_device, _pipelineLayout, &_finishedPipeline, finishedCode);
     _init = true;
     LOG_INFO("DLSS-NR Vulkan pass up: {} constant slots, stride {}", kSlots, (uint64_t) _slotStride);
 }
 
 DlssNr_Vk::~DlssNr_Vk()
 {
+    _finished.reset();
+    _model.reset();
+    if (_finishedPipeline) vkDestroyPipeline(_device, _finishedPipeline, nullptr);
     if (_device == VK_NULL_HANDLE)
         return;
 
@@ -235,10 +243,10 @@ void DlssNr_Vk::WriteDescriptors(VkDescriptorSet set, VkDeviceSize constantOffse
 
 bool DlssNr_Vk::Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InConstants, uint32_t InThreadsX,
                          uint32_t InThreadsY, VkImageView InSource, VkImageView InModel, VkImageView InOriginal,
-                         VkImageView InMotion, VkImageView InTarget, VkImageView InKeep,
-                         VkImageLayout InSourceLayout, VkImageLayout InMotionLayout)
+                         VkImageView InMotion, VkImageView InTarget, VkImageView InKeep, VkImageLayout InSourceLayout,
+                         VkImageLayout InMotionLayout, bool finishedColor, uint32_t* immutableSlot)
 {
-    if (!CanRender() || InCmdList == VK_NULL_HANDLE)
+    if (!CanRender() || InCmdList == VK_NULL_HANDLE || (finishedColor && !_finishedPipeline))
         return false;
 
     if (InTarget == VK_NULL_HANDLE)
@@ -250,16 +258,21 @@ bool DlssNr_Vk::Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InCon
     if (!CreateDummy(InCmdList))
         return false;
 
-    const uint32_t slot = _slot;
-    _slot = (_slot + 1) % kSlots;
+    const bool reuse = immutableSlot && *immutableSlot != UINT32_MAX;
+    const uint32_t slot = reuse ? *immutableSlot : _slot;
+    if (!reuse)
+    {
+        _slot = (_slot + 1) % kSlots;
+        const VkDeviceSize offset = _slotStride * slot;
+        std::memcpy((char*) _mappedConstantBuffer + offset, &InConstants, sizeof(DlssNrConstants));
 
-    const VkDeviceSize offset = _slotStride * slot;
-    std::memcpy((char*) _mappedConstantBuffer + offset, &InConstants, sizeof(DlssNrConstants));
+        WriteDescriptors(_descriptorSets[slot], offset, InSource, InModel, InOriginal, InMotion, InTarget, InKeep,
+                         InSourceLayout, InMotionLayout);
+        if (immutableSlot)
+            *immutableSlot = slot;
+    }
 
-    WriteDescriptors(_descriptorSets[slot], offset, InSource, InModel, InOriginal, InMotion, InTarget, InKeep,
-                     InSourceLayout, InMotionLayout);
-
-    vkCmdBindPipeline(InCmdList, VK_PIPELINE_BIND_POINT_COMPUTE, _pipeline);
+    vkCmdBindPipeline(InCmdList, VK_PIPELINE_BIND_POINT_COMPUTE, finishedColor ? _finishedPipeline : _pipeline);
     vkCmdBindDescriptorSets(InCmdList, VK_PIPELINE_BIND_POINT_COMPUTE, _pipelineLayout, 0, 1, &_descriptorSets[slot], 0,
                             nullptr);
 
@@ -280,4 +293,62 @@ bool DlssNr_Vk::Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InCon
                          &barrier, 0, nullptr, 0, nullptr);
 
     return true;
+}
+
+VkImageInfo DlssNr_Vk::PrepareInput(VkCommandBuffer cmd, const VkImageInfo& nextOutput)
+{
+    if (!nextOutput.Image || !nextOutput.Width || !nextOutput.Height)
+        return {};
+    const bool resized = nextOutput.Width != _width || nextOutput.Height != _height || nextOutput.Format != _format;
+    if (resized && GetImage() != VK_NULL_HANDLE && vkDeviceWaitIdle(_device) != VK_SUCCESS)
+    {
+        LOG_ERROR("DLSS-NR Vulkan: device did not retire the previous intermediate");
+        return {};
+    }
+    if (!CreateImageResource(nextOutput.Width, nextOutput.Height, nextOutput.Format,
+                             VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+        return {};
+    if (resized)
+        _intermediateLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageInfo image { GetImageView(),    GetImage(),       { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+                        nextOutput.Format, nextOutput.Width, nextOutput.Height };
+    SetImageLayout(cmd, image.Image, _intermediateLayout, VK_IMAGE_LAYOUT_GENERAL, image.SubresourceRange);
+    _intermediateLayout = VK_IMAGE_LAYOUT_GENERAL;
+    return image;
+}
+
+bool DlssNr_Vk::Dispatch(VkCommandBuffer cmd, const VkImageInfo& colour, const VkImageInfo& depth,
+                         const VkImageInfo& motion, const VkImageInfo& output, const DlssNrFrameInfo_Vk& frame,
+                         VkInstance instance, VkImageLayout inputLayout, bool* modelRan)
+{
+    if (!CanRender() || !colour.Image || !output.Image || colour.Image == output.Image)
+        return false;
+
+    // Always produce the unmodified frame first. A missing model, retryable failure, or missing
+    // guides must leave the downstream pipeline a valid image. Compute copy needs only SAMPLED
+    // usage on the game's input, unlike a transfer copy.
+    SetImageLayout(cmd, colour.Image, inputLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, colour.SubresourceRange);
+    DlssNrConstants copy {};
+    copy.Mode = DlssNrMode_Downsample;
+    copy.Width = output.Width;
+    copy.Height = output.Height;
+    const bool copied = Dispatch(cmd, copy, output.Width, output.Height, colour.ImageView, VK_NULL_HANDLE,
+                                 VK_NULL_HANDLE, VK_NULL_HANDLE, output.ImageView, VK_NULL_HANDLE);
+    SetImageLayout(cmd, colour.Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, inputLayout, colour.SubresourceRange);
+    if (!copied)
+        return false;
+    if (!_model)
+        _model = std::make_unique<DlssNr::ModelVk>(*this);
+    const bool ran = _model->Evaluate(cmd, colour, depth, motion, output, frame, instance, _physicalDevice, _device, inputLayout);
+    if (modelRan) *modelRan = ran;
+    return true;
+}
+
+void DlssNr_Vk::CaptureFinished(VkCommandBuffer cmd, const VkImageInfo& depth, const VkImageInfo& motion,
+                                const DlssNrFrameInfo_Vk& frame, VkInstance instance)
+{
+    if (!CanRender()) return;
+    if (!_finished) _finished = std::make_unique<DlssNr::FinishedVk>(*this, _device, _physicalDevice);
+    _finished->Capture(cmd, depth, motion, frame, instance);
 }

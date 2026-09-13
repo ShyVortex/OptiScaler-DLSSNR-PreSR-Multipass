@@ -1,4 +1,4 @@
-// Runs the production SPIR-V encode/resolve on a real Vulkan device. No game or NR DLL needed.
+﻿// Runs the production SPIR-V encode/resolve on a real Vulkan device. No game or NR DLL needed.
 // cl /std:c++20 /EHsc /Iexternal/vulkan/include tests/nr_vulkan_shader_smoke.cpp
 //    /link OptiScaler/library/vulkan/vulkan-1.lib
 #include <vulkan/vulkan.h>
@@ -185,6 +185,48 @@ try
                     throw std::runtime_error("Pixel mismatch at " + std::to_string(x) + "," + std::to_string(y) + " got " + std::to_string(got));
             }
     std::cout << "PASS: production Vulkan encode/resolve, 1507x847 active inside 1536x864, RGBA preserved, padding untouched\n";
+    // Reuse two unchanged bindings for a 30-pass clamp chain, as the production model loop does.
+    constants.Mode = DlssNrMode_ClampProxy;
+    for (auto& uniform : uniforms) std::memcpy(uniform.mapped, &constants, sizeof(constants));
+    for (uint32_t pass=0; pass<2; ++pass)
+    {
+        VkDescriptorImageInfo source {sampler, images[pass ? 1 : 4].view, VK_IMAGE_LAYOUT_GENERAL};
+        VkDescriptorImageInfo target {sampler, images[pass ? 4 : 1].view, VK_IMAGE_LAYOUT_GENERAL};
+        VkWriteDescriptorSet writes[2] {};
+        for (auto& write : writes) { write.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; write.dstSet=sets[pass]; write.descriptorCount=1; }
+        writes[0].dstBinding=1; writes[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; writes[0].pImageInfo=&source;
+        writes[1].dstBinding=5; writes[1].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; writes[1].pImageInfo=&target;
+        vkUpdateDescriptorSets(device,2,writes,0,nullptr);
+    }
+    const VkClearColorValue inputs[] = {{{-0.2f,1.2f,0.3f,0.25f}}, {{INFINITY,-INFINITY,NAN,0.75f}}};
+    const VkClearColorValue expected[] = {{{0,1,0.3f,0.25f}}, {{0.5f,0.5f,0.5f,0.75f}}};
+    for (uint32_t sample=0; sample<2; ++sample)
+    {
+        check(vkResetCommandPool(device,commandPool,0));
+        check(vkBeginCommandBuffer(cmd,&begin));
+        vkCmdClearColorImage(cmd,images[4].image,VK_IMAGE_LAYOUT_GENERAL,&inputs[sample],1,&range);
+        memoryBarrier(VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+        vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,pipeline);
+        for (uint32_t pass=0; pass<30; ++pass)
+        {
+            vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,pipelineLayout,0,1,&sets[pass%2],0,nullptr);
+            vkCmdDispatch(cmd,(width+7)/8,(height+7)/8,1);
+            memoryBarrier(VK_ACCESS_SHADER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+        }
+        vkCmdCopyImageToBuffer(cmd,images[4].image,VK_IMAGE_LAYOUT_GENERAL,readback.buffer,1,&copy);
+        memoryBarrier(VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_HOST_READ_BIT);
+        check(vkEndCommandBuffer(cmd));
+        check(vkQueueSubmit(queue,1,&submit,VK_NULL_HANDLE)); check(vkQueueWaitIdle(queue));
+        for (uint32_t y=0; y<height; ++y)
+            for (uint32_t x=0; x<width; ++x)
+                for (uint32_t c=0; c<4; ++c)
+                {
+                    const float got=pixels[((size_t)y*allocationWidth+x)*4+c];
+                    if (!std::isfinite(got) || std::abs(got-expected[sample].float32[c])>0.0001f)
+                        throw std::runtime_error("Vulkan interpass clamp mismatch");
+                }
+    }
+    std::cout << "PASS: production Vulkan 30-pass clamp chain, finite RGB, bounded range, identity and alpha\n";
     vkDestroyCommandPool(device, commandPool, nullptr); vkDestroyDescriptorPool(device, pool, nullptr);
     vkDestroySampler(device, sampler, nullptr); vkDestroyPipeline(device, pipeline, nullptr);
     vkDestroyShaderModule(device, shader, nullptr); vkDestroyPipelineLayout(device, pipelineLayout, nullptr);

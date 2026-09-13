@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // The composition pass on Vulkan.
 //
@@ -25,14 +25,36 @@
 #include "SysUtils.h"
 #include <shaders/Shader_Vk.h>
 #include "DlssNr_Common.h"
+#include <memory>
+
+namespace DlssNr
+{
+class ModelVk;
+class FinishedVk;
+}
+
+// NGX's Vulkan guide wrappers also state whether the image supports storage access.
+// Keep that metadata alongside the shared frame properties when rebuilding explicit resources.
+struct DlssNrFrameInfo_Vk : DlssNrFrameInfo
+{
+    bool DepthReadWrite = false;
+    bool MotionReadWrite = false;
+    unsigned int ColorSubrectBaseX = 0;
+    unsigned int ColorSubrectBaseY = 0;
+};
 
 class DlssNr_Vk : public Shader_Vk
 {
     // Enough slots for several dispatches per frame across the frames that can be in flight. Encode
     // and resolve are two; the debug views and the exposure fetch are the others.
-    static constexpr uint32_t kSlotsPerFrame = 6;
-    static constexpr uint32_t kFramesInFlight = 3;
+    static constexpr uint32_t kSlotsPerFrame = 12;
+    static constexpr uint32_t kFramesInFlight = 4;
     static constexpr uint32_t kSlots = kSlotsPerFrame * kFramesInFlight;
+
+    std::unique_ptr<DlssNr::ModelVk> _model;
+    std::unique_ptr<DlssNr::FinishedVk> _finished;
+    VkPipeline _finishedPipeline = VK_NULL_HANDLE;
+    VkImageLayout _intermediateLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkDeviceSize _slotStride = 0;   // sizeof(DlssNrConstants), rounded up to the device's alignment
     uint32_t _slot = 0;             // next slot to hand out, wrapping
@@ -54,6 +76,18 @@ class DlssNr_Vk : public Shader_Vk
     DlssNr_Vk(std::string InName, VkDevice InDevice, VkPhysicalDevice InPhysicalDevice);
     ~DlssNr_Vk();
 
+    VkImageInfo PrepareInput(VkCommandBuffer cmd, const VkImageInfo& nextOutput);
+    void SetImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout before, VkImageLayout after,
+                        VkImageSubresourceRange range)
+    {
+        Shader_Vk::SetImageLayout(cmd, image, before, after, range);
+    }
+    bool Dispatch(VkCommandBuffer cmd, const VkImageInfo& colour, const VkImageInfo& depth, const VkImageInfo& motion,
+                  const VkImageInfo& output, const DlssNrFrameInfo_Vk& frame, VkInstance instance,
+                  VkImageLayout inputLayout = VK_IMAGE_LAYOUT_GENERAL, bool* modelRan = nullptr);
+    void CaptureFinished(VkCommandBuffer cmd, const VkImageInfo& depth, const VkImageInfo& motion,
+                         const DlssNrFrameInfo_Vk& frame, VkInstance instance);
+
     // One dispatch of the composition shader.
     //
     // Any of the four read views may be VK_NULL_HANDLE, in which case the dummy is bound; the two
@@ -71,5 +105,7 @@ class DlssNr_Vk : public Shader_Vk
                   uint32_t InThreadsY, VkImageView InSource, VkImageView InModel, VkImageView InOriginal,
                   VkImageView InMotion, VkImageView InTarget, VkImageView InKeep,
                   VkImageLayout InSourceLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                  VkImageLayout InMotionLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                  VkImageLayout InMotionLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, bool finishedColor = false,
+                  // Initialize to UINT32_MAX; identical bindings/constants within one model chain only.
+                  uint32_t* immutableSlot = nullptr);
 };

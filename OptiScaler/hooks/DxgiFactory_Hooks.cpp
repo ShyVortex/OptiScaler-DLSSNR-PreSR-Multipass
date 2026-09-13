@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "DxgiFactory_Hooks.h"
 #include "DxgiSwapchainSizing.h"
 
@@ -25,46 +25,212 @@
 #include <magic_enum.hpp>
 #endif
 
-static bool PrepareDx12InteropDesc(DXGI_SWAP_CHAIN_DESC& desc)
+static bool IsTearingSupported(IDXGIFactory* factory)
 {
+    if (factory == nullptr)
+        return false;
+
+    IDXGIFactory5* factory5 = nullptr;
+
+    if (FAILED(factory->QueryInterface(IID_PPV_ARGS(&factory5))))
+        return false;
+
+    BOOL supported = FALSE;
+
+    const HRESULT hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &supported, sizeof(supported));
+
+    factory5->Release();
+
+    return SUCCEEDED(hr) && supported == TRUE;
+}
+
+static bool PrepareDx12FlipFormat(DXGI_FORMAT& format)
+{
+    switch (format)
+    {
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        LOG_WARN("Dx11wDx12 converting R8G8B8A8_UNORM_SRGB to "
+                 "R8G8B8A8_UNORM for DX12 flip swapchain");
+        format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        return true;
+
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        LOG_WARN("Dx11wDx12 converting B8G8R8A8_UNORM_SRGB to "
+                 "B8G8R8A8_UNORM for DX12 flip swapchain");
+        format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        return true;
+
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+        return true;
+
+    default:
+        LOG_ERROR("Unsupported texture format for DX12 flip swapchain: {}", (UINT) format);
+        return false;
+    }
+}
+
+static bool PrepareDx12InteropDesc(DXGI_SWAP_CHAIN_DESC& desc, bool tearingSupported)
+{
+    // D3D12 swapchain backbuffers cannot be multisampled.
     if (desc.SampleDesc.Count > 1)
     {
-        LOG_WARN("Dx11wDx12 interop does not support MSAA swapchains!");
+        LOG_WARN("Dx11wDx12 interop does not support MSAA swapchains! SampleCount: {}", desc.SampleDesc.Count);
         return false;
     }
 
+    // Flip-model swapchains support a limited set of formats.
+    if (!PrepareDx12FlipFormat(desc.BufferDesc.Format))
+    {
+        LOG_WARN("Dx11wDx12 interop unsupported flip-model format: {}", (UINT) desc.BufferDesc.Format);
+        return false;
+    }
+
+    // Flip-model requires 2-16 buffers.
     if (desc.BufferCount < 2)
         desc.BufferCount = 2;
 
-    if (desc.SwapEffect == DXGI_SWAP_EFFECT_DISCARD)
+    if (desc.BufferCount > 16)
+    {
+        LOG_WARN("Dx11wDx12 interop invalid BufferCount: {}", desc.BufferCount);
+        return false;
+    }
+
+    // D3D12 supports flip-model swap effects only.
+    switch (desc.SwapEffect)
+    {
+    case DXGI_SWAP_EFFECT_DISCARD:
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    else if (desc.SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL)
+        break;
+
+    case DXGI_SWAP_EFFECT_SEQUENTIAL:
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        break;
+
+    case DXGI_SWAP_EFFECT_FLIP_DISCARD:
+    case DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL:
+        break;
+
+    default:
+        LOG_WARN("Dx11wDx12 interop unsupported SwapEffect: {}", (UINT) desc.SwapEffect);
+        return false;
+    }
 
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
-    desc.Windowed = TRUE;
+
+    // D3D12 swapchain backbuffers cannot expose UAV usage.
+    if (desc.BufferUsage & DXGI_USAGE_UNORDERED_ACCESS)
+    {
+        LOG_DEBUG("Dx11wDx12 removing DXGI_USAGE_UNORDERED_ACCESS from DX12 swapchain");
+        desc.BufferUsage &= ~DXGI_USAGE_UNORDERED_ACCESS;
+    }
+
+    // GDI-compatible swapchains are not applicable to the D3D12 interop path.
+    if (desc.Flags & DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE)
+    {
+        LOG_DEBUG("Dx11wDx12 removing DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE");
+        desc.Flags &= ~DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
+    }
+
+    // Keep the game's tearing intent when the system supports it.
+    if (!tearingSupported && (desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING))
+    {
+        LOG_DEBUG("Dx11wDx12 removing unsupported DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING");
+        desc.Flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    }
+
+    LOG_DEBUG("Dx11wDx12 DX12 desc: {}x{}, Format: {}, Count: {}, "
+              "Sample: {}/{}, Usage: {:X}, SwapEffect: {}, Flags: {:X}, "
+              "Windowed: {}, Refresh: {}/{}, Scaling: {}, Scanline: {}",
+              desc.BufferDesc.Width, desc.BufferDesc.Height, (UINT) desc.BufferDesc.Format, desc.BufferCount,
+              desc.SampleDesc.Count, desc.SampleDesc.Quality, desc.BufferUsage, (UINT) desc.SwapEffect, desc.Flags,
+              desc.Windowed, desc.BufferDesc.RefreshRate.Numerator, desc.BufferDesc.RefreshRate.Denominator,
+              (UINT) desc.BufferDesc.Scaling, (UINT) desc.BufferDesc.ScanlineOrdering);
+
     return true;
 }
 
-static bool PrepareDx12InteropDesc1(DXGI_SWAP_CHAIN_DESC1& desc)
+static bool PrepareDx12InteropDesc1(DXGI_SWAP_CHAIN_DESC1& desc, bool tearingSupported)
 {
+    // D3D12 swapchain backbuffers cannot be multisampled.
     if (desc.SampleDesc.Count > 1)
     {
-        LOG_ERROR("Dx11wDx12 interop does not support MSAA swapchains!");
+        LOG_WARN("Dx11wDx12 interop does not support MSAA swapchains! SampleCount: {}", desc.SampleDesc.Count);
+        return false;
+    }
+
+    if (!PrepareDx12FlipFormat(desc.Format))
+    {
+        LOG_WARN("Dx11wDx12 interop unsupported flip-model format: {}", (UINT) desc.Format);
         return false;
     }
 
     if (desc.BufferCount < 2)
         desc.BufferCount = 2;
 
-    if (desc.SwapEffect == DXGI_SWAP_EFFECT_DISCARD)
+    if (desc.BufferCount > 16)
+    {
+        LOG_WARN("Dx11wDx12 interop invalid BufferCount: {}", desc.BufferCount);
+        return false;
+    }
+
+    // Current interop wrapper does not explicitly handle stereo swapchains.
+    if (desc.Stereo)
+    {
+        LOG_WARN("Dx11wDx12 interop does not support stereo swapchains!");
+        return false;
+    }
+
+    switch (desc.SwapEffect)
+    {
+    case DXGI_SWAP_EFFECT_DISCARD:
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    else if (desc.SwapEffect == DXGI_SWAP_EFFECT_SEQUENTIAL)
+        break;
+
+    case DXGI_SWAP_EFFECT_SEQUENTIAL:
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        break;
+
+    case DXGI_SWAP_EFFECT_FLIP_DISCARD:
+    case DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL:
+        break;
+
+    default:
+        LOG_WARN("Dx11wDx12 interop unsupported SwapEffect: {}", (UINT) desc.SwapEffect);
+        return false;
+    }
 
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
+
+    if (desc.BufferUsage & DXGI_USAGE_UNORDERED_ACCESS)
+    {
+        LOG_DEBUG("Dx11wDx12 removing DXGI_USAGE_UNORDERED_ACCESS from DX12 swapchain");
+        desc.BufferUsage &= ~DXGI_USAGE_UNORDERED_ACCESS;
+    }
+
+    if (desc.Flags & DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE)
+    {
+        LOG_DEBUG("Dx11wDx12 removing DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE");
+        desc.Flags &= ~DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
+    }
+
+    if (!tearingSupported && (desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING))
+    {
+        LOG_DEBUG("Dx11wDx12 removing unsupported DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING");
+        desc.Flags &= ~DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    }
+
+    LOG_DEBUG("Dx11wDx12 DX12 desc1: {}x{}, Format: {}, Count: {}, "
+              "Sample: {}/{}, Usage: {:X}, SwapEffect: {}, Flags: {:X}, "
+              "Scaling: {}, AlphaMode: {}, Stereo: {}",
+              desc.Width, desc.Height, (UINT) desc.Format, desc.BufferCount, desc.SampleDesc.Count,
+              desc.SampleDesc.Quality, desc.BufferUsage, (UINT) desc.SwapEffect, desc.Flags, (UINT) desc.Scaling,
+              (UINT) desc.AlphaMode, desc.Stereo);
+
     return true;
 }
 
@@ -442,8 +608,9 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
                     IDXGISwapChain* fgSwapChain = nullptr;
                     IDXGISwapChain4* fgSwapChain4 = nullptr;
                     bool fgSwapChainIsRealFG = false;
+                    const bool tearingSupported = IsTearingSupported(realFactory);
 
-                    if (SUCCEEDED(realScResult) && PrepareDx12InteropDesc(fgDesc))
+                    if (SUCCEEDED(realScResult) && PrepareDx12InteropDesc(fgDesc, tearingSupported))
                     {
                         {
                             ScopedSkipFGSCCreation skipFGSCCreation {};
@@ -842,8 +1009,9 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
                     IDXGISwapChain1* fgSwapChain1 = nullptr;
                     IDXGISwapChain4* fgSwapChain4 = nullptr;
                     bool fgSwapChainIsRealFG = false;
+                    const bool tearingSupported = IsTearingSupported(realFactory);
 
-                    if (realScResult == S_OK && PrepareDx12InteropDesc1(fgDesc))
+                    if (realScResult == S_OK && PrepareDx12InteropDesc1(fgDesc, tearingSupported))
                     {
                         {
                             ScopedSkipFGSCCreation skipFGSCCreation {};

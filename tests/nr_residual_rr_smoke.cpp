@@ -1,4 +1,4 @@
-// WARP executes the shipped residual shader. No game or NVIDIA model is loaded.
+﻿// WARP executes the shipped residual shader. No game or NVIDIA model is loaded.
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
@@ -128,6 +128,22 @@ try
     result = run(c, base, model, history, motion);
     expect(closeFloat(result[0].r, 1.25f) && closeFloat(result[0].g, 1) && closeFloat(result[0].b, 2.5f),
            "Accumulation wrong");
+    // The restored host path composes at INPUT resolution, then lets the existing private
+    // upscaler enlarge its encoded difference. No extra strength or spatial enlargement here.
+    const auto accumulated = result;
+    DlssNrConstants compose {};
+    compose.Mode = DlssNrResidualMode_Apply;
+    compose.Width = 2; compose.Height = 1; compose.TransferStrength = 1;
+    result = run(compose, base, accumulated, history, motion);
+    expect(closeFloat(result[0].r, 11.25f) && closeFloat(result[0].g, 11) &&
+           closeFloat(result[0].b, 12.5f) && result[0].a == base[0].a,
+           "Accumulated edit was not preserved for private DLSS encoding");
+    c.ResidualHistoryValid = 0;
+    c.ResidualBlend = .08f;
+    result = run(c, base, model, accumulated, motion);
+    expect(closeFloat(result[0].r, .16f) && closeFloat(result[0].g, -.16f),
+           "Reset did not discard previous residual history at the release default blend");
+    c.ResidualHistoryValid = 1;
     c.ResidualBlend = 0;
     c.ResidualMotionBaseX = 1;
     history = { { 1, 1, 1, 1 }, { 3, 3, 3, 1 } };
@@ -147,7 +163,7 @@ try
     result = run(c, base, model, history, motion);
     for (unsigned i = 0; i < 4; ++i)
         expect(result[i].r == base[i].r && result[i].a == base[i].a, "Zero strength changed output");
-    std::puts("PASS: residual seam identity, cold/warm history, MV subrect, signed upscale, alpha and zero strength");
+    std::puts("PASS: residual seams, cold/warm/reset history, motion reprojection, input-resolution composition, alpha");
     return 0;
 }
 catch (const std::exception& e)

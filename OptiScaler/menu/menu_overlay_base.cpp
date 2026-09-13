@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "menu_overlay_base.h"
 #include "menu_common.h"
 
@@ -43,3 +43,5 @@ void MenuOverlayBase::Present() { MenuCommon::Present(); }
 void MenuOverlayBase::Shutdown() { MenuCommon::Shutdown(); }
 
 void MenuOverlayBase::HideMenu() { MenuCommon::HideMenu(); }
+
+void MenuOverlayBase::ApplyThemeStyle() { MenuCommon::ApplyThemeStyle(); }

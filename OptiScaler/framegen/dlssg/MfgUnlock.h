@@ -1,5 +1,6 @@
-// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
-#pragma once
+﻿#pragma once
+
+#if defined(OPTISCALER_RTX40_MFG)
 
 #include <SysUtils.h>
 
@@ -23,7 +24,7 @@
 //       jbe   accept
 //
 // Patched: the count immediates become 5, the cmovl becomes a nop, and the jl becomes two nops. The
-// result is a maximum of five generated frames -- 6X -- on any architecture.
+// result is a maximum of five generated frames -- 6X -- on supported Ada GPUs.
 //
 // Memory only. The file on disk carries an Authenticode signature and is left alone.
 //
@@ -49,7 +50,8 @@ struct Status
     std::string SnippetVersion; // file version of nvngx_dlssg.dll, empty if it could not be read
 };
 
-const Status& LastStatus();
+Status LastStatus();
+bool EnabledForSession();
 
 // Applies the patches once per process. Silent and harmless when the config option is off, when
 // nvngx_dlssg.dll is not loaded, or when a signature does not match exactly once.
@@ -59,3 +61,6 @@ bool Pending();
 // The generated frame ceiling the patches opened, or 0 when they did not land.
 unsigned int UnlockedMax();
 } // namespace MfgUnlock
+
+#endif
+

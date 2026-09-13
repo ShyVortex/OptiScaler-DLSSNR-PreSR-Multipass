@@ -1,93 +1,45 @@
-# Generate NR before SR; apply its contribution after SR
+# Generate early, apply later
 
-Experimental third placement mode. The contribution upscaler is **NVIDIA DLSS Super Resolution**,
-not a spatial filter, FSR or XeSS. The game's selected main upscaler is not changed automatically;
-select DLSS in the game/OptiScaler as well for a DLSS-on-both-branches comparison.
-
-## Enable
-
-Use v0.7.0 or a newer build containing this change (not v0.6.2). Under **DLSS Neural Rendering**, enable
-**Generate before SR, apply after SR (DLSS)**. It overrides, but does not erase, the existing
-**Apply before Super Resolution** checkbox. Or configure:
+Enable **Generate before upscale, apply after upscale**, then choose **Private NR upscaler**. NR edits an owned input copy; the game reconstructs its clean input. A private context enlarges only NR's contribution and applies it after SR/RR+SR. **Apply NR to the finished picture** moves composition after effects/HUD.
 
 ```ini
 [DlssNr]
 Enabled=true
 DeferredDLSS=true
+PrivateUpscaler=0
 WorkingScale=1.0
 Passes=1
 ```
 
-Keep **Apply model** on; turn off frame hold, debug/compare views and skin-mask preview. For a first
-comparison keep FG and RR off and use the same model profile, exposure and strengths. Model resolution
-is relative to the active render raster, not final output: 100% for a 1080p input runs NR at 1080p.
-Existing per-pass controls remain effective. The menu reports the private DLSS path separately.
+Model scale is relative to the active render input. NR evaluates every rendered frame. Start with one pass, **Apply model** on and inspection views off for comparison.
 
-An optional [half-rate residual FG experiment](RESIDUAL-FG-PROTOTYPE.md) adds every-other-frame
-NR with NVIDIA interpolation. It has additional latency, camera and downstream-effect limitations;
-the every-frame pipeline described below remains the default.
+| PrivateUpscaler | Backend |
+| --- | --- |
+| 0 (default) | DLSS; [private RR](NR-PRIVATE-RR.md) with compatible native RR guides, otherwise SR |
+| 1 | Linked FSR 2.2 |
+| 2 | Installed FidelityFX provider; FSR4 availability is not guaranteed |
+| 3 | XeSS, if its supported input range contains the carrier size |
 
-Requires your own working NVIDIA DLSS SR runtime and NVIDIA NR runtime. None is redistributed with
-this change. GPU/runtime support is determined by actual private DLSS creation/evaluation, not a GPU
-series whitelist. This mode is on the D3D12 seam, including the existing D3D11/Vulkan-to-D3D12 bridges.
-Native Vulkan skips NR with a diagnostic rather than silently substituting a different placement.
-Native RR retains its existing separate post-RR route; this experiment never edits RR's noisy inputs.
+Missing/invalid values select DLSS. Backends use independent parameters/history, unit exposure and no sharpening, auto-exposure or game masks. Selection never changes the game's upscaler or NR's own runtime requirements. FidelityFX provider choice is independent of the main pass override.
 
-## What it computes
+## Image path
 
-1. Copy only the active original colour rectangle to an owned UAV; do not edit the game's colour.
-2. Run the existing NR model/passes and low-resolution composition on that copy. The resulting
-   difference includes the existing intensity/colour/skin controls; they aren't applied twice.
-3. Encode `d = (NR-composed - original) / preExposure` as `0.5 + 0.5*d/(1+abs(d))` into an RGBA16F
-   carrier. Neutral grey means zero change; values below grey carry darkening, above grey brightening.
-4. Let the game's SR operate on the untouched colour. Then run a private DLSS SR feature on the carrier,
-   using separately allocated parameters and history, copied jitter/motion/depth data and unit exposure.
-   Calls go directly to the NVIDIA runtime, not back through OptiScaler's interception layer.
-5. Decode the enlarged carrier and add the signed edit to a copy of the clean final-resolution raster,
-   preserving its alpha. Copy back only after successful DLSS evaluation and composition.
+1. Copy the active colour to owned scratch and run NR/composition there. Strength and skin controls apply once.
+2. On source RR, [accumulate the signed edit with motion vectors](RESIDUAL-ACROSS-RR.md).
+3. For post-upscale application, encode `d = (edited - original) / preExposure` as `0.5 + 0.5*d/(1+abs(d))` in RGBA16F. For finished-picture application, encode bounded relative RGB log-gain instead.
+4. Enlarge the carrier using copied jitter, depth, motion and camera metadata. Restore borrowed guide states.
+5. Decode and compose with the clean output, preserving alpha. Finished-picture slots retain the edit/reference until presentation.
 
-This is not a separate physical lighting or shadow buffer. NR returns an edited RGB image; the layer
-is inferred from its difference to the original. The signed compression is deliberately experimental.
-DLSS sees biased/compressed data rather than natural colour and may smooth, distort or temporally
-destabilize it. FP16 carrier precision and the nonlinear inverse can amplify errors. The inverse is
-clamped to signed magnitude 0.999 before decoding (about 999 times pre-exposure); this prevents poles,
-but does not guarantee desirable brightness. Negative final RGB is clamped to zero. No promise of
-matching full-resolution NR or restoring the reported gun-rack shadows is made.
+The carrier is a compressed RGB difference, not a lighting buffer. Nonlinear decoding and FP16/temporal filtering can distort it. Decode clamps signed magnitude to 0.999; final RGB is nonnegative. Finished-picture transfer approximates the unavailable game tone mapping.
 
-## Failure and lifetime behaviour
+## Scheduling and limits
 
-- Unsupported layouts, non-zero subrect offsets, missing guides, allocation/runtime/evaluation failure
-  or unmatched before/after calls retain the clean main-SR result. No alternative residual upscaler runs.
-- Private creation and evaluation are separated by a submission epoch. Camera cuts, disabled/missed
-  frames and generation changes reset private history. Main-game parameters/handles are never edited.
-- Resolution/format/device/queue changes create a new generation. Retired histories, shaders and buffers
-  are released only after the last recorded GPU timestamp completion marker is visible. Completion slots
-  also limit outstanding work; retired generations are bounded, with clean-frame fallback under backlog.
-- Only one upscale per submission epoch and a known same-device direct queue are supported. Multi-view,
-  asynchronous-compute and unusual engine submission patterns require further work/testing.
-- If GPU work cannot be confirmed complete at shutdown, its generation is retained for process teardown
-  instead of releasing in-flight resources. A private runtime failure latches for its generation; restart
-  the game to retry reliably. Turning the option off restores the selected existing placement.
-- NR's existing GPU timer measures NR work, **not** the extra DLSS pass and final-resolution copies/
-  composition. Compare total frame time; this mode costs more than ordinary pre-SR NR and uses more VRAM.
+The private seam supports D3D12 and its bridges; early-to-finished composition supports D3D12/D3D11. Native Vulkan has no private adapter. One upscale per submission epoch and a known same-device direct queue are required; multi-view and unusual async submission need further work.
 
-## Validation
+Creation must be submitted before evaluation. Backend, size, format, device/queue, RR mode or destination changes create a new generation. Cuts, missed frames and generation changes reset history. Completion markers protect bounded retired generations; backlog, unsupported layouts/guides or runtime failures retain the clean frame. There is no automatic alternate-backend fallback. Restart is the reliable retry for a latched runtime failure.
 
-- Shared HLSL WARP smoke tests: signed shadow/brightening roundtrip, neutral identity, alpha preservation,
-  non-finite/overshoot guards and fixed unit exposure passed; existing skin-control tests also passed.
-- Headless RTX 5090 test using the installed NVIDIA NGX driver and an existing, signature-verified official
-  SR DLL: two distinct DLSS feature handles created, and 1080p carriers upscaled to 4K over eight frames.
-  Neutral samples stayed exactly 0.5; dark/neutral/bright band centres returned 0.25/0.5/0.75.
-- That hardware test uses synthetic static inputs and real DLSS, not an NR model, game injection or the
-  complete before/after hook. Moving-scene alignment, private-pass scheduling in games, FG compatibility,
-  visual quality and performance require separate live-game validation. Experimental builds have been
-  installed locally in BG3 and Jedi Survivor; see the residual FG notes for the newer tests.
+Unresolved teardown work survives until process exit. The private pass, copies and final composition add GPU/VRAM cost beyond NR's timer; smaller model input does not guarantee a faster frame.
 
-Reproduce from an x64 VS developer prompt:
+## Checks
 
-```bat
-cl /nologo /std:c++20 /EHsc /Iexternal\nvngx_dlss_sdk tests\nr_residual_dlss_smoke.cpp /Fe:x64\nr_residual_dlss_smoke.exe /Fo:x64\nr_residual_dlss_smoke.obj /link d3d12.lib dxgi.lib
-x64\nr_residual_dlss_smoke.exe "FULL PATH TO INSTALLED nvngx.dll" "DIRECTORY CONTAINING YOUR OFFICIAL nvngx_dlss.dll"
-```
-
-The test loads user-supplied local DLLs and does not download, redistribute or inject them into a game.
+Production-adapter hardware tests exercised two contexts, neutral/signed carriers, reset/history and guide-state restoration for DLSS, FSR 2.2, FidelityFX and XeSS. WARP checks cover carrier round trips, alpha and non-finite guards. These static checks do not establish motion quality or game scheduling. See [test commands](../tests/nr_private_upscaler_smoke.md), [GPU lifetime](NR-GPU-RETIREMENT.md) and [live results](NR-UPSTREAM-REVIEW.md).

@@ -1,5 +1,7 @@
-// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
+﻿// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
 #include "pch.h"
+
+#if defined(OPTISCALER_RTX40_MFG)
 
 #include "MfgUnlock.h"
 
@@ -8,13 +10,15 @@
 #include <Util.h>
 #include <scanner/scanner.h>
 #include <misc/IdentifyGpu.h>
+#include <mutex>
+
 
 
 namespace
 {
+
 // mov ebx,1 / mov r8d,3 / cmp edi,0x1b0 / cmovl r8d,ebx. The two counts and the architecture
-// constant together are unique in the module; the wildcards cover nothing, they are here only to
-// keep the shape readable.
+// constant together identify the legacy capability gate.
 constexpr std::string_view kAdvertisePattern = "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
 
 // cmp eax,0x1b0 / jl / cmp ebx,3 / jbe. The only comparison against the architecture constant that
@@ -75,6 +79,7 @@ uintptr_t FindDataBytes(HMODULE module, const uint8_t* needle, size_t length)
 }
 
 MfgUnlock::Status g_status {};
+std::recursive_mutex g_mutex;
 
 uintptr_t UniqueAddress(HMODULE module, std::string_view pattern)
 {
@@ -339,14 +344,14 @@ unsigned int RewriteBlackwellKernels(HMODULE module)
 
 void MfgUnlock::TryApply(HMODULE requestedModule)
 {
-    if (!Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
-        Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
-        State::Instance().externalFrameGeneration)
+    if (!EnabledForSession())
         return;
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     // The kernel retarget is Ada-specific. Do not patch Ampere/Turing or change Blackwell's working path.
     if (gpu.vendorId != VendorId::Nvidia || gpu.nvidiaArchInfo.architecture_id != NV_GPU_ARCHITECTURE_AD100)
         return;
+
+    std::lock_guard lock(g_mutex);
 
     // Latches once nvngx_dlssg.dll is present; before that every call rescans for it.
     static bool snippetDone = false;
@@ -370,15 +375,8 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
                 return;
             }
 
-            // Default on where it applies: below Blackwell the unlock alone produces frames that do
-            // not advance the picture, so the two belong together. dlssCapable is set from the same
-            // field, so an architecture that never reported leaves this off.
-            const bool preBlackwell = gpu.vendorId == VendorId::Nvidia &&
-                                      gpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_TU100 &&
-                                      gpu.nvidiaArchInfo.architecture_id <= NV_GPU_ARCHITECTURE_AD100;
-
-            if (Config::Instance()->FGDLSSGAdaBlackwellKernels.value_or(preBlackwell))
-                g_status.KernelsRewritten = RewriteBlackwellKernels(module);
+            // Retargeting and both gates form one feature; a count-only unlock repeats frames.
+            g_status.KernelsRewritten = RewriteBlackwellKernels(module);
 
             if (g_status.KernelsRewritten == 0)
             {
@@ -408,12 +406,26 @@ unsigned int MfgUnlock::UnlockedMax()
 
 bool MfgUnlock::Pending()
 {
-    if (!Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
-        Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
-        State::Instance().externalFrameGeneration || g_status.ModuleFound)
+    if (!EnabledForSession() || LastStatus().ModuleFound)
         return false;
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     return gpu.vendorId == VendorId::Nvidia && gpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_AD100;
 }
 
-const MfgUnlock::Status& MfgUnlock::LastStatus() { return g_status; }
+MfgUnlock::Status MfgUnlock::LastStatus()
+{
+    std::lock_guard lock(g_mutex);
+    return g_status;
+}
+
+bool MfgUnlock::EnabledForSession()
+{
+    // Latch before the first FG load/query. UI changes take effect on the next launch.
+    // Mutual exclusion: Ada unlock is disabled if Ampere unlock or external FG is enabled.
+    static const bool enabled = Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() &&
+                                !Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() &&
+                                !State::Instance().externalFrameGeneration;
+    return enabled;
+}
+
+#endif

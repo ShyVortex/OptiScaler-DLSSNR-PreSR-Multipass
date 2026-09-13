@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "SysUtils.h"
 #include <Config.h>
@@ -8,6 +8,8 @@
 #include "d3d12.h"
 
 #include <vector>
+
+using Microsoft::WRL::ComPtr;
 
 class DECLSPEC_UUID("23b064bb-482d-416c-93b1-829acedfb3d0") Dx11wDx12SC final : public IDXGISwapChain4
 {

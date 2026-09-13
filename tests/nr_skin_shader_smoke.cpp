@@ -1,4 +1,4 @@
-// Headless shader test: Windows D3D11 WARP executes the shared HLSL, no game or NR DLL.
+﻿// Headless shader test: Windows D3D11 WARP executes the shared HLSL, no game or NR DLL.
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
@@ -9,7 +9,9 @@
 #include <cstdio>
 #include <stdexcept>
 #include <cstddef>
+#include <DirectXPackedVector.h>
 #include "../OptiScaler/shaders/dlssnr/DlssNr_Common.h"
+#include "../OptiScaler/shaders/dlssnr/precompile/DlssNr_Shader.h"
 using Microsoft::WRL::ComPtr;
 struct Pixel { float r, g, b, a; };
 static void check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D call failed"); }
@@ -111,56 +113,86 @@ int wmain(int argc, wchar_t** argv) try {
     settings.Mode=DlssNrMode_UnitExposure; result=run();
     expect(result[0].r==1 && result[1].r==1, "Private DLSS exposure is not fixed at one");
     std::puts("PASS: signed residual, shadow/brightening roundtrip, neutral identity, alpha, overshoot, unit exposure");
-    const std::array<Pixel,2> currentMotion {{{1,0,0,1}, {INFINITY,0,0,1}}};
-    ctx->UpdateSubresource(original.Get(),0,nullptr,currentMotion.data(),sizeof(currentMotion),0);
-    settings.Mode=DlssNrMode_NormalizeMotion; settings.MvScaleX=0.5f; settings.MvScaleY=1;
-    result=run();
-    expect(result[0].r==0.5f && result[0].a==1 && result[1].r==65504 && result[1].a==0,
-           "Motion normalization / invalid sentinel failed");
-    const std::array<Pixel,2> normalized {{{0.5f,0,0,1}, {0.5f,0,0,1}}};
-    const std::array<Pixel,2> previousMotion {{{0.2f,0,0,1}, {0.1f,0,0,1}}};
-    ctx->UpdateSubresource(original.Get(),0,nullptr,normalized.data(),sizeof(normalized),0);
-    ctx->UpdateSubresource(model.Get(),0,nullptr,previousMotion.data(),sizeof(previousMotion),0);
-    settings.Mode=DlssNrMode_ComposeMotion; result=run();
-    expect(std::abs(result[0].r-0.6f)<0.0001f && result[0].a==1,
-           "Two-frame motion did not sample the previous field at the displaced position");
-    expect(result[1].r==65504 && result[1].a==0, "Offscreen history was silently clamped");
-    std::puts("PASS: motion normalization, displaced two-frame composition, invalid and offscreen history");
-    ctx->UpdateSubresource(original.Get(),0,nullptr,carrierBase.data(),sizeof(carrierBase),0);
-    ctx->UpdateSubresource(model.Get(),0,nullptr,carrier.data(),sizeof(carrier),0);
-    settings.Mode=DlssNrMode_ApplyInterpolatedResidual; settings.ExposurePreMul=2;
-    D3D11_TEXTURE2D_DESC flagDesc {}; flagDesc.Width=flagDesc.Height=flagDesc.MipLevels=flagDesc.ArraySize=1;
-    flagDesc.Format=DXGI_FORMAT_R8_UNORM; flagDesc.SampleDesc.Count=1;
-    flagDesc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-    unsigned char flag=1; D3D11_SUBRESOURCE_DATA flagData {&flag,1,0};
-    ComPtr<ID3D11Texture2D> flagTexture; ComPtr<ID3D11ShaderResourceView> flagSrv;
-    check(device->CreateTexture2D(&flagDesc,&flagData,&flagTexture));
-    check(device->CreateShaderResourceView(flagTexture.Get(),nullptr,&flagSrv));
-    ctx->CSSetShaderResources(4,1,flagSrv.GetAddressOf());
-    result=run(); expect(same(result[0],carrierBase[0]) && same(result[1],carrierBase[1]),
-                         "FG suppression did not preserve matching clean frame");
-    flag=0; ctx->UpdateSubresource(flagTexture.Get(),0,nullptr,&flag,1,0);
-    result=run(); expect(same(result[0],carrierEdit[0]) && same(result[1],carrierEdit[1]),
-                         "Allowed FG residual was not composed");
-    std::puts("PASS: rejected FG output preserves the clean frame");
-    DlssNrResidualHold hold;
-    expect(!hold.CanReuse(0), "Uninitialized hold was reused");
-    hold.SampleSucceeded(0);
-    expect(!hold.CanReuse(0) && hold.CanReuse(1) && !hold.CanReuse(2), "Hold exceeded two-frame cadence");
-    hold.Reset(); expect(!hold.CanReuse(1), "Cut/failure did not invalidate held residual");
-    hold.SampleSucceeded(5); expect(!hold.CanReuse(7), "Frame gap reused stale residual");
-    auto nextBase=carrierBase, nextExpected=carrierEdit;
-    for (unsigned i=0;i<2;++i) {
-        nextBase[i].r+=0.3f; nextBase[i].g+=0.3f; nextBase[i].b+=0.3f;
-        nextExpected[i].r+=0.3f; nextExpected[i].g+=0.3f; nextExpected[i].b+=0.3f;
+    // Intermediate NR answers must remain encoded, finite and bounded over a long chain.
+    settings.Mode=DlssNrMode_ClampProxy;
+    const std::array<Pixel,2> raw {{{-0.2f,1.2f,0.3f,0.25f}, {INFINITY,-INFINITY,NAN,0.75f}}};
+    const std::array<Pixel,2> bounded {{{0,1,0.3f,0.25f}, {0.5f,0.5f,0.5f,0.75f}}};
+    ComPtr<ID3D11ComputeShader> productionShader;
+    check(device->CreateComputeShader(DlssNr_cso,sizeof(DlssNr_cso),nullptr,&productionShader));
+    ctx->CSSetShader(productionShader.Get(),nullptr,0);
+    ctx->UpdateSubresource(original.Get(),0,nullptr,raw.data(),sizeof(raw),0);
+    for (int pass=0; pass<30; ++pass)
+    {
+        result=run();
+        expect(same(result[0],bounded[0]) && same(result[1],bounded[1]),
+               "Interpass clamp lost finite RGB, input range, identity or alpha");
+        ctx->UpdateSubresource(original.Get(),0,nullptr,result.data(),sizeof(result),0);
     }
-    ctx->UpdateSubresource(original.Get(),0,nullptr,nextBase.data(),sizeof(nextBase),0);
-    settings.Mode=DlssNrMode_ApplyResidual; result=run();
-    expect(same(result[0],nextExpected[0]) && same(result[1],nextExpected[1]),
-           "Held residual froze the raster instead of editing the next current frame");
-    settings.Mode=DlssNrMode_ZeroMotion; result=run();
-    expect(result[0].r==0 && result[0].g==0 && result[1].r==0 && result[1].g==0,
-           "Private reset-only motion guide was not zero");
-    std::puts("PASS: two-frame hold cadence, cut/gap invalidation, current-raster composition, zero guide");
+    std::puts("PASS: 30 interpass clamps, finite RGB, bounded range, encoded identity and alpha");
+    settings = {};
+    settings.Width=2; settings.Height=1; settings.Passthrough=1;
+    settings.Mode=DlssNrMode_EncodeProxyResidual;
+    ctx->UpdateSubresource(original.Get(),0,nullptr,base.data(),sizeof(base),0);
+    ctx->UpdateSubresource(model.Get(),0,nullptr,edited.data(),sizeof(edited),0);
+    result=run();
+    for (int i=0;i<2;++i)
+    {
+        const float difference=edited[i].r-base[i].r;
+        expect(std::abs(result[i].r-(.5f+.5f*difference/(1.0f/64+std::abs(difference))))<.0001f,
+               "Private enlargement proxy carrier encoding");
+    }
+    ctx->UpdateSubresource(model.Get(),0,nullptr,result.data(),sizeof(result),0);
+    settings.Mode=DlssNrMode_Resolve; settings.Transfer=2; settings.WhitePoint=1;
+    settings.ReversibleMode=2; settings.ApplyModel=1; settings.TransferStrength=settings.ColourStrength=1;
+    settings.MaxRatio=2;
+    result=run();
+    expect(same(result[0],edited[0]) && same(result[1],edited[1]), "DLSS carrier matched reconstruction");
+    const std::array<Pixel,2> neutralEnlargement {{{.5f,.5f,.5f,1},{.5f,.5f,.5f,1}}};
+    ctx->UpdateSubresource(model.Get(),0,nullptr,neutralEnlargement.data(),sizeof(neutralEnlargement),0);
+    result=run();
+    expect(same(result[0],base[0]) && same(result[1],base[1]), "Neutral DLSS carrier altered base detail");
+    const std::array<Pixel,2> hdrBase {{{2.0f,.3f,4.0f,1},{.02f,1.5f,.4f,1}}};
+    ctx->UpdateSubresource(original.Get(),0,nullptr,hdrBase.data(),sizeof(hdrBase),0);
+    settings.Passthrough=0;
+    result=run();
+    expect(same(result[0],hdrBase[0]) && same(result[1],hdrBase[1]), "Neutral DLSS carrier altered HDR base");
+    // Model edits in KCD2's pre-tonemap shadows were smaller than one carrier FP16 step.
+    // Exercise actual storage rounding between production encode and resolve, in both directions.
+    const std::array<Pixel,2> darkBase {{{.0002f,.0002f,.0002f,1},{.0002f,.0002f,.0002f,1}}};
+    const std::array<Pixel,2> darkEdit {{{.00035f,.00035f,.00035f,1},{.00008f,.00008f,.00008f,1}}};
+    ctx->UpdateSubresource(original.Get(),0,nullptr,darkBase.data(),sizeof(darkBase),0);
+    ctx->UpdateSubresource(model.Get(),0,nullptr,darkEdit.data(),sizeof(darkEdit),0);
+    settings.Passthrough=1; settings.Mode=DlssNrMode_EncodeProxyResidual;
+    result=run();
+    for (auto& pixel : result)
+        for (float* channel : {&pixel.r,&pixel.g,&pixel.b})
+            *channel=DirectX::PackedVector::XMConvertHalfToFloat(
+                DirectX::PackedVector::XMConvertFloatToHalf(*channel));
+    ctx->UpdateSubresource(model.Get(),0,nullptr,result.data(),sizeof(result),0);
+    settings.Mode=DlssNrMode_Resolve;
+    result=run();
+    for (int i=0;i<2;++i)
+        expect(std::abs(result[i].r-darkEdit[i].r)<.00001f &&
+               std::abs(result[i].g-darkEdit[i].g)<.00001f &&
+               std::abs(result[i].b-darkEdit[i].b)<.00001f,
+               "FP16 private enlargement erased shadow brightening or darkening");
+    std::puts("PASS: FP16 matched residual preserves shadow brightening and darkening");
+    ctx->UpdateSubresource(original.Get(),0,nullptr,base.data(),sizeof(base),0);
+    settings = {}; settings.Mode=DlssNrMode_ResizePrivateGuides;
+    settings.Width=settings.Height=1; settings.GuideWidth=1; settings.GuideHeight=1;
+    settings.DebugView=1; // Select the second depth sample through an active-region offset.
+    settings.TransferStrength=settings.ColourStrength=1; settings.CompareSwap=1;
+    settings.MvScaleX=2; settings.MvScaleY=3;
+    ctx->UpdateSubresource(model.Get(),0,nullptr,edited.data(),sizeof(edited),0);
+    result=run();
+    expect(std::abs(result[0].r-base[1].r)<.0001f, "Private depth active region resize");
+    ctx->CopyResource(readback.Get(),keep.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped {};
+    check(ctx->Map(readback.Get(),0,D3D11_MAP_READ,0,&mapped));
+    const auto velocity=*static_cast<const Pixel*>(mapped.pData);
+    ctx->Unmap(readback.Get(),0);
+    expect(std::abs(velocity.r-edited[1].r*2)<.0001f && std::abs(velocity.g-edited[1].g*3)<.0001f,
+           "Private motion active region or pixel scale");
+    std::puts("PASS: DLSS proxy carrier, matched reconstruction, neutral identity, depth/motion regions and scale");
     return 0;
 } catch (const std::exception& e) { std::fprintf(stderr,"FAIL: %s\n",e.what()); return 1; }

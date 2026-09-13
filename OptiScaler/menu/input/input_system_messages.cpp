@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "input_system_internal.h"
 
 #include <include/imgui/imgui.h>
@@ -219,16 +219,8 @@ void SetKeyDown(int vk, DWORD messageTime, bool blocked)
         key.Pressed = true;
         _state.LastPressedKey = vk;
 
-        // Only a real press can be a blocked press.
-        //
-        // Windows repeats WM_KEYDOWN while a key is held. If the menu opens mid-hold, those repeats
-        // arrive blocked and used to set BlockedDown on a key whose original press the game had
-        // already seen. The release is then suppressed as if the game had never heard the press --
-        // so the key stays held, and closing the menu does not clear it, because the release has
-        // already been thrown away.
-        //
-        // Recording it here, inside the transition, means BlockedDown answers the question it is
-        // actually asked: did the game miss the press this release belongs to?
+        // Only the real down transition can be a blocked press. Auto-repeat while the menu opens
+        // mid-hold must not steal the matching key-up from the game.
         if (blocked)
             key.BlockedDown = true;
     }
@@ -469,6 +461,9 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
 
     const bool isInputMessage = IsInputMessage(msg);
 
+    const bool blockMouse = ShouldBlockMouseInputLocked();
+    const bool blockKeyboard = ShouldBlockKeyboardInputLocked();
+
     if (isInputMessage)
     {
         if (source == InputMessageSource::WndProc)
@@ -482,7 +477,7 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
                               "blockMouse:{} blockKeyboard:{}",
                               InputMessageSourceName(source), WindowMessageName(msg), static_cast<unsigned>(msg),
                               static_cast<void*>(hwnd), static_cast<UINT64>(wParam), static_cast<UINT64>(lParam),
-                              _state.MenuVisible ? 1 : 0, _state.BlockMouse ? 1 : 0, _state.BlockKeyboard ? 1 : 0);
+                              _state.MenuVisible ? 1 : 0, blockMouse ? 1 : 0, blockKeyboard ? 1 : 0);
     }
 
     bool shouldBlock = false;
@@ -491,20 +486,30 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
     {
     case WM_SETFOCUS:
     {
+        const bool wasFocused = _state.Focused;
         _state.Focused = true;
+
+        if (!wasFocused)
+            HandleBlockingFocusGainLocked();
+
         break;
     }
 
     case WM_KILLFOCUS:
     {
+        const bool wasFocused = _state.Focused;
         _state.Focused = false;
+
+        if (wasFocused)
+            HandleBlockingFocusLossLocked();
+
         break;
     }
 
     case WM_MOUSEMOVE:
     {
         UpdateMousePositionFromClient(hwnd, lParam);
-        shouldBlock = _state.BlockMouse;
+        shouldBlock = blockMouse;
         break;
     }
 
@@ -520,11 +525,11 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
         UpdateMousePositionFromClient(hwnd, lParam);
 
         const int button = MouseMessageToButton(msg, wParam);
-        SetMouseDown(button, GetMessageTime(), _state.BlockMouse);
-        OPTIINPUT_LOG_VERBOSE("mouse down button:{} blocked:{} pos=({}, {})", button, _state.BlockMouse ? 1 : 0,
+        SetMouseDown(button, GetMessageTime(), blockMouse);
+        OPTIINPUT_LOG_VERBOSE("mouse down button:{} blocked:{} pos=({}, {})", button, blockMouse ? 1 : 0,
                               _state.MouseClientPos.x, _state.MouseClientPos.y);
 
-        shouldBlock = _state.BlockMouse;
+        shouldBlock = blockMouse;
         break;
     }
 
@@ -551,13 +556,13 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
         const SHORT delta = GET_WHEEL_DELTA_WPARAM(wParam);
         _state.MouseWheel += static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA);
 
-        shouldBlock = _state.BlockMouse;
+        shouldBlock = blockMouse;
         break;
     }
 
     case WM_MOUSEHWHEEL:
     {
-        shouldBlock = _state.BlockMouse;
+        shouldBlock = blockMouse;
         break;
     }
 
@@ -565,10 +570,10 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
     case WM_SYSKEYDOWN:
     {
         const int vk = NormalizeModifierVirtualKey(static_cast<int>(wParam), lParam);
-        SetKeyDown(vk, GetMessageTime(), _state.BlockKeyboard);
-        OPTIINPUT_LOG_VERBOSE("key down vk:{} blocked:{}", vk, _state.BlockKeyboard ? 1 : 0);
+        SetKeyDown(vk, GetMessageTime(), blockKeyboard);
+        OPTIINPUT_LOG_VERBOSE("key down vk:{} blocked:{}", vk, blockKeyboard ? 1 : 0);
 
-        shouldBlock = _state.BlockKeyboard;
+        shouldBlock = blockKeyboard;
         break;
     }
 
@@ -590,7 +595,7 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
         if (wParam >= 0x20 && wParam <= 0xFFFF)
             _state.TextInput.push_back(static_cast<wchar_t>(wParam));
 
-        shouldBlock = _state.BlockKeyboard;
+        shouldBlock = blockKeyboard;
         break;
     }
 
@@ -599,7 +604,7 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
         if (wParam != UNICODE_NOCHAR && wParam >= 0x20 && wParam <= 0xFFFF)
             _state.TextInput.push_back(static_cast<wchar_t>(wParam));
 
-        shouldBlock = wParam != UNICODE_NOCHAR && _state.BlockKeyboard;
+        shouldBlock = wParam != UNICODE_NOCHAR && blockKeyboard;
         break;
     }
 
@@ -616,30 +621,25 @@ bool HandleWindowMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, Inpu
                 Otherwise the same message may later reach WndProc and be parsed twice.
         */
 
-        const bool shouldParseRawInput =
-            source == InputMessageSource::WndProc || _state.BlockMouse || _state.BlockKeyboard;
+        const bool shouldParseRawInput = source == InputMessageSource::WndProc || blockMouse || blockKeyboard;
 
         bool mustReachGame = false;
 
         if (shouldParseRawInput)
             mustReachGame = HandleRawInputLocked(reinterpret_cast<HRAWINPUT>(lParam));
 
-        // Withhold the message, unless it carries a key release the game is owed.
-        //
-        // Content is neutralised in the GetRawInputData hook, per key, by the same decision taken
-        // above -- so letting one of these through does not leak input. What it does is give the
-        // game the chance to ask, which it never had while the whole message was being discarded.
-        shouldBlock = (_state.BlockMouse || _state.BlockKeyboard) && !mustReachGame;
-
+        // The GetRawInputData hook uses the cached sanitize decision made above. Keep WM_INPUT
+        // reachable only when it carries an owed release; all other blocked packets stay hidden.
+        shouldBlock = (blockMouse || blockKeyboard) && !mustReachGame;
         break;
     }
 
     default:
     {
         if (IsMouseMessage(msg))
-            shouldBlock = _state.BlockMouse;
+            shouldBlock = blockMouse;
         else if (IsKeyboardMessage(msg))
-            shouldBlock = _state.BlockKeyboard;
+            shouldBlock = blockKeyboard;
 
         break;
     }
@@ -744,7 +744,14 @@ LRESULT CALLBACK OptiInputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         return TRUE;
 
     if (handled)
+    {
+        // Foreground raw-input messages require DefWindowProc cleanup even when
+        // the application intentionally consumes the WM_INPUT.
+        if (msg == WM_INPUT && GET_RAWINPUT_CODE_WPARAM(wParam) == RIM_INPUT)
+            DefWindowProcW(hwnd, msg, wParam, lParam);
+
         return 0;
+    }
 
     if (originalWndProc != nullptr)
         return CallWindowProcW(originalWndProc, hwnd, msg, wParam, lParam);
@@ -787,6 +794,12 @@ bool ProcessRemovedMessage(MSG* msg)
 
     if (!handled)
         return false;
+
+    // Foreground raw-input messages require DefWindowProc cleanup. Since this
+    // queue message is being consumed before DispatchMessage, perform that
+    // cleanup here while the original WM_INPUT parameters are still intact.
+    if (msg->message == WM_INPUT && GET_RAWINPUT_CODE_WPARAM(msg->wParam) == RIM_INPUT)
+        DefWindowProcW(msg->hwnd, msg->message, msg->wParam, msg->lParam);
 
     // Important:
     // Let TranslateMessage generate WM_CHAR for ImGui text input before

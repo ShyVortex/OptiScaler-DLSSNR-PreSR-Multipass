@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "NvApiHooks.h"
 #include <dlssnr/DlssNrNative.h>
 #include <NvApiDriverSettings.h>
