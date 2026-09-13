@@ -446,7 +446,6 @@ release
 /.dependencies/
 /OptiScaler/streamline/
 
-.agents/
 .logs/
 
 # dlssg_sm86 files & local runtime experiments
