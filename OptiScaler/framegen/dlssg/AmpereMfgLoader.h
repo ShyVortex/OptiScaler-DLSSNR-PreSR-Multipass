@@ -87,7 +87,7 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     int validLogLevel = (logLevel >= 0 && logLevel <= 3) ? logLevel : 1;
 
     std::ostringstream ss;
-    ss << "; Native 0.2.3. Restart the game after changing this file.\n";
+    ss << "; Native 0.2.4. Restart the game after changing this file.\n";
     ss << "[Compatibility]\n";
     ss << "Router=" << validRouter << "\n";
     ss << "KernelImage=" << validKernel << "\n";
