@@ -143,16 +143,6 @@ bool OS_Vk::DispatchWithSize(VkCommandBuffer InCmdList, const VkImageInfo& InRes
     if (!_init || InCmdList == VK_NULL_HANDLE)
         return false;
 
-    // The resample sizes. Output Scaling and the Magnifier keep reading them from the current feature
-    // (unchanged). A Neural Rendering instance (_scalerOverride set) sizes from the passed images
-    // instead: NR's supersample up/down legs resample native<->super-native, nothing to do with the
-    // feature's render/display sizes. The group count below already uses OutResourceView.
-    const bool nr = _scalerOverride != Scaler::Count;
-    const uint32_t srcW = nr ? InResourceView.Width : State::Instance().currentFeature->TargetWidth();
-    const uint32_t srcH = nr ? InResourceView.Height : State::Instance().currentFeature->TargetHeight();
-    const uint32_t dstW = nr ? OutResourceView.Width : State::Instance().currentFeature->DisplayWidth();
-    const uint32_t dstH = nr ? OutResourceView.Height : State::Instance().currentFeature->DisplayHeight();
-
     // Update Constants
     FsrEasuCon(fsr1Constants.const0, fsr1Constants.const1, fsr1Constants.const2, fsr1Constants.const3,
                srcW, srcH, srcW, srcH, dstW, dstH);
