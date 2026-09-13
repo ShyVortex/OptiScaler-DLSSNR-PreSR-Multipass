@@ -877,9 +877,6 @@ class Config
     CustomOptional<bool> FGXeFGForceBorderless { false };
 
     // DLSSG
-#if defined(OPTISCALER_RTX40_MFG)
-    CustomOptional<bool> FGDLSSGAdaMfgUnlock { false }; // RTX 40 only; restart required
-#endif
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance
     CustomOptional<bool> FGDLSSGUseGamesReflexMarkers { true };
     CustomOptional<int, NoDefault>

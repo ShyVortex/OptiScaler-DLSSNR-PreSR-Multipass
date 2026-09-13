@@ -251,9 +251,6 @@ bool Config::Reload(std::filesystem::path iniPath)
         }
 
         {
-#if defined(OPTISCALER_RTX40_MFG)
-            FGDLSSGAdaMfgUnlock.set_from_config(readBool("DLSSG", "AdaMfgUnlock"));
-#endif
             FGDLSSGInterpolationCount.set_from_config(readInt("DLSSG", "InterpolationCount"));
             if (FGDLSSGInterpolationCount.has_value() &&
                 (FGDLSSGInterpolationCount.value() < 1 || FGDLSSGInterpolationCount.value() > 6))
@@ -1138,11 +1135,6 @@ bool Config::SaveIni()
     }
 
     {
-#if defined(OPTISCALER_RTX40_MFG)
-        ini.SetValue("DLSSG", "AdaMfgUnlock", GetBoolValue(Instance()->FGDLSSGAdaMfgUnlock.value_for_config()).c_str());
-#else
-        ini.Delete("DLSSG", "AdaMfgUnlock");
-#endif
         ini.SetValue("DLSSG", "InterpolationCount",
                      GetIntValue(Instance()->FGDLSSGInterpolationCount.value_for_config()).c_str());
         ini.SetValue("DLSSG", "UseGamesReflexMarkers",

@@ -7,7 +7,7 @@ int main()
 {
     using namespace AmpereMfgLoader;
 
-    // 1. Clamping of MaxGeneratedFrames: Native 0.2.3 requires strictly 1, 2, or 3
+    // 1. Clamping of MaxGeneratedFrames: Native 0.2.4 requires strictly 1, 2, or 3
     {
         // 0 (Runtime default in OptiScaler) must be clamped to 3 capability limit
         std::string ini0 = FormatIniContent(0, "PTX", 0, "SM86", 1);
@@ -72,7 +72,7 @@ int main()
         assert(fallback.find("Router=SM86") != std::string::npos);
     }
 
-    // 5. Logging Level: Default 1 in Native 0.2.3
+    // 5. Logging Level: Default 1 in Native 0.2.4
     {
         std::string defLog = FormatIniContent(3, "PTX", 0, "SM86");
         assert(defLog.find("Level=1") != std::string::npos);
@@ -141,7 +141,7 @@ int main()
         assert(fg2x.find("Level=1\n") != std::string::npos);
 
         std::string expected2x =
-            "; Native 0.2.3. Restart the game after changing this file.\n"
+            "; Native 0.2.4. Restart the game after changing this file.\n"
             "[Compatibility]\n"
             "Router=SM86\n"
             "KernelImage=PTX\n"

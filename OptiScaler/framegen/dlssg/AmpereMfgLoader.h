@@ -68,10 +68,10 @@ inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMax
     return false;
 }
 
-/// Formats dlssg_sm86.ini content with Native 0.2.3 specification and strict clamping.
+/// Formats dlssg_sm86.ini content with Native 0.2.4 specification and strict clamping.
 inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg, int hwBilinear = 0, const std::string& router = "SM86", int logLevel = 1)
 {
-    // Native 0.2.3 strictly requires: MaxGeneratedFrames must be 1, 2 or 3
+    // Native 0.2.4 strictly requires: MaxGeneratedFrames must be 1, 2 or 3
     if (maxFrames <= 0 || maxFrames > 3)
         maxFrames = 3;
 
