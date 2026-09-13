@@ -19,10 +19,10 @@ description: Architecture, frame generation, and safety rules for OptiScaler
 3. **Menu Subsection Placement**:
    - External FG mod controls and status indicators in `menu/menu_common.cpp` must be placed **before** the `if (state.externalFrameGeneration)` early return, ensuring users can always observe status and toggle settings even when External FG mode is active.
 
-4. **Preservation of SM75-SM86 MFG Unlocker Across Upstream Merges**:
-   - Upstream author (`wilsjo2`) removed / omitted the SM75-SM86 (Turing/Ampere) MFG unlocker in subsequent commits.
-   - When merging changes from upstream, the SM75-SM86 component and all related work must **NEVER** be removed, overwritten, disabled, or regressed.
-   - Always preserve:
+4. **Preservation of MFG Unlockers Across Upstream Merges**:
+   - Upstream author (`wilsjo2`) removed / omitted both the SM75-SM86 (Turing/Ampere) MFG unlocker and the Ada (RTX 40) MFG unlocker in subsequent commits.
+   - When merging changes from upstream, **both** MFG unlocker components and all related work must **NEVER** be removed, overwritten, disabled, or regressed.
+   - Always preserve **SM75-SM86 MFG Unlocker**:
      - `OptiScaler/framegen/dlssg/AmpereMfgLoader.h` and `AmpereMfgLoader.cpp`
      - Config declarations, parsing, saving, and defaults (`Config.h`, `Config.cpp`, `OptiScaler.ini`)
      - Linux 2X FG FSR Fallback (`AmpereMfgLoader::ShouldFallbackToFsrFg`, `dllmain.cpp`, `menu_common.cpp`)
@@ -30,11 +30,17 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - Menu UI section, sliders, and tonemapped status indicators (`menu_common.cpp`)
      - Packaging and build integration (`OptiScaler.vcxproj`, `OptiScaler.vcxproj.filters`, `package_release.ps1`, workflows)
      - Associated tests (`tests/dlssg_sm86_ini_smoke.cpp`, `tests/kernel_hooks_nvngx_dlssg_unit.cpp`)
+   - Always preserve **Ada (RTX 40) MFG Unlocker**:
+     - `OptiScaler/framegen/dlssg/MfgUnlock.h` and `MfgUnlock.cpp`
+     - Build flag `OptiScalerRtx40Mfg` must default to `true` in `OptiScaler.vcxproj` (defines `OPTISCALER_RTX40_MFG`)
+     - Config declarations (`FGDLSSGAdaMfgUnlock`, `FGDLSSGAdaBlackwellKernels` in `Config.h`, `Config.cpp`)
+     - All `#if defined(OPTISCALER_RTX40_MFG)` guarded code in `DLSSG_Dx12.cpp`, `Streamline_Hooks.cpp`, `LibraryLoad_Hooks.cpp`, `menu_common.cpp`
+     - INI entry `AdaMfgUnlock` in `OptiScaler.ini` (must not be stripped during packaging)
 
 5. **Permanent Workflow Branches & Integration Lifecycle**:
    - **`merge-upstream` (Permanent Branch)**:
      - Dedicated strictly to pulling and integrating upstream commits from `wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass`.
-     - Must always maintain the SM75–SM86 mod, configs, and Linux fallbacks without regression.
+     - Must always maintain both the SM75–SM86 mod and the Ada MFG unlocker, configs, and Linux fallbacks without regression.
    - **`dlssg-sm86` (Permanent Branch)**:
      - Dedicated to inspecting newer versions of the `dlssg_for_sm86` mod (by sdli1995), analyzing binary/INI differences, and updating OptiScaler loader/hooking integration.
    - **Standard 2-Step Workflow Sequence**:

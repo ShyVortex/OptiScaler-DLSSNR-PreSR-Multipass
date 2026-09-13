@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -305,11 +305,9 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <PropertyGroup>
-    <OptiScalerRtx40Mfg Condition="'$(OptiScalerRtx40Mfg)'==''">false</OptiScalerRtx40Mfg>
+    <OptiScalerRtx40Mfg Condition="'$(OptiScalerRtx40Mfg)'==''">true</OptiScalerRtx40Mfg>
   </PropertyGroup>
   <PropertyGroup Condition="'$(OptiScalerRtx40Mfg)'=='true'">
-    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)-RTX40-MFG\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)-RTX40-MFG\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(OptiScalerRtx40Mfg)'=='true'">
     <ClCompile>

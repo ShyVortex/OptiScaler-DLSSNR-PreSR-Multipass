@@ -10,13 +10,12 @@
 
 param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
-    [string]$Version = "v0.8.3",
+    [string]$Version = "v0.8.5",
     [switch]$SkipBuild,
     [switch]$IncludeDlssFrameGeneration,
     [switch]$AcceptNvidiaLicenses,
     [switch]$IncludeAmpereMfg,
     [switch]$AcceptAmpereMfgLicenses,
-    [switch]$EnableRtx40Mfg,
     [string]$HybridAssetsDirectory,
     [string]$StreamlineArchive
 )
@@ -26,7 +25,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSCommandPath
 $flavour = if ($IncludeDlssFrameGeneration) { '-with-dlss-fg' } else { '' }
 if ($IncludeAmpereMfg) { $flavour += '-with-sm86-mfg' }
-if ($EnableRtx40Mfg) { $flavour += '-rtx40-mfg' }
+
 $stage = "$root\release\$Version$flavour"
 $zip = "$root\release\OptiScaler-DLSSNR-$Version$flavour.zip"
 if ((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $zip)) {
@@ -72,7 +71,7 @@ if (-not $SkipBuild) {
         if ($err) { Write-Host "FAILED: $forwarderProj"; $err | Select-Object -First 6; exit 1 }
     }
 
-    $out = & $msb (Join-Path $root 'OptiScaler.sln') /p:Configuration=Release /p:Platform=x64 /p:PostBuildEventUseInBuild=false "/p:OptiScalerRtx40Mfg=$($EnableRtx40Mfg.IsPresent.ToString().ToLowerInvariant())" /v:minimal /m 2>&1
+    $out = & $msb (Join-Path $root 'OptiScaler.sln') /p:Configuration=Release /p:Platform=x64 /p:PostBuildEventUseInBuild=false /v:minimal /m 2>&1
     $err = $out | Select-String "error "
     if ($err) { Write-Host "FAILED: OptiScaler.sln"; $err | Select-Object -First 6; exit 1 }
     Write-Host "built"
@@ -228,10 +227,7 @@ $iniPath = "$stage\OptiScaler.ini"
 $ini = Get-Content $iniPath -Raw
 $ini = $ini -replace '(?m)^LogToFile=auto', 'LogToFile=true'
 $ini = $ini -replace '(?m)^LogLevel=auto', 'LogLevel=2'
-if (-not $EnableRtx40Mfg) {
-    $ini = $ini -replace '(?m)^; Experimental built-in RTX 40 MFG unlock[^\r\n]*\r?\n', ''
-    $ini = $ini -replace '(?m)^AdaMfgUnlock=[^\r\n]*\r?\n', ''
-}
+
 Set-Content $iniPath $ini -Encoding utf8 -NoNewline
 
 $check = Select-String -Path $iniPath -Pattern '^LogToFile=|^LogLevel=' | ForEach-Object { $_.Line }
@@ -253,7 +249,7 @@ if ($on) {
 }
 Write-Host "ini verified: nothing switched on by default"
 
-foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AdaMfgUnlock', 'AmpereMfgUnlock')) {
+foreach ($key in @('FinishedPicture', 'DeferredDLSS', 'ResidualFG', 'ResidualFGApproxCamera', 'UnlockPasses', 'AmpereMfgUnlock')) {
     if ($ini -match "(?mi)^$key=true\s*$") {
         throw "REFUSING: experimental option $key is enabled in the portable package"
     }
