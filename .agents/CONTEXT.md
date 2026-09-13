@@ -86,9 +86,28 @@ The mod by sdli1995 is a **standalone DLL proxy** (`version.dll` + `dlssg_sm86.i
 ## Upstream Fork & Merge Strategy
 - **Upstream Repository**: `https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass.git` (remote: `upstream`)
 - **Divergence Context**:
-  - After initially accepting PR #23 containing the SM75/SM86 MFG unlocker, upstream author `wilsjo2` excluded the SM75-SM86 mod component in later commits/branches (around v0.8.0–v0.8.3).
+  - After initially accepting PR #23 containing the SM75/SM86 MFG unlocker, upstream author `wilsjo2` excluded the SM75-SM86 mod component in later commits/branches (around v0.8.0–v0.8.3) due to NVIDIA DMCA concerns.
   - This repository (`ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass`) explicitly maintains and supports the Turing (SM75) and Ampere (SM86) MFG unlocker along with the Linux 2X FG FSR Fallback pipeline.
-- **Merge Mandate**:
-  - Upcoming changes, fixes, and features from `upstream` will continue to be merged into this repository.
-  - **CRITICAL**: Every merge from upstream MUST preserve and protect the SM75-SM86 mod and our Linux fixes without regressions or omissions. Never allow upstream's removal of SM75-SM86 files or configs to overwrite our tree.
+
+### Permanent Multi-Branch Architecture
+To safely manage upstream merges and mod evolution, three permanent branches are established:
+1. **`merge-upstream` (Permanent Upstream Ingestion Branch)**:
+   - Used to fetch and merge incoming commits/tags from `upstream` (`wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass`).
+   - Acts as the initial integration buffer where merge conflicts are resolved and verified, ensuring SM75–SM86 files, configs, and Linux fallbacks are preserved.
+2. **`dlssg-sm86` (Permanent Mod Tracking & Inspection Branch)**:
+   - Used to inspect newer releases/commits of `sdli1995/dlssg_for_sm86`.
+   - Used to diff proxy binaries, analyze configuration/INI adjustments, and update OptiScaler's `AmpereMfgLoader` / packaging integration.
+3. **`main` (Production Branch)**:
+   - Verified, deployable production branch where CI builds and release packaging take place.
+
+### Standard Integration Workflow
+1. **Step 1: Ingest Upstream into `merge-upstream`**:
+   - Check out `merge-upstream` and merge the desired commit/tag from `upstream`.
+   - Resolve any conflicts while strictly keeping all SM75–SM86 headers, source files, UI elements, and configs.
+   - Verify code compiles and unit tests pass (`g++ -std=c++20 tests/dlssg_sm86_ini_smoke.cpp`).
+2. **Step 2: Sync with `dlssg-sm86` and Promote to `main`**:
+   - Merge `merge-upstream` into `dlssg-sm86`.
+   - **Case A (Mod Updates Available)**: If a new `dlssg_for_sm86` release exists, inspect differences in `dlssg-sm86`, apply necessary updates to OptiScaler's loader/hooks, verify with tests, and merge `dlssg-sm86` into `main`.
+   - **Case B (No Mod Updates)**: If no mod updates are required, directly merge `merge-upstream` into `main`.
+
 

@@ -30,3 +30,16 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - Menu UI section, sliders, and tonemapped status indicators (`menu_common.cpp`)
      - Packaging and build integration (`OptiScaler.vcxproj`, `OptiScaler.vcxproj.filters`, `package_release.ps1`, workflows)
      - Associated tests (`tests/dlssg_sm86_ini_smoke.cpp`, `tests/kernel_hooks_nvngx_dlssg_unit.cpp`)
+
+5. **Permanent Workflow Branches & Integration Lifecycle**:
+   - **`merge-upstream` (Permanent Branch)**:
+     - Dedicated strictly to pulling and integrating upstream commits from `wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass`.
+     - Must always maintain the SM75–SM86 mod, configs, and Linux fallbacks without regression.
+   - **`dlssg-sm86` (Permanent Branch)**:
+     - Dedicated to inspecting newer versions of the `dlssg_for_sm86` mod (by sdli1995), analyzing binary/INI differences, and updating OptiScaler loader/hooking integration.
+   - **Standard 2-Step Workflow Sequence**:
+     1. **Step 1 (Upstream Ingestion)**: Merge new commits from `wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass` into `merge-upstream`. Verify integration correctness, compile tests (`dlssg_sm86_ini_smoke`), and ensure CI builds pass.
+     2. **Step 2 (Mod Synchronization & Main Promotion)**:
+        - Merge `merge-upstream` into `dlssg-sm86`.
+        - If there are updates to `dlssg_for_sm86`, inspect differences, adapt `AmpereMfgLoader` / INI generation, test, and then merge `dlssg-sm86` into `main`.
+        - If there are no updates to the mod, merge `merge-upstream` directly into `main`.
