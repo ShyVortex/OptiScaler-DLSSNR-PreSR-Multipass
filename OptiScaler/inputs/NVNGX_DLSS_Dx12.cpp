@@ -14,6 +14,9 @@
 #include "upscalers/dlss/DLSSFeature_Dx12.h"
 
 #include <framegen/nvngx/Nvngx_FG.h>
+#if defined(OPTISCALER_RTX40_MFG)
+#include <framegen/dlssg/MfgUnlock.h>
+#endif
 #include "FG/FSR3_Dx12_FG.h"
 #include "FG/Upscaler_Inputs_Dx12.h"
 
@@ -1169,6 +1172,18 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
 
         int frameCount = 0;
         InParameters->Get("DLSSG.MultiFrameCount", &frameCount);
+
+#if defined(OPTISCALER_RTX40_MFG)
+        if (MfgUnlock::EnabledForSession() && !State::Instance().dlssgMfgMax.has_value())
+            State::Instance().dlssgMfgMax = 5;
+#endif
+
+        if (cfg.FGDLSSGOverrideInterpolationCount.has_value())
+        {
+            frameCount = cfg.FGDLSSGOverrideInterpolationCount.value();
+            InParameters->Set("DLSSG.MultiFrameCount", frameCount);
+        }
+
         State::Instance().dlssgDetectedInterpolationCount = frameCount;
         ReflexHooks::setDlssgFrameCount(frameCount);
 

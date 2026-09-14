@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "NVNGX_Parameter.h"
 
@@ -839,6 +839,8 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
         else if (adaMfgActive)
         {
             countMax = 5;
+            if (!State::Instance().dlssgMfgMax.has_value())
+                State::Instance().dlssgMfgMax = 5;
         }
 #endif
         InParams->Set("DLSSG.MultiFrameCountMax", countMax);

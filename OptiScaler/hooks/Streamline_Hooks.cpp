@@ -1155,17 +1155,22 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
         MfgUnlock::TryApply();
         if (const auto maximum = MfgUnlock::UnlockedMax(); maximum > 0)
             state.dlssgMfgMax = std::max(state.dlssgMfgMax.value_or(0), static_cast<int>(maximum));
+        else if (MfgUnlock::EnabledForSession())
+            state.dlssgMfgMax = std::max(state.dlssgMfgMax.value_or(0), 5);
 #endif
 
         // Populate dlssgMfgMax once
         if (!state.dlssgMfgMax.has_value()
 #if defined(OPTISCALER_RTX40_MFG)
             && !MfgUnlock::Pending()
+            && !MfgUnlock::EnabledForSession()
 #endif
         )
         {
             sl::DLSSGState localState {};
+            localState.structVersion = 4;
             sl::DLSSGOptions localOptions {};
+            localOptions.structVersion = 3;
             if (o_slDLSSGGetState(viewport, localState, &localOptions) == sl::Result::eOk)
             {
                 if (localState.numFramesToGenerateMax > 0 && localState.numFramesToGenerateMax < 6)
@@ -1189,9 +1194,15 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
         {
             auto overrideCount = Config::Instance()->FGDLSSGOverrideInterpolationCount.value();
             if (overrideCount != 0)
+            {
                 newOptions.numFramesToGenerate = overrideCount;
+                ReflexHooks::setDlssgFrameCount(overrideCount);
+            }
             else if (!enableDynamicMode)
+            {
                 newOptions.mode = sl::DLSSGMode::eOff;
+                ReflexHooks::setDlssgFrameCount(0);
+            }
         }
     }
     else if (dlssgPotentiallyActive && Config::Instance()->FGDLSSGOverrideInterpolationCount.has_value() &&
@@ -1226,6 +1237,7 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
     if (originalStructVersion < 4)
     {
         sl::DLSSGState newState {};
+        newState.structVersion = 4;
 
         // We might be feeding a newer struct to an older SL but that seems to work just fine for this Get function
         result = o_slDLSSGGetState(viewport, dynamic_cast<sl::DLSSGState&>(newState), options);
@@ -1263,7 +1275,12 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
 #if defined(OPTISCALER_RTX40_MFG)
     // Version 1 has no maximum-count field: retain its ABI boundary.
     if (originalStructVersion >= 2)
-        state.numFramesToGenerateMax = std::max(state.numFramesToGenerateMax, MfgUnlock::UnlockedMax());
+    {
+        unsigned int unlocked = MfgUnlock::UnlockedMax();
+        if (unlocked == 0 && MfgUnlock::EnabledForSession())
+            unlocked = 5;
+        state.numFramesToGenerateMax = std::max(state.numFramesToGenerateMax, unlocked);
+    }
 #endif
 
     if (!State::Instance().dlssgGameDMFGSupported)
@@ -1275,6 +1292,8 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
 #if defined(OPTISCALER_RTX40_MFG)
     if (const auto maximum = MfgUnlock::UnlockedMax(); maximum > 0)
         optiState.dlssgMfgMax = std::max(optiState.dlssgMfgMax.value_or(0), static_cast<int>(maximum));
+    else if (MfgUnlock::EnabledForSession())
+        optiState.dlssgMfgMax = std::max(optiState.dlssgMfgMax.value_or(0), 5);
 #endif
 
     if (optiState.streamlineVersion >= feature_version { 2, 7, 1 })
@@ -1282,11 +1301,14 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
         if (!optiState.dlssgMfgMax.has_value()
 #if defined(OPTISCALER_RTX40_MFG)
             && !MfgUnlock::Pending()
+            && !MfgUnlock::EnabledForSession()
 #endif
         )
         {
             sl::DLSSGState localState {};
+            localState.structVersion = 4;
             sl::DLSSGOptions localOptions {};
+            localOptions.structVersion = 3;
             if (o_slDLSSGGetState(viewport, localState, &localOptions) == sl::Result::eOk)
             {
                 if (localState.numFramesToGenerateMax > 0 && localState.numFramesToGenerateMax < 6)
