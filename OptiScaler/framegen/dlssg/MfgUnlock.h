@@ -46,6 +46,7 @@ struct Status
     bool ModuleFound = false; // nvngx_dlssg.dll was loaded
     bool AdvertiseMatched = false;
     bool ValidateMatched = false;
+    bool ArchGatesPatched = false;
     unsigned int KernelsRewritten = 0;
     std::string SnippetVersion; // file version of nvngx_dlssg.dll, empty if it could not be read
 };
@@ -60,6 +61,9 @@ bool Pending();
 
 // The generated frame ceiling the patches opened, or 0 when they did not land.
 unsigned int UnlockedMax();
+
+// Directly patches architecture gate comparisons (0x1b0 -> 0x190) across executable sections.
+bool PatchArchGates(HMODULE module);
 } // namespace MfgUnlock
 
 #endif

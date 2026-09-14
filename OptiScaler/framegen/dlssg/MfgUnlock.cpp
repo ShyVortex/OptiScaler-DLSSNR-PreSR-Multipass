@@ -342,6 +342,61 @@ unsigned int RewriteBlackwellKernels(HMODULE module)
 }
 } // namespace
 
+bool MfgUnlock::PatchArchGates(HMODULE module)
+{
+    auto base = reinterpret_cast<uint8_t*>(module);
+    auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    auto section = IMAGE_FIRST_SECTION(nt);
+
+    std::vector<uint8_t*> sites;
+
+    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+    {
+        const auto& s = section[i];
+        if ((s.Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0)
+            continue;
+
+        uint8_t* start = base + s.VirtualAddress;
+        const size_t size = s.Misc.VirtualSize;
+        if (size < 6)
+            continue;
+
+        for (size_t off = 0; off + 6 <= size; ++off)
+        {
+            // 3D imm32: cmp eax, 0x1b0
+            if (start[off] == 0x3D && start[off + 1] == 0xB0 && start[off + 2] == 0x01 &&
+                start[off + 3] == 0x00 && start[off + 4] == 0x00)
+            {
+                sites.push_back(start + off + 1);
+                continue;
+            }
+            // 81 /7 imm32: cmp r32, 0x1b0 (ModR/M 0xF8..0xFF, covering all r32 and r8d..r15d)
+            if (start[off] == 0x81 && start[off + 1] >= 0xF8 && start[off + 1] <= 0xFF &&
+                start[off + 2] == 0xB0 && start[off + 3] == 0x01 && start[off + 4] == 0x00 &&
+                start[off + 5] == 0x00)
+            {
+                sites.push_back(start + off + 2);
+                continue;
+            }
+        }
+    }
+
+    if (sites.empty() || sites.size() > 8)
+        return false;
+
+    size_t rewritten = 0;
+    const uint8_t archAda = 0x90; // 0x190 AD10x
+    for (uint8_t* site : sites)
+    {
+        if (WriteBytes(reinterpret_cast<uintptr_t>(site), &archAda, 1))
+            ++rewritten;
+    }
+
+    LOG_INFO("MFG unlock: rewrote {} arch gate(s) (0x1b0 -> 0x190) in nvngx_dlssg.dll", rewritten);
+    return rewritten > 0;
+}
+
 void MfgUnlock::TryApply(HMODULE requestedModule)
 {
     if (!EnabledForSession())
@@ -368,30 +423,45 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
             const bool knownGates =
                 (UniqueAddress(module, kAdvertisePattern309) && UniqueAddress(module, kValidatePattern309)) ||
                 (UniqueAddress(module, kAdvertisePattern) && UniqueAddress(module, kValidatePattern));
-            if (!knownGates)
+
+            if (knownGates)
             {
-                LOG_WARN("MFG unlock: unsupported or ambiguous DLSSG {} signatures; left unchanged",
-                         g_status.SnippetVersion);
-                return;
+                // Retargeting and both gates form one feature; a count-only unlock repeats frames.
+                g_status.KernelsRewritten = RewriteBlackwellKernels(module);
+
+                if (g_status.KernelsRewritten == 0)
+                {
+                    LOG_WARN("MFG unlock: no compatible interpolation kernels; frame-count gates left unchanged");
+                    return;
+                }
+                const bool advertise = PatchAdvertise(module);
+                const bool validate = PatchValidate(module);
+                g_status.AdvertiseMatched = advertise;
+                g_status.ValidateMatched = validate;
+
+                if (advertise && validate)
+                    LOG_INFO("MFG unlock: nvngx_dlssg.dll patched for {} generated frames", kMaxGeneratedFrames);
+                else
+                    LOG_WARN("MFG unlock: nvngx_dlssg.dll incomplete, advertise {}, validate {}", advertise, validate);
             }
-
-            // Retargeting and both gates form one feature; a count-only unlock repeats frames.
-            g_status.KernelsRewritten = RewriteBlackwellKernels(module);
-
-            if (g_status.KernelsRewritten == 0)
-            {
-                LOG_WARN("MFG unlock: no compatible interpolation kernels; frame-count gates left unchanged");
-                return;
-            }
-            const bool advertise = PatchAdvertise(module);
-            const bool validate = PatchValidate(module);
-            g_status.AdvertiseMatched = advertise;
-            g_status.ValidateMatched = validate;
-
-            if (advertise && validate)
-                LOG_INFO("MFG unlock: nvngx_dlssg.dll patched for {} generated frames", kMaxGeneratedFrames);
             else
-                LOG_WARN("MFG unlock: nvngx_dlssg.dll incomplete, advertise {}, validate {}", advertise, validate);
+            {
+                // Fall back to robust arch gate scanning (mavismmg / RenoDX method for 310.9.1+ and newer DLLs)
+                if (PatchArchGates(module))
+                {
+                    g_status.AdvertiseMatched = true;
+                    g_status.ValidateMatched = true;
+                    g_status.ArchGatesPatched = true;
+                    g_status.KernelsRewritten = RewriteBlackwellKernels(module);
+                    LOG_INFO("MFG unlock: nvngx_dlssg.dll arch gates patched for {} generated frames (kernels rewritten: {})",
+                             kMaxGeneratedFrames, g_status.KernelsRewritten);
+                }
+                else
+                {
+                    LOG_WARN("MFG unlock: unsupported or ambiguous DLSSG {} signatures; left unchanged",
+                             g_status.SnippetVersion);
+                }
+            }
         }
     }
 }
@@ -399,6 +469,9 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
 unsigned int MfgUnlock::UnlockedMax()
 {
     const auto& status = LastStatus();
+
+    if (status.ArchGatesPatched && status.AdvertiseMatched && status.ValidateMatched)
+        return kMaxGeneratedFrames;
 
     return status.AdvertiseMatched && status.ValidateMatched && status.KernelsRewritten > 0
                ? kMaxGeneratedFrames : 0;
