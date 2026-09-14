@@ -380,7 +380,9 @@ bool DlssNr_Dx12::CreateBufferResource(ID3D12Device* device, ID3D12Resource* sou
     if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
         desc.DepthOrArraySize != 1 || desc.MipLevels != 1)
         return false;
-    desc.Flags = (desc.Flags | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) & ~D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
+    desc.Format = _state->TypedGuideFormat(desc.Format);
+    desc.Flags = (desc.Flags | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) &
+                 ~(D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
     if (_state->buffer != nullptr)
     {
         const auto previous = _state->buffer->GetDesc();
@@ -389,10 +391,39 @@ bool DlssNr_Dx12::CreateBufferResource(ID3D12Device* device, ID3D12Resource* sou
             return true;
         _state->ParkNrResource(_state->buffer);
     }
-    const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, state, nullptr,
-                                               IID_PPV_ARGS(&_state->buffer))))
+    D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    D3D12_HEAP_FLAGS heapFlags = D3D12_HEAP_FLAG_NONE;
+    if (FAILED(source->GetHeapProperties(&heapProps, &heapFlags)))
+    {
+        heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        heapFlags = D3D12_HEAP_FLAG_NONE;
+    }
+    else
+    {
+        heapFlags &= ~(D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_BUFFERS);
+    }
+
+    HRESULT hr = device->CreateCommittedResource(&heapProps, heapFlags, &desc, state, nullptr,
+                                                 IID_PPV_ARGS(&_state->buffer));
+    if (FAILED(hr))
+    {
+        if (heapProps.Type != D3D12_HEAP_TYPE_DEFAULT || heapFlags != D3D12_HEAP_FLAG_NONE)
+        {
+            heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+            heapFlags = D3D12_HEAP_FLAG_NONE;
+            hr = device->CreateCommittedResource(&heapProps, heapFlags, &desc, state, nullptr,
+                                                 IID_PPV_ARGS(&_state->buffer));
+        }
+    }
+
+    if (FAILED(hr))
+    {
+        LOG_ERROR("DlssNr_Dx12::CreateBufferResource failed! HRESULT: {:X}, Width: {}, Height: {}, Format: {}",
+                  (UINT64)hr, desc.Width, desc.Height, static_cast<uint32_t>(desc.Format));
         return false;
+    }
+    LOG_DEBUG("DlssNr_Dx12::CreateBufferResource succeeded: Width: {}, Height: {}, Format: {}",
+              desc.Width, desc.Height, static_cast<uint32_t>(desc.Format));
     _state->bufferState = state;
     return true;
 }

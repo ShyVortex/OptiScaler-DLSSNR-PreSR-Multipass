@@ -74,6 +74,15 @@ void RenderStatus(Config* config, float menuResScale)
                 ImGui::TextUnformatted("Restart the game to retry native Vulkan NR.");
             else if (ImGui::SmallButton("Retry"))
                 DlssNr::RetryAfterFailure();
+
+            if (!config->DlssNrRunBeforeSr.value_or_default() && strstr(reason, "display resolution") != nullptr)
+            {
+                if (ImGui::Button("Switch to Pre-SR (Generate model before upscale)"))
+                {
+                    config->DlssNrRunBeforeSr = true;
+                    DlssNr::RetryAfterFailure();
+                }
+            }
         }
         else if (feature && feature->Api() == API::DX11 && !feature->IsWithDx12())
         {
