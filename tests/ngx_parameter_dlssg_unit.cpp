@@ -58,12 +58,17 @@ void SimulateInitNGXParameters(
     FGNvngxReplacement activeFgNvngx,
     bool ampereMfgActive,
     int ampereMaxFrames,
-    bool isUnrealEngine = false)
+    bool isUnrealEngine = false,
+    bool adaMfgActive = false)
 {
+    // Mutual exclusion: Ada unlock is disabled if Ampere unlock is enabled
+    if (ampereMfgActive)
+        adaMfgActive = false;
+
     if ((api == API::DX12 || api == API::Vulkan) &&
         (activeFgInput == FGInput::DLSSG ||
          activeFgNvngx != FGNvngxReplacement::None ||
-         ampereMfgActive))
+         ampereMfgActive || adaMfgActive))
     {
         params.Set("FrameGeneration.Available", 1);
         params.Set("FrameGeneration.NeedsUpdatedDriver", 0);
@@ -84,6 +89,10 @@ void SimulateInitNGXParameters(
         else if (ampereMfgActive)
         {
             countMax = (ampereMaxFrames > 0 && ampereMaxFrames <= 3) ? ampereMaxFrames : 3;
+        }
+        else if (adaMfgActive)
+        {
+            countMax = 5;
         }
         params.Set("DLSSG.MultiFrameCountMax", countMax);
 
@@ -190,6 +199,47 @@ int main()
         assert(params.Get("FrameGeneration.MinDriverVersionMajor") == 10);
         assert(params.Get("FrameInterpolation.MinDriverVersionMajor") == 10);
         printf("  [PASS] Case 5: Unreal Engine quirks correctly applied for external FG\n");
+    }
+
+    // Case 6: Ada MFG Unlock active on DX12 (advertises max 5 frames for up to 6X MFG)
+    {
+        MockParams params;
+        SimulateInitNGXParameters(
+            params,
+            API::DX12,
+            FGInput::DLSSG,
+            FGNvngxReplacement::None,
+            /*ampereMfgActive=*/false,
+            /*ampereMaxFrames=*/0,
+            /*isUnrealEngine=*/false,
+            /*adaMfgActive=*/true);
+
+        assert(params.Get("FrameGeneration.Available") == 1);
+        assert(params.Get("FrameInterpolation.Available") == 1);
+        assert(params.Get("DLSSG.Available") == 1);
+        assert(params.Get("DLSSG.MultiFrameCountMax") == 5);
+        assert(params.Get("FrameGeneration.NeedsUpdatedDriver") == 0);
+        assert(params.Get("FrameGeneration.FeatureInitResult") == 1);
+        printf("  [PASS] Case 6: Ada MFG Unlock advertises DLSSG.MultiFrameCountMax = 5 (up to 6X)\n");
+    }
+
+    // Case 7: Mutual Exclusion - When AmpereMfgUnlock is active, Ada MFG is suppressed
+    {
+        MockParams params;
+        SimulateInitNGXParameters(
+            params,
+            API::DX12,
+            FGInput::NoFG,
+            FGNvngxReplacement::None,
+            /*ampereMfgActive=*/true,
+            /*ampereMaxFrames=*/2,
+            /*isUnrealEngine=*/false,
+            /*adaMfgActive=*/true); // Config might have both, but mutual exclusion suppresses Ada
+
+        assert(params.Get("DLSSG.Available") == 1);
+        // Must use Ampere max frames (2), NOT Ada max frames (5)
+        assert(params.Get("DLSSG.MultiFrameCountMax") == 2);
+        printf("  [PASS] Case 7: Mutual exclusion between Ampere and Ada MFG strictly enforced\n");
     }
 
     printf("[TEST] All NGX Frame Generation parameter unit tests passed successfully!\n");

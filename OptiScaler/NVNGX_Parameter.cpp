@@ -8,6 +8,10 @@
 #include <misc/IdentifyGpu.h>
 #include <framegen/nvngx/Nvngx_FG.h>
 
+#if defined(OPTISCALER_RTX40_MFG)
+#include <framegen/dlssg/MfgUnlock.h>
+#endif
+
 /// @brief Calculates the resolution scaling ratio override based on the provided quality level and current
 /// configuration.
 /// @param input The performance quality value (e.g. Quality, Balanced, Performance).
@@ -800,9 +804,14 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
     }
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+#if defined(OPTISCALER_RTX40_MFG)
+    const bool adaMfgActive = MfgUnlock::EnabledForSession();
+#else
+    const bool adaMfgActive = false;
+#endif
     if ((api == API::DX12 || api == API::Vulkan) && (State::Instance().activeFgInput == FGInput::DLSSG ||
                                                      State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                                                     ampereMfgActive))
+                                                     ampereMfgActive || adaMfgActive))
     {
         InParams->Set("FrameGeneration.Available", 1);
         InParams->Set("FrameGeneration.NeedsUpdatedDriver", 0);
@@ -826,6 +835,12 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
             int configuredFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
             countMax = (configuredFrames > 0 && configuredFrames <= 3) ? configuredFrames : 3;
         }
+#if defined(OPTISCALER_RTX40_MFG)
+        else if (adaMfgActive)
+        {
+            countMax = 5;
+        }
+#endif
         InParams->Set("DLSSG.MultiFrameCountMax", countMax);
 
         if (State::Instance().NVNGX_Engine == NVSDK_NGX_ENGINE_TYPE_UNREAL ||
