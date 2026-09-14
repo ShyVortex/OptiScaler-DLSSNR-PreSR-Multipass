@@ -33,6 +33,7 @@ Reference: official master `5ee53e38`. Each group states why its changed files a
 - `docs/NR-NATIVE-STREAMLINE-PRESENT.md`
 - `docs/NR-PHOTO-DIAGNOSTIC.md`
 - `docs/NR-PIPELINE-UI.md`
+- `docs/NR-PRESR-DIAGNOSTICS-FALLBACK.md`
 - `docs/NR-PRIVATE-RR.md`
 - `docs/NR-VULKAN.md`
 - `docs/PADDED-PRESR.md`
@@ -265,6 +266,7 @@ Reference: official master `5ee53e38`. Each group states why its changed files a
 - `tests/dlssnr_proxy/run.ps1`
 - `tests/dxgi_window_size_smoke.cpp`
 - `tests/nr_active_color_smoke.cpp`
+- `tests/nr_buffer_resource_unit.cpp`
 - `tests/nr_dx11_finished_bridge_smoke.cpp`
 - `tests/nr_finished_color_smoke.cpp`
 - `tests/nr_finished_queue_smoke.cpp`
@@ -273,12 +275,15 @@ Reference: official master `5ee53e38`. Each group states why its changed files a
 - `tests/nr_guides_smoke.cpp`
 - `tests/nr_ngx_routing_smoke.cpp`
 - `tests/nr_pipeline_capture_smoke.cpp`
+- `tests/nr_pipeline_setup_unit.cpp`
+- `tests/nr_placement_config_unit.cpp`
 - `tests/nr_private_upscaler_smoke.cpp`
 - `tests/nr_private_upscaler_smoke.md`
 - `tests/nr_residual_dlss_smoke.cpp`
 - `tests/nr_residual_rr_smoke.cpp`
 - `tests/nr_seam_clock_smoke.cpp`
 - `tests/nr_skin_shader_smoke.cpp`
+- `tests/nr_status_reporting_unit.cpp`
 - `tests/nr_streamline_picture_smoke.cpp`
 - `tests/nr_vulkan_shader_smoke.cpp`
 - `tests/run_nr_gpu_lifetime.ps1`
