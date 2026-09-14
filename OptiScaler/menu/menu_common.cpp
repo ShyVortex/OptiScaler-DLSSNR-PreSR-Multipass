@@ -3321,6 +3321,22 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Cubin: precompiled binary, requires exact physical SM match on Windows.\n"
                            "Save Settings and restart to apply.");
 
+            // Router Architecture combo
+            std::string resolvedAutoRouter = AmpereMfgLoader::ResolveRouter(static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id), primaryGpu.name, "Auto");
+            std::string autoRouterLabel = "Auto (" + resolvedAutoRouter + " on this GPU)";
+            const char* routerOptions[] = { autoRouterLabel.c_str(), "SM86 (RTX 30 series)", "SM75 (RTX 20 / GTX 16)" };
+            std::string currentRouter = config->FGDLSSGAmpereMfgRouter.value_or("Auto");
+            int routerIdx = (currentRouter == "SM86") ? 1 : (currentRouter == "SM75") ? 2 : 0;
+            if (ImGui::Combo("Router Architecture##sm86", &routerIdx, routerOptions, 3))
+            {
+                const char* storedRouterOptions[] = { "Auto", "SM86", "SM75" };
+                config->FGDLSSGAmpereMfgRouter = std::string(storedRouterOptions[routerIdx]);
+            }
+            ShowHelpMarker("Auto: automatically selects SM75 for Turing or SM86 for Ampere.\n"
+                           "SM86: Ampere route (RTX 30 series).\n"
+                           "SM75: Turing route (RTX 20 / GTX 16 series, or SM75 forward-PTX testing on RTX 3080 Ti).\n"
+                           "Save Settings and restart to apply.");
+
             // HardwareBilinear checkbox
             bool hwBilinear = config->FGDLSSGAmpereMfgHardwareBilinear.value_or_default();
             if (ImGui::Checkbox("Hardware Bilinear (approximate sampling)##sm86", &hwBilinear))
