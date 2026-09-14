@@ -112,9 +112,14 @@ inline bool IsAmpereArch(uint32_t archId)
     return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170);
 }
 
-/// Resolves router string ("SM75" or "SM86") based on architecture ID and GPU name.
-inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "")
+/// Resolves router string ("SM75" or "SM86") based on architecture ID, GPU name, and configured preference.
+inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "", const std::string& configuredRouter = "Auto")
 {
+    if (configuredRouter == "SM75" || configuredRouter == "sm75")
+        return "SM75";
+    if (configuredRouter == "SM86" || configuredRouter == "sm86")
+        return "SM86";
+
     if (IsTuringArch(archId))
         return "SM75";
     if (IsAmpereArch(archId))

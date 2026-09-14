@@ -86,6 +86,15 @@ bool Config::Reload(std::filesystem::path iniPath)
                 else
                     FGDLSSGAmpereMfgKernelImage.set_from_config("Auto");
             }
+            if (auto ampereRouter = readString("DLSSG", "AmpereMfgRouter"); ampereRouter.has_value())
+            {
+                if (lstrcmpiA(ampereRouter.value().c_str(), "sm75") == 0)
+                    FGDLSSGAmpereMfgRouter.set_from_config("SM75");
+                else if (lstrcmpiA(ampereRouter.value().c_str(), "sm86") == 0)
+                    FGDLSSGAmpereMfgRouter.set_from_config("SM86");
+                else
+                    FGDLSSGAmpereMfgRouter.set_from_config("Auto");
+            }
             FGDLSSGAmpereMfgHardwareBilinear.set_from_config(readBool("DLSSG", "AmpereMfgHardwareBilinear"));
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
@@ -1007,6 +1016,7 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgUnlock", GetBoolValue(ampereUnlock).c_str());
         ini.SetValue("DLSSG", "AmpereMfgMaxFrames", GetIntValue(Instance()->FGDLSSGAmpereMfgMaxFrames.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgKernelImage", Instance()->FGDLSSGAmpereMfgKernelImage.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgRouter", Instance()->FGDLSSGAmpereMfgRouter.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgHardwareBilinear", GetBoolValue(Instance()->FGDLSSGAmpereMfgHardwareBilinear.value_for_config()).c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";

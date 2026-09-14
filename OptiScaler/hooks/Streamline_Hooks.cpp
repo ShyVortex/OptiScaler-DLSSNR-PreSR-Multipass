@@ -332,7 +332,7 @@ static sl::Result dummy_slDLSSGSetOptions(const sl::ViewportHandle& viewport, co
 
 sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const char* functionName, void*& function)
 {
-    if (feature == sl::kFeatureDLSS_G)
+    if (!State::Instance().externalFrameGeneration && feature == sl::kFeatureDLSS_G)
     {
         if (strcmp(functionName, "slDLSSGSetOptions") == 0)
         {
@@ -1962,7 +1962,8 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
                         DetourAttach(&(PVOID&) o_slSetConstants, hkslSetConstants);
                 }
 
-                if (State::Instance().activeFgInput == FGInput::DLSSG)
+                const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+                if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive)
                 {
                     if (o_slIsFeatureSupported != nullptr)
                         DetourAttach(&(PVOID&) o_slIsFeatureSupported, hkslIsFeatureSupported);

@@ -788,6 +788,7 @@ class Config
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
     CustomOptional<int>  FGDLSSGAmpereMfgMaxFrames { 3 };       // 0-3: 0=runtime default (3X), 1=2X, 2=3X, 3=4X
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgKernelImage;     // Auto / PTX / Cubin
+    CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgRouter;          // Auto / SM86 / SM75
     CustomOptional<bool> FGDLSSGAmpereMfgHardwareBilinear { false };        // Optional approximate sampling (SM86 only)
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };

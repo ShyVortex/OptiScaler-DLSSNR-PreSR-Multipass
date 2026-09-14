@@ -123,12 +123,23 @@ int main()
         // Default fallback for unrecognized hardware
         assert(ResolveRouter(0, "") == "SM86");
 
+        // Explicit router configuration overrides hardware auto-detection
+        assert(ResolveRouter(0x00000170, "RTX 3080", "SM75") == "SM75");
+        assert(ResolveRouter(0x00000170, "RTX 3080", "sm75") == "SM75");
+        assert(ResolveRouter(0x00000160, "RTX 2070", "SM86") == "SM86");
+        assert(ResolveRouter(0x00000160, "RTX 2070", "sm86") == "SM86");
+        assert(ResolveRouter(0x00000170, "RTX 3080", "Auto") == "SM86");
+        assert(ResolveRouter(0x00000160, "RTX 2070", "Auto") == "SM75");
+
         // End-to-end INI output with router resolution
         std::string turingIni = FormatIniContent(3, "PTX", 0, ResolveRouter(0x160));
         assert(turingIni.find("Router=SM75") != std::string::npos);
 
         std::string ampereIni = FormatIniContent(3, "PTX", 0, ResolveRouter(0x170));
         assert(ampereIni.find("Router=SM86") != std::string::npos);
+
+        std::string forcedSm75Ini = FormatIniContent(3, "PTX", 0, ResolveRouter(0x170, "RTX 3080", "SM75"));
+        assert(forcedSm75Ini.find("Router=SM75") != std::string::npos);
     }
 
     // 9. Single-Frame (2X) DLSS Frame Generation exact INI verification

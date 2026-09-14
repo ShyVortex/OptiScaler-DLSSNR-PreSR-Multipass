@@ -40,8 +40,10 @@ std::string ResolveAutoKernelImage()
 
 std::string ResolveRouter()
 {
+    auto* cfg = Config::Instance();
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
-    return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name);
+    const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
+    return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter);
 }
 
 std::string GenerateIniContent()
