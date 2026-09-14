@@ -235,6 +235,7 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
 
     if (NeuralRendering && !specializedNr && !nrBeforeUpscale && Config::Instance()->DlssNrEnabled.value_or_default())
     {
+        LOG_DEBUG("IFeature_Dx12: Scheduling DLSS-NR post-upscale pass in pipeline");
         pipeline.push_back(MakeDlssNrPass(*NeuralRendering, Device, InCommandList, InParameters, false,
                                           GetFeatureFlags(), timingQueue, interop, rayReconstruction, submissionEpoch));
     }
@@ -290,9 +291,12 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
                                          rayReconstruction);
     if (nrBeforeUpscale)
     {
+        LOG_DEBUG("IFeature_Dx12: Evaluating DLSS-NR pre-SR input preparation");
         if (auto* nrInput = PrepareDlssNrInput(*NeuralRendering, Device, InCommandList, InParameters, GetFeatureFlags(),
                                                timingQueue, interop, rayReconstruction, submissionEpoch))
             SetUpscalerResource_Dx12(InParameters, NVSDK_NGX_Parameter_Color, nrInput);
+        else
+            LOG_WARN("IFeature_Dx12: PrepareDlssNrInput returned nullptr; continuing with original color");
     }
     if (diagnoseNr)
     {

@@ -408,6 +408,18 @@ void DlssNr_Dx12::SetBufferState(ID3D12GraphicsCommandList* cmdList, D3D12_RESOU
 ID3D12Resource* DlssNr_Dx12::Buffer() { return _state->buffer; }
 bool DlssNr_Dx12::CanRender() const { return _init && _state->buffer != nullptr; }
 
+void DlssNr_Dx12::ReportPipelineSkip(const char* reason)
+{
+    if (reason == nullptr || _state == nullptr)
+        return;
+    std::lock_guard ownersLock(nrOwnersMutex);
+    std::lock_guard stateLock(_state->mutex);
+    _state->ReportSkipOnce(reason);
+    if (_state->nr.reason.empty())
+        _state->nr.reason = reason;
+    _state->Publish();
+}
+
 bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmd, ID3D12Resource* colour, ID3D12Resource* depth,
                            ID3D12Resource* motion, ID3D12Resource* output, const DlssNrFrameInfo& frame,
                            ID3D12CommandQueue* queue)

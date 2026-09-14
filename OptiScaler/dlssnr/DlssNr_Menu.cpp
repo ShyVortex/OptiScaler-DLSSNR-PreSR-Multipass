@@ -25,7 +25,11 @@ void RenderMenu(Config* config, float menuResScale)
         const float toggleRight = ImGui::GetCursorPosX() + toggleWidth + toggleGap;
         bool enabled = config->DlssNrEnabled.value_or_default();
         if (PipelineUi::CheckboxWrapped("Enable Neural Rendering", &enabled, toggleWidth))
+        {
             config->DlssNrEnabled = enabled;
+            if (enabled && !config->DlssNrRunBeforeSr.has_value())
+                config->DlssNrRunBeforeSr = true;
+        }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip(
                 "Enable NR processing.");

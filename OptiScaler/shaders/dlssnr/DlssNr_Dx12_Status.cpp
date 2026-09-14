@@ -54,7 +54,7 @@ auto DlssNr_Dx12::State::Publish() -> void
     DlssNr::PublishStatus(
         &shader, DlssNr::Backend::Dx12,
         { !nr.failed && modelRunning && enlargementStatus.empty(),
-          nr.failed ? nr.reason : enlargementStatus,
+          !nr.reason.empty() ? nr.reason : enlargementStatus,
           lastGpuTime,
           frames,
           { nr.exposureFrames, nr.exposureOfferedNow, nr.exposureEverOffered, nr.gameExposure, nr.gamePreExposure },

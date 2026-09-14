@@ -258,8 +258,8 @@ class Config
     // an undocumented feature driven directly through its snippet, not something NVIDIA exposes.
     CustomOptional<bool> DlssNrEnabled { false };
     // Run the NR pass on the upscaler's colour input, at render resolution, immediately before SR.
-    // Off preserves the v0.2.0 post-upscale placement.
-    CustomOptional<bool> DlssNrRunBeforeSr { false };
+    // Off uses post-upscale placement. Default is true (Pre-SR).
+    CustomOptional<bool> DlssNrRunBeforeSr { true };
     CustomOptional<bool> DlssNrFinishedPicture { false };
     // Fit the scene-to-finished HDR luminance response for early-generated residuals. Opt-in.
     CustomOptional<bool> DlssNrHdrTransfer { false };

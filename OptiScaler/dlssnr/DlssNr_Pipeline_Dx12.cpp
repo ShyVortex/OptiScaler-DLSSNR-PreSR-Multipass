@@ -147,16 +147,52 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &frame.MotionSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, &frame.MotionSubrectBaseY);
 
+    LOG_DEBUG("MakeDlssNrPass: beforeUpscale={}, supportedSubrects={}, color={}, depth={}, motion={}, exposure={}, output={}",
+              beforeUpscale, supportedSubrects, (void*) color, (void*) depth, (void*) motion, (void*) exposure, (void*) finalOutput);
+
     return {
         [=, &shader](ID3D12Resource* nextOutput) -> ID3D12Resource*
         {
-            if (!supportedSubrects || !Config::Instance()->DlssNrEnabled.value_or_default() || !shader.IsInit() ||
-                depth == nullptr || motion == nullptr || nextOutput == nullptr)
+            if (!Config::Instance()->DlssNrEnabled.value_or_default())
                 return nullptr;
+            if (!shader.IsInit())
+            {
+                LOG_WARN("DLSS-NR pass setup skipped: shader compute pipeline is not initialized");
+                shader.ReportPipelineSkip("the Neural Rendering shader is not initialized");
+                return nullptr;
+            }
+            if (!supportedSubrects)
+            {
+                LOG_WARN("DLSS-NR pass setup skipped: unsupported subrect offsets");
+                shader.ReportPipelineSkip("subrect offsets are unsupported by DLSS-NR");
+                return nullptr;
+            }
+            if (depth == nullptr)
+            {
+                LOG_WARN("DLSS-NR pass setup skipped: depth resource is null");
+                shader.ReportPipelineSkip("depth resource is missing");
+                return nullptr;
+            }
+            if (motion == nullptr)
+            {
+                LOG_WARN("DLSS-NR pass setup skipped: motion-vector resource is null");
+                shader.ReportPipelineSkip("motion-vector resource is missing");
+                return nullptr;
+            }
+            if (nextOutput == nullptr)
+            {
+                LOG_WARN("DLSS-NR pass setup skipped: nextOutput resource is null");
+                shader.ReportPipelineSkip("output target resource is null");
+                return nullptr;
+            }
             if (beforeUpscale)
                 return color;
             if (!shader.CreateBufferResource(device, nextOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+            {
+                LOG_ERROR("DLSS-NR post-upscale pass setup failed: CreateBufferResource failed on output buffer");
+                shader.ReportPipelineSkip("the post-upscale intermediate buffer could not be allocated");
                 return nullptr;
+            }
             shader.SetBufferState(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             return shader.Buffer();
         },
@@ -219,14 +255,35 @@ ID3D12Resource* PrepareDlssNrInput(DlssNr_Dx12& shader, ID3D12Device* device, ID
                                    uint64_t submissionEpoch)
 {
     auto* color = NrResource(parameters, NVSDK_NGX_Parameter_Color, "DLSSD.Color");
-    if (color == nullptr || !shader.IsInit() || !DlssNr::CanRunBeforeUpscale_Dx12(parameters) ||
-        !Config::Instance()->DlssNrEnabled.value_or_default())
+    if (!Config::Instance()->DlssNrEnabled.value_or_default())
         return nullptr;
+    if (color == nullptr)
+    {
+        LOG_WARN("DLSS-NR pre-SR input skipped: color resource is null");
+        shader.ReportPipelineSkip("color resource is missing for pre-SR NR");
+        return nullptr;
+    }
+    if (!shader.IsInit())
+    {
+        LOG_WARN("DLSS-NR pre-SR input skipped: shader compute pipeline is not initialized");
+        shader.ReportPipelineSkip("the Neural Rendering shader is not initialized");
+        return nullptr;
+    }
+    if (!DlssNr::CanRunBeforeUpscale_Dx12(parameters))
+    {
+        LOG_WARN("DLSS-NR pre-SR input skipped: CanRunBeforeUpscale_Dx12 returned false");
+        shader.ReportPipelineSkip("input dimensions or subrects are invalid for pre-SR NR");
+        return nullptr;
+    }
     const auto desc = color->GetDesc();
     if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
         desc.DepthOrArraySize != 1 || desc.MipLevels != 1 ||
         !shader.CreateBufferResource(device, color, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+    {
+        LOG_ERROR("DLSS-NR pre-SR input failed: CreateBufferResource failed for color buffer");
+        shader.ReportPipelineSkip("the pre-SR intermediate buffer could not be allocated");
         return nullptr;
+    }
 
     ShaderPipeline_Dx12 pipeline;
     pipeline.push_back(MakeDlssNrPass(shader, device, commandList, parameters, true, featureFlags, timingQueue, interop,
@@ -234,5 +291,7 @@ ID3D12Resource* PrepareDlssNrInput(DlssNr_Dx12& shader, ID3D12Device* device, ID
     SetupShaderPipeline(pipeline, shader.Buffer());
     if (pipeline.front().inputBuffer != nullptr && DispatchShaderPipeline(pipeline))
         return shader.Buffer();
+
+    LOG_WARN("DLSS-NR pre-SR input dispatch failed in pipeline");
     return nullptr;
 }
