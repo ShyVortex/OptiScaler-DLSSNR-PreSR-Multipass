@@ -57,7 +57,8 @@ std::string GenerateIniContent(bool hasSm75Support)
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
     const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-    const int maxFrames = ResolveMaxGeneratedFrames(configuredFrames, onLinux);
+    const int maxCeiling = hasSm75Support ? 3 : 5;
+    const int maxFrames = ResolveMaxGeneratedFrames(configuredFrames, onLinux, maxCeiling);
 
     if (onLinux && configuredFrames == 1)
     {
@@ -82,12 +83,14 @@ std::string GenerateIniContent(bool hasSm75Support)
     int hwBilinear = cfg->FGDLSSGAmpereMfgHardwareBilinear.value_or_default() ? 1 : 0;
     const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
     std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
+    const bool optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(true);
+    const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
     int logLevel = 1;
 
-    LOG_INFO("AmpereMfgLoader: Router selected: {} (hasSm75Support: {}) for GPU: {}",
-             router, hasSm75Support, IdentifyGpu::getPrimaryGpu().name);
+    LOG_INFO("AmpereMfgLoader: 0.3.0 INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {} (hasSm75Support: {}) for GPU: {}",
+             maxFrames, optimized, preset, router, hasSm75Support, IdentifyGpu::getPrimaryGpu().name);
 
-    return FormatIniContent(maxFrames, kernelImg, hwBilinear, router, logLevel);
+    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel);
 }
 
 std::string GenerateIniContent()

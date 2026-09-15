@@ -26,13 +26,13 @@ Status LastStatus();
 void TrySetup();
 
 /// Resolves the companion INI MaxGeneratedFrames setting.
-/// MaxFrames is clamped to [1, 3] (preserving 1 for 2X FG, 2 for 3X FG, 3 for 4X FG).
+/// MaxFrames is clamped to [1, maxCeiling] (preserving 1 for 2X FG, up to maxCeiling).
 /// With NvAPI_D3D12_SetFlipConfig stubbed on Linux, both Windows and Linux cleanly
 /// support single-frame 2X FG (MaxGeneratedFrames = 1) without artificial elevation.
-inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ = false)
+inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ = false, int maxCeiling = 3)
 {
-    if (configuredMaxFrames <= 0 || configuredMaxFrames > 3)
-        configuredMaxFrames = 3;
+    if (configuredMaxFrames <= 0 || configuredMaxFrames > maxCeiling)
+        configuredMaxFrames = maxCeiling;
 
     return configuredMaxFrames;
 }
@@ -49,7 +49,7 @@ constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562
 
 /// Evaluates whether a DRS query matches a DLSSG multi-frame setting and resolves
 /// the overridden value when running on Linux with Ampere MFG unlock enabled.
-inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, uint32_t& outValue)
+inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, uint32_t& outValue, int maxCeiling = 3)
 {
     if (!onLinux || !mfgUnlockEnabled)
         return false;
@@ -63,8 +63,8 @@ inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMax
         settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID)
     {
         int clamped = configuredMaxFrames;
-        if (clamped <= 0 || clamped > 3)
-            clamped = 3;
+        if (clamped <= 0 || clamped > maxCeiling)
+            clamped = maxCeiling;
         outValue = static_cast<uint32_t>(clamped);
         return true;
     }
@@ -100,6 +100,56 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     ss << "MaxGeneratedFrames=" << maxFrames << "\n\n";
     ss << "[Logging]\n";
     ss << "Level=" << validLogLevel << "\n";
+
+    return ss.str();
+}
+
+/// Formats dlssg_sm86.ini content with 0.3.0 specification ([General], [FrameGeneration] Optimized, MaxGeneratedFrames up to 5, [Compatibility] Preset).
+inline std::string FormatIniContent030(int maxFrames, bool optimized = true, const std::string& preset = "Auto",
+                                       const std::string& kernelImg = "Auto", int hwBilinear = 0,
+                                       const std::string& router = "Auto", int logLevel = 1)
+{
+    // Clamping of MaxGeneratedFrames for 0.3.0: 1 to 5 (5 = 6X)
+    if (maxFrames <= 0 || maxFrames > 5)
+        maxFrames = 5;
+
+    std::string validKernel = kernelImg;
+    if (validKernel != "PTX" && validKernel != "Cubin")
+        validKernel = "Auto";
+
+    std::string validRouter = router;
+    if (validRouter != "SM75" && validRouter != "SM86" && validRouter != "Auto")
+        validRouter = "Auto";
+
+    std::string validPreset = preset;
+    if (validPreset != "A" && validPreset != "B" && validPreset != "a" && validPreset != "b")
+        validPreset = "Auto";
+    else if (validPreset == "a")
+        validPreset = "A";
+    else if (validPreset == "b")
+        validPreset = "B";
+
+    int validOptimized = optimized ? 1 : 0;
+    int validHwBilinear = (hwBilinear == 1) ? 1 : 0;
+    int validLogLevel = (logLevel >= 0 && logLevel <= 3) ? logLevel : 1;
+
+    std::ostringstream ss;
+    ss << "; DLSSG SM86 0.3.0 configuration. Restart the game after changing this file.\n";
+    ss << "[General]\n";
+    ss << "Enabled=1\n\n";
+    ss << "[FrameGeneration]\n";
+    ss << "Optimized=" << validOptimized << "\n";
+    ss << "MaxGeneratedFrames=" << maxFrames << "\n\n";
+    ss << "[Compatibility]\n";
+    ss << "Preset=" << validPreset << "\n";
+    ss << "Router=" << validRouter << "\n";
+    ss << "KernelImage=" << validKernel << "\n";
+    ss << "HardwareBilinear=" << validHwBilinear << "\n\n";
+    ss << "[Logging]\n";
+    ss << "Level=" << validLogLevel << "\n";
+    ss << "Directory=dlssg_sm86\\logs\n\n";
+    ss << "[Runtime]\n";
+    ss << "Mode=Bundled\n";
 
     return ss.str();
 }

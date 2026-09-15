@@ -3297,12 +3297,36 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             // MaxGeneratedFrames slider
             int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-            const char* frameLabels[] = { "Capability default (3X)", "1 (2X)", "2 (3X)", "3 (4X)" };
-            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 3) ? frameLabels[maxFrames] : "Capability default (3X)";
-            if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 3, currentLabel))
+            const char* frameLabels[] = { "Capability default (6X)", "1 (2X)", "2 (3X)", "3 (4X)", "4 (5X)", "5 (6X)" };
+            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Capability default (6X)";
+            if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 5, currentLabel))
                 config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
-            ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X). The game chooses the actual count.\n"
-                           "0 = Default capability limit (allows up to 4X).\n"
+            ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X, 4=5X, 5=6X). The game chooses the actual count.\n"
+                           "0 = Default capability limit (allows up to 6X on 310.9 runtime, 4X on 310.1).\n"
+                           "Save Settings and restart to apply.");
+
+            // Optimized Kernels checkbox (0.3.0)
+            bool optimized = config->FGDLSSGAmpereMfgOptimized.value_or(true);
+            if (ImGui::Checkbox("Optimized Kernels (19-32% faster)##sm86", &optimized))
+                config->FGDLSSGAmpereMfgOptimized = optimized;
+            ShowHelpMarker("Recommended. Uses the validated fastest kernel pipeline for ~19-32% GPU latency reduction.\n"
+                           "Output is bit-identical to stock numerics. Turn off to use original stock kernels.\n"
+                           "Save Settings and restart to apply.");
+
+            // UI Recomposition Preset combo (0.3.0)
+            const char* presetOptions[] = { "Auto (Game / Profile default)", "Preset A (Force UI recomposition off)", "Preset B (Force UI recomposition on)" };
+            std::string currentPreset = config->FGDLSSGAmpereMfgPreset.value_or("Auto");
+            int presetIdx = (currentPreset == "A" || currentPreset == "a") ? 1 :
+                            (currentPreset == "B" || currentPreset == "b") ? 2 : 0;
+            if (ImGui::Combo("UI Recomposition Preset##sm86", &presetIdx, presetOptions, 3))
+            {
+                const char* storedPresetOptions[] = { "Auto", "A", "B" };
+                config->FGDLSSGAmpereMfgPreset = std::string(storedPresetOptions[presetIdx]);
+            }
+            ShowHelpMarker("Preset for UI / HUD recomposition on 310.9 runtime:\n"
+                           "Auto: Let the game or driver profile decide (default).\n"
+                           "A: Force UI recomposition off.\n"
+                           "B: Force UI recomposition on for cleaner HUD inside generated frames (only takes effect if game provides HUD-less plane).\n"
                            "Save Settings and restart to apply.");
 
             // KernelImage combo

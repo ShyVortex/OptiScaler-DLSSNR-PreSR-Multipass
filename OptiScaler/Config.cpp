@@ -74,7 +74,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGDLSSGAmpereMfgUnlock.set_from_config(readBool("DLSSG", "AmpereMfgUnlock"));
             FGDLSSGAmpereMfgMaxFrames.set_from_config(readInt("DLSSG", "AmpereMfgMaxFrames"));
             if (FGDLSSGAmpereMfgMaxFrames.has_value() &&
-                (FGDLSSGAmpereMfgMaxFrames.value() < 0 || FGDLSSGAmpereMfgMaxFrames.value() > 3))
+                (FGDLSSGAmpereMfgMaxFrames.value() < 0 || FGDLSSGAmpereMfgMaxFrames.value() > 5))
                 FGDLSSGAmpereMfgMaxFrames.reset();
 
             if (auto ampereKernel = readString("DLSSG", "AmpereMfgKernelImage"); ampereKernel.has_value())
@@ -96,6 +96,16 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGDLSSGAmpereMfgRouter.set_from_config("Auto");
             }
             FGDLSSGAmpereMfgHardwareBilinear.set_from_config(readBool("DLSSG", "AmpereMfgHardwareBilinear"));
+            FGDLSSGAmpereMfgOptimized.set_from_config(readBool("DLSSG", "AmpereMfgOptimized"));
+            if (auto amperePreset = readString("DLSSG", "AmpereMfgPreset"); amperePreset.has_value())
+            {
+                if (lstrcmpiA(amperePreset.value().c_str(), "a") == 0)
+                    FGDLSSGAmpereMfgPreset.set_from_config("A");
+                else if (lstrcmpiA(amperePreset.value().c_str(), "b") == 0)
+                    FGDLSSGAmpereMfgPreset.set_from_config("B");
+                else
+                    FGDLSSGAmpereMfgPreset.set_from_config("Auto");
+            }
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
@@ -1018,6 +1028,8 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgKernelImage", Instance()->FGDLSSGAmpereMfgKernelImage.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgRouter", Instance()->FGDLSSGAmpereMfgRouter.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgHardwareBilinear", GetBoolValue(Instance()->FGDLSSGAmpereMfgHardwareBilinear.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgOptimized", GetBoolValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgPreset", Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())
