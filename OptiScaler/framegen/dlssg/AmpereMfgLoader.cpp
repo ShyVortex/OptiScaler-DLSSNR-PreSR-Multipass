@@ -51,13 +51,13 @@ std::string ResolveRouter()
     return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
 }
 
-std::string GenerateIniContent(bool hasSm75Support)
+std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
 {
     auto* cfg = Config::Instance();
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
     const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-    const int maxCeiling = hasSm75Support ? 3 : 5;
+    const int maxCeiling = is3101Runtime ? 3 : 5;
     const int maxFrames = ResolveMaxGeneratedFrames(configuredFrames, onLinux, maxCeiling);
 
     if (onLinux && configuredFrames == 1)
@@ -87,16 +87,21 @@ std::string GenerateIniContent(bool hasSm75Support)
     const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
     int logLevel = 1;
 
-    LOG_INFO("AmpereMfgLoader: 0.3.0 INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {} (hasSm75Support: {}) for GPU: {}",
-             maxFrames, optimized, preset, router, hasSm75Support, IdentifyGpu::getPrimaryGpu().name);
+    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {} (hasSm75Support: {}, is3101Runtime: {}) for GPU: {}",
+             maxFrames, optimized, preset, router, hasSm75Support, is3101Runtime, IdentifyGpu::getPrimaryGpu().name);
 
     return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel);
+}
+
+std::string GenerateIniContent(bool hasSm75Support)
+{
+    return GenerateIniContent(hasSm75Support, false);
 }
 
 std::string GenerateIniContent()
 {
     std::lock_guard lock(s_mutex);
-    return GenerateIniContent(s_status.HasSm75Support);
+    return GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime);
 }
 
 void TrySetup()
@@ -176,46 +181,84 @@ void TrySetup()
 
     auto mainOverride = cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
 
-    // If running on Turing, prioritize dedicated 310.1 build containing SM75 kernel family
-    if (isTuring)
+    // Standard candidates for root runtime (310.9)
+    std::filesystem::path rootCandidates[] = {
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        basePath / L"dlssg_sm86.dll"
+    };
+
+    // Candidates for fallback 310.1 runtime (specifically providing SM75 kernels on legacy 0.3.0 builds)
+    std::filesystem::path legacy3101Candidates[] = {
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        basePath / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+        basePath / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        basePath / L"310.1" / L"dlssg_sm86.dll",
+        basePath / L"310.1" / L"version.dll"
+    };
+
+    // Probe root runtime candidate first
+    std::filesystem::path rootDll;
+    for (const auto& candidate : rootCandidates)
     {
-        std::filesystem::path turingCandidates[] = {
-            mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
-            mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"version.dll",
-            basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
-            basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"version.dll",
-            basePath / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
-            basePath / L"dlssg_sm86" / L"310.1" / L"version.dll",
-            basePath / L"310.1" / L"dlssg_sm86.dll",
-            basePath / L"310.1" / L"version.dll"
-        };
-        for (const auto& candidate : turingCandidates)
+        if (probePath(candidate))
         {
-            if (probePath(candidate))
-            {
-                dllPath = candidate;
-                LOG_INFO("AmpereMfgLoader: Turing GPU detected; selected 310.1 runtime with dedicated SM75 kernel support at {}",
-                         wstring_to_string(dllPath.wstring()));
-                break;
-            }
+            rootDll = candidate;
+            break;
         }
     }
 
-    // Standard search across configured and default folders
-    if (dllPath.empty())
+    if (isTuring)
     {
-        std::filesystem::path candidates[] = {
-            mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
-            basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
-            basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
-            basePath / L"dlssg_sm86.dll"
-        };
-        for (const auto& candidate : candidates)
+        // If root binary is found and already contains native SM75 support (0.3.1+ unified build),
+        // use it directly so Turing benefits from the latest 310.9 runtime, 6X MFG, and optimizations.
+        if (!rootDll.empty() && HasSm75KernelFamily(rootDll))
         {
-            if (probePath(candidate))
+            dllPath = rootDll;
+            LOG_INFO("AmpereMfgLoader: Turing GPU detected; root runtime at {} contains native SM75 support (0.3.1+)",
+                     wstring_to_string(dllPath.wstring()));
+        }
+        else
+        {
+            // Root binary lacks SM75 support (e.g. legacy 0.3.0 310.9 build); fallback to 310.1 runtime
+            for (const auto& candidate : legacy3101Candidates)
             {
-                dllPath = candidate;
-                break;
+                if (probePath(candidate))
+                {
+                    dllPath = candidate;
+                    LOG_INFO("AmpereMfgLoader: Turing GPU detected; root runtime lacks SM75 kernels, falling back to 310.1 runtime at {}",
+                             wstring_to_string(dllPath.wstring()));
+                    break;
+                }
+            }
+
+            // If 310.1 was not found either, fall back to rootDll if available
+            if (dllPath.empty() && !rootDll.empty())
+            {
+                dllPath = rootDll;
+            }
+        }
+    }
+    else
+    {
+        // Ampere (or other supported Nvidia arch): use root runtime, or fallback to 310.1 if root not present
+        if (!rootDll.empty())
+        {
+            dllPath = rootDll;
+        }
+        else
+        {
+            for (const auto& candidate : legacy3101Candidates)
+            {
+                if (probePath(candidate))
+                {
+                    dllPath = candidate;
+                    break;
+                }
             }
         }
     }
@@ -231,9 +274,10 @@ void TrySetup()
     s_status.DllFound = true;
     s_status.LoadedDllPath = dllPath.wstring();
     s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
+    s_status.Is3101Runtime = Is3101Runtime(dllPath);
 
-    LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}",
-             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support);
+    LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}, Is3101Runtime: {}",
+             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support, s_status.Is3101Runtime);
 
     // Generate and write companion dlssg_sm86.ini beside the DLL
     auto iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
@@ -248,7 +292,7 @@ void TrySetup()
             LOG_ERROR("AmpereMfgLoader: Failed to open {} for writing", wstring_to_string(iniPath.wstring()));
             return;
         }
-        iniFile << GenerateIniContent(s_status.HasSm75Support);
+        iniFile << GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime);
         iniFile.close();
         if (!iniFile)
             throw std::runtime_error("Could not finish writing dlssg_sm86.ini");

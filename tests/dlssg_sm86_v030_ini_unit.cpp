@@ -117,6 +117,21 @@ int main()
         std::printf("  [PASS] Case 7: 0.2.4 legacy formatter preserved for backward compatibility\n");
     }
 
+    // Test 8: Decoupled ceiling resolution for 0.3.1 (310.9 with SM75 support retains 6X ceiling)
+    {
+        // 310.9 runtime with SM75 support (0.3.1 unified build): ceiling is 5 (6X)
+        const int ceiling3109 = 5;
+        assert(ResolveMaxGeneratedFrames(5, false, ceiling3109) == 5);
+        assert(ResolveMaxGeneratedFrames(4, false, ceiling3109) == 4);
+
+        // 310.1 runtime with SM75 support: ceiling is 3 (4X)
+        const int ceiling3101 = 3;
+        assert(ResolveMaxGeneratedFrames(5, false, ceiling3101) == 3);
+        assert(ResolveMaxGeneratedFrames(4, false, ceiling3101) == 3);
+
+        std::printf("  [PASS] Case 8: Decoupled 0.3.1 ceiling: 310.9 with SM75 preserves 6X, 310.1 clamps to 4X\n");
+    }
+
     std::printf("=== All DLSSG SM86 0.3.0 INI & Configuration Unit Tests PASSED! ===\n");
     return 0;
 }

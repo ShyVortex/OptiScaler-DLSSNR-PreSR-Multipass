@@ -15,7 +15,8 @@ struct Status
     bool IniWritten = false;  // dlssg_sm86.ini generated and written
     bool DllLoaded = false;   // LoadLibrary succeeded
     bool FsrFallbackActive = false; // 2X FG on Linux: internal FSR FG active
-    bool HasSm75Support = false;    // Loaded runtime binary contains dedicated SM75 kernel family (310.1)
+    bool HasSm75Support = false;    // Loaded runtime binary contains dedicated SM75 kernel family (310.1 or unified 310.9 0.3.1+)
+    bool Is3101Runtime = false;     // True if 310.1 runtime (max ceiling 3 / 4X), false if 310.9 runtime (max ceiling 5 / 6X)
     std::wstring LoadedDllPath;     // Absolute path of loaded DLL
     std::string ErrorMessage; // Human-readable error if anything failed
 };
@@ -166,7 +167,7 @@ inline bool IsAmpereArch(uint32_t archId)
     return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170);
 }
 
-/// Detects if a dlssg_sm86 binary contains the dedicated Coldwood1026 SM75 kernel family (310.1 build).
+/// Detects if a dlssg_sm86 binary contains the SM75 kernel family (310.1 build or 0.3.1+ unified 310.9 build).
 inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
 {
     if (dllPath.empty())
@@ -181,8 +182,55 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
 
     constexpr size_t bufferSize = 65536;
     std::string buffer(bufferSize, '\0');
-    const std::string needleSm75 = "DLSSG_SM75_SLOTS";
-    const std::string needle3109 = "The 310.9 backend has no SM75";
+    const std::string needleSm75Slots = "DLSSG_SM75_SLOTS";
+    const std::string needleSm75Family = "sm75_family";
+    const std::string needleCubinSm75 = "cubin_sm75";
+    const std::string needleSm75Hw = "executed_on_sm75_hardware";
+    const std::string needle3109NoSm75 = "The 310.9 backend has no SM75";
+
+    bool foundSm75 = false;
+    std::string overlap;
+    while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+    {
+        size_t bytesRead = file.gcount();
+        std::string chunk = overlap + std::string(buffer.data(), bytesRead);
+        if (chunk.find(needle3109NoSm75) != std::string::npos)
+            return false;
+        if (!foundSm75 && (chunk.find(needleSm75Slots) != std::string::npos ||
+                           chunk.find(needleSm75Family) != std::string::npos ||
+                           chunk.find(needleCubinSm75) != std::string::npos ||
+                           chunk.find(needleSm75Hw) != std::string::npos))
+        {
+            foundSm75 = true;
+        }
+        constexpr size_t maxNeedle = 64;
+        if (chunk.size() >= maxNeedle)
+            overlap = chunk.substr(chunk.size() - maxNeedle + 1);
+        else
+            overlap = chunk;
+    }
+
+    return foundSm75;
+}
+
+/// Detects if a dlssg_sm86 binary represents the 310.1 runtime (4X / MaxGeneratedFrames=3 ceiling)
+/// rather than the 310.9+ runtime (6X / MaxGeneratedFrames=5 ceiling).
+inline bool Is3101Runtime(const std::filesystem::path& dllPath)
+{
+    if (dllPath.empty())
+        return false;
+
+    if (dllPath.wstring().find(L"310.1") != std::wstring::npos)
+        return true;
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    constexpr size_t bufferSize = 65536;
+    std::string buffer(bufferSize, '\0');
+    const std::string needle3101 = "dlssg-310.1";
+    const std::string needle3109 = "dlssg-310.9";
 
     std::string overlap;
     while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
@@ -191,10 +239,11 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
         std::string chunk = overlap + std::string(buffer.data(), bytesRead);
         if (chunk.find(needle3109) != std::string::npos)
             return false;
-        if (chunk.find(needleSm75) != std::string::npos)
+        if (chunk.find(needle3101) != std::string::npos)
             return true;
-        if (chunk.size() >= needleSm75.size())
-            overlap = chunk.substr(chunk.size() - needleSm75.size() + 1);
+        constexpr size_t maxNeedle = 32;
+        if (chunk.size() >= maxNeedle)
+            overlap = chunk.substr(chunk.size() - maxNeedle + 1);
         else
             overlap = chunk;
     }
@@ -250,6 +299,7 @@ std::string ResolveRouter();
 /// Generates dlssg_sm86.ini content from OptiScaler config values.
 std::string GenerateIniContent();
 std::string GenerateIniContent(bool hasSm75Support);
+std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime);
 
 /// Resolves optimal kernel image format for current hardware/environment when Auto is requested.
 std::string ResolveAutoKernelImage();

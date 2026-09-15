@@ -10,41 +10,61 @@ int main()
 
     using namespace AmpereMfgLoader;
 
-    // Test 1: Binary detection of SM75 kernel family (310.1 vs 310.9)
+    // Test 1: Binary detection of SM75 kernel family and runtime model (0.3.1 310.9 vs 310.1 vs legacy 0.3.0)
     {
         std::filesystem::path p3109 = "dlssg_for_sm86/version.dll";
         std::filesystem::path p3101 = "dlssg_for_sm86/310.1/version.dll";
 
         if (std::filesystem::exists(p3109) && std::filesystem::exists(p3101))
         {
-            assert(!HasSm75KernelFamily(p3109) && "310.9 runtime must not be identified as having SM75 kernels!");
+            // In 0.3.1, root 310.9 contains native SM75 kernels (unified build)
+            assert(HasSm75KernelFamily(p3109) && "0.3.1 310.9 root runtime must be identified as having SM75 kernels!");
             assert(HasSm75KernelFamily(p3101) && "310.1 runtime must be identified as having SM75 kernels!");
-            std::printf("  [PASS] Case 1: Binary inspection accurately discriminates 310.1 (SM75) vs 310.9\n");
+
+            // Runtime discrimination: 310.1 vs 310.9
+            assert(!Is3101Runtime(p3109) && "Root 310.9 runtime must not be identified as 310.1!");
+            assert(Is3101Runtime(p3101) && "310.1 runtime must be identified as 310.1!");
+
+            std::printf("  [PASS] Case 1a: Binary inspection detects unified SM75 in 0.3.1 root 310.9 and in 310.1\n");
+            std::printf("  [PASS] Case 1b: Is3101Runtime discriminates 310.1 (ceiling 3/4X) vs 310.9 (ceiling 5/6X)\n");
         }
         else
         {
             std::printf("  [SKIP] Case 1: dlssg_for_sm86 binaries not in working directory\n");
         }
+
+        // Verify rejection of legacy 0.3.0 310.9 binary via synthetic mock file
+        {
+            std::filesystem::path mockLegacy = std::filesystem::temp_directory_path() / "mock_dlssg_030.dll";
+            std::ofstream f(mockLegacy, std::ios::binary);
+            std::string content = "prefix...sm75_family...The 310.9 backend has no SM75...suffix";
+            f.write(content.data(), content.size());
+            f.close();
+
+            assert(!HasSm75KernelFamily(mockLegacy) && "Legacy 0.3.0 310.9 binary with abort error must be rejected!");
+            std::filesystem::remove(mockLegacy);
+            std::printf("  [PASS] Case 1c: Legacy 0.3.0 binary with no-SM75 error string correctly rejected\n");
+        }
     }
 
-    // Test 2: 310.9 runtime abort prevention on Turing hardware (Router must be Auto, not SM75)
+    // Test 2: Legacy 310.9 runtime abort prevention on Turing hardware (Router must be Auto, not SM75)
     {
-        // Turing 0x160 on 310.9 (hasSm75Support = false): must yield "Auto"
+        // Turing 0x160 on legacy 310.9 (hasSm75Support = false): must yield "Auto"
         std::string routerAuto = ResolveRouter(0x00000160, "RTX 2070", "Auto", false);
-        assert(routerAuto == "Auto" && "On 310.9, Turing Auto router must resolve to Auto to prevent runtime abort!");
+        assert(routerAuto == "Auto" && "On legacy 310.9, Turing Auto router must resolve to Auto to prevent runtime abort!");
 
-        // Turing 0x160 with explicit "SM75" on 310.9: must safely fall back to "Auto"
+        // Turing 0x160 with explicit "SM75" on legacy 310.9: must safely fall back to "Auto"
         std::string routerFallback = ResolveRouter(0x00000160, "RTX 2070", "SM75", false);
-        assert(routerFallback == "Auto" && "Explicit SM75 on 310.9 must fall back to Auto!");
+        assert(routerFallback == "Auto" && "Explicit SM75 on legacy 310.9 must fall back to Auto!");
 
-        std::printf("  [PASS] Case 2: 310.9 runtime router safely set to Auto on Turing to prevent abort\n");
+        std::printf("  [PASS] Case 2: Legacy 310.9 runtime router safely set to Auto on Turing to prevent abort\n");
     }
 
-    // Test 3: 310.1 runtime on Turing hardware uses dedicated SM75 kernels
+    // Test 3: Runtime on Turing hardware with SM75 support uses dedicated SM75 kernels
     {
-        // Turing 0x160 on 310.1 (hasSm75Support = true): Auto router resolves to SM75
+        // Turing 0x160 with hasSm75Support = true: Auto router resolves to SM75
         std::string routerSm75 = ResolveRouter(0x00000160, "RTX 2070", "Auto", true);
-        assert(routerSm75 == "SM75" && "On 310.1, Turing Auto router resolves to SM75!");
+        assert(routerSm75 == "SM75" && "On SM75-capable runtime, Turing Auto router resolves to SM75!");
 
         // Explicit "SM75" honored when runtime has SM75 support
         std::string explicitSm75 = ResolveRouter(0x00000160, "RTX 2070", "SM75", true);
