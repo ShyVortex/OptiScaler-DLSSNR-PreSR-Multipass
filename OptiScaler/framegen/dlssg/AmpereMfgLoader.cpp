@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "AmpereMfgLoader.h"
 
@@ -43,10 +43,15 @@ std::string ResolveRouter()
     auto* cfg = Config::Instance();
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
-    return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter);
+    bool hasSm75Support = false;
+    {
+        std::lock_guard lock(s_mutex);
+        hasSm75Support = s_status.HasSm75Support;
+    }
+    return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
 }
 
-std::string GenerateIniContent()
+std::string GenerateIniContent(bool hasSm75Support)
 {
     auto* cfg = Config::Instance();
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
@@ -75,12 +80,20 @@ std::string GenerateIniContent()
     }
 
     int hwBilinear = cfg->FGDLSSGAmpereMfgHardwareBilinear.value_or_default() ? 1 : 0;
-    std::string router = ResolveRouter();
+    const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
+    std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
     int logLevel = 1;
 
-    LOG_INFO("AmpereMfgLoader: Router selected: {} for GPU: {}", router, IdentifyGpu::getPrimaryGpu().name);
+    LOG_INFO("AmpereMfgLoader: Router selected: {} (hasSm75Support: {}) for GPU: {}",
+             router, hasSm75Support, IdentifyGpu::getPrimaryGpu().name);
 
     return FormatIniContent(maxFrames, kernelImg, hwBilinear, router, logLevel);
+}
+
+std::string GenerateIniContent()
+{
+    std::lock_guard lock(s_mutex);
+    return GenerateIniContent(s_status.HasSm75Support);
 }
 
 void TrySetup()
@@ -126,8 +139,19 @@ void TrySetup()
     }
 
     const uint32_t archId = static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id);
-    const bool isAmpere = IsAmpereArch(archId) || (gpu.name.find("RTX 30") != std::string::npos);
-    const bool isTuring = IsTuringArch(archId) || (gpu.name.find("RTX 20") != std::string::npos || gpu.name.find("GTX 16") != std::string::npos);
+    const bool isAmpere = IsAmpereArch(archId) ||
+                          (gpu.name.find("RTX 30") != std::string::npos ||
+                           gpu.name.find("Ampere") != std::string::npos ||
+                           gpu.name.find("GA10") != std::string::npos ||
+                           gpu.name.find("RTX A") != std::string::npos);
+
+    const bool isTuring = IsTuringArch(archId) ||
+                          (gpu.name.find("RTX 20") != std::string::npos ||
+                           gpu.name.find("GTX 16") != std::string::npos ||
+                           gpu.name.find("TITAN RTX") != std::string::npos ||
+                           gpu.name.find("Turing") != std::string::npos ||
+                           gpu.name.find("TU10") != std::string::npos ||
+                           gpu.name.find("TU11") != std::string::npos);
 
     if (!isAmpere && !isTuring)
     {
@@ -140,32 +164,73 @@ void TrySetup()
 
     // Locate dlssg_sm86.dll
     auto basePath = Util::DllPath().parent_path();
-    auto dllPath = std::filesystem::path(cfg->MainDllPath.value_or(basePath.wstring())) /
-                   L"dlssg_sm86" / L"dlssg_sm86.dll";
+    std::filesystem::path dllPath;
     std::error_code fileError;
-    if (!std::filesystem::exists(dllPath, fileError))
-        dllPath = basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll";
-    if (!std::filesystem::exists(dllPath, fileError))
+
+    auto probePath = [&](const std::filesystem::path& candidate) -> bool {
+        return !candidate.empty() && std::filesystem::exists(candidate, fileError);
+    };
+
+    auto mainOverride = cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
+
+    // If running on Turing, prioritize dedicated 310.1 build containing SM75 kernel family
+    if (isTuring)
     {
-        dllPath = basePath / L"dlssg_sm86" / L"dlssg_sm86.dll";
+        std::filesystem::path turingCandidates[] = {
+            mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+            mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"version.dll",
+            basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+            basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"version.dll",
+            basePath / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+            basePath / L"dlssg_sm86" / L"310.1" / L"version.dll",
+            basePath / L"310.1" / L"dlssg_sm86.dll",
+            basePath / L"310.1" / L"version.dll"
+        };
+        for (const auto& candidate : turingCandidates)
+        {
+            if (probePath(candidate))
+            {
+                dllPath = candidate;
+                LOG_INFO("AmpereMfgLoader: Turing GPU detected; selected 310.1 runtime with dedicated SM75 kernel support at {}",
+                         wstring_to_string(dllPath.wstring()));
+                break;
+            }
+        }
     }
-    if (!std::filesystem::exists(dllPath, fileError))
+
+    // Standard search across configured and default folders
+    if (dllPath.empty())
     {
-        // Fallback: check directly beside OptiScaler DLL
-        auto fallbackPath = basePath / L"dlssg_sm86.dll";
-        if (std::filesystem::exists(fallbackPath, fileError))
+        std::filesystem::path candidates[] = {
+            mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
+            basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
+            basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
+            basePath / L"dlssg_sm86.dll"
+        };
+        for (const auto& candidate : candidates)
         {
-            dllPath = fallbackPath;
-        }
-        else
-        {
-            s_status.DllFound = false;
-            s_status.ErrorMessage = "dlssg_sm86.dll not found in OptiScaler/dlssg_sm86/ or dlssg_sm86/ subfolders.";
-            LOG_ERROR("AmpereMfgLoader: {}", s_status.ErrorMessage);
-            return;
+            if (probePath(candidate))
+            {
+                dllPath = candidate;
+                break;
+            }
         }
     }
+
+    if (dllPath.empty())
+    {
+        s_status.DllFound = false;
+        s_status.ErrorMessage = "dlssg_sm86.dll not found in OptiScaler/dlssg_sm86/ or dlssg_sm86/ subfolders.";
+        LOG_ERROR("AmpereMfgLoader: {}", s_status.ErrorMessage);
+        return;
+    }
+
     s_status.DllFound = true;
+    s_status.LoadedDllPath = dllPath.wstring();
+    s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
+
+    LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}",
+             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support);
 
     // Generate and write companion dlssg_sm86.ini beside the DLL
     auto iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
@@ -180,7 +245,7 @@ void TrySetup()
             LOG_ERROR("AmpereMfgLoader: Failed to open {} for writing", wstring_to_string(iniPath.wstring()));
             return;
         }
-        iniFile << GenerateIniContent();
+        iniFile << GenerateIniContent(s_status.HasSm75Support);
         iniFile.close();
         if (!iniFile)
             throw std::runtime_error("Could not finish writing dlssg_sm86.ini");
@@ -212,7 +277,7 @@ void TrySetup()
 
     s_status.DllLoaded = true;
     s_status.ErrorMessage.clear();
-    LOG_INFO("AmpereMfgLoader: SM86 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+    LOG_INFO("AmpereMfgLoader: SM86/SM75 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
 }
 
 } // namespace AmpereMfgLoader

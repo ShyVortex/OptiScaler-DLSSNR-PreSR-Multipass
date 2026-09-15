@@ -299,11 +299,17 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $sm86Ini) {
         Copy-Item -LiteralPath $sm86Ini -Destination "$sm86DestDir\dlssg_sm86.ini"
     }
+    $sm863101Dll = "$sm86Src\310.1\version.dll"
+    if (Test-Path -LiteralPath $sm863101Dll) {
+        $sm863101DestDir = "$sm86DestDir\310.1"
+        New-Item -ItemType Directory -Force -Path $sm863101DestDir | Out-Null
+        Copy-Item -LiteralPath $sm863101Dll -Destination "$sm863101DestDir\dlssg_sm86.dll"
+    }
     $notices = "$sm86Src\THIRD_PARTY_NOTICES.txt"
     if (Test-Path -LiteralPath $notices) {
         Copy-Item -LiteralPath $notices -Destination "$sm86DestDir\THIRD_PARTY_NOTICES.txt"
     }
-    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, and notices staged"
+    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, 310.1 runtime (if present), and notices staged"
 }
 
 $checksumLines = Get-ChildItem -LiteralPath $stage -Recurse -File |

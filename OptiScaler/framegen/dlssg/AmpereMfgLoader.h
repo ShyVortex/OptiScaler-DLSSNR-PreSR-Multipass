@@ -1,6 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -13,6 +15,8 @@ struct Status
     bool IniWritten = false;  // dlssg_sm86.ini generated and written
     bool DllLoaded = false;   // LoadLibrary succeeded
     bool FsrFallbackActive = false; // 2X FG on Linux: internal FSR FG active
+    bool HasSm75Support = false;    // Loaded runtime binary contains dedicated SM75 kernel family (310.1)
+    std::wstring LoadedDllPath;     // Absolute path of loaded DLL
     std::string ErrorMessage; // Human-readable error if anything failed
 };
 
@@ -80,7 +84,7 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
         validKernel = "Auto";
 
     std::string validRouter = router;
-    if (validRouter != "SM75" && validRouter != "SM86")
+    if (validRouter != "SM75" && validRouter != "SM86" && validRouter != "Auto")
         validRouter = "SM86";
 
     int validHwBilinear = (hwBilinear == 1) ? 1 : 0;
@@ -112,16 +116,60 @@ inline bool IsAmpereArch(uint32_t archId)
     return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170);
 }
 
-/// Resolves router string ("SM75" or "SM86") based on architecture ID, GPU name, and configured preference.
-inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "", const std::string& configuredRouter = "Auto")
+/// Detects if a dlssg_sm86 binary contains the dedicated Coldwood1026 SM75 kernel family (310.1 build).
+inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
+{
+    if (dllPath.empty())
+        return false;
+
+    if (dllPath.wstring().find(L"310.1") != std::wstring::npos)
+        return true;
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    constexpr size_t bufferSize = 65536;
+    std::string buffer(bufferSize, '\0');
+    const std::string needleSm75 = "DLSSG_SM75_SLOTS";
+    const std::string needle3109 = "The 310.9 backend has no SM75";
+
+    std::string overlap;
+    while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+    {
+        size_t bytesRead = file.gcount();
+        std::string chunk = overlap + std::string(buffer.data(), bytesRead);
+        if (chunk.find(needle3109) != std::string::npos)
+            return false;
+        if (chunk.find(needleSm75) != std::string::npos)
+            return true;
+        if (chunk.size() >= needleSm75.size())
+            overlap = chunk.substr(chunk.size() - needleSm75.size() + 1);
+        else
+            overlap = chunk;
+    }
+
+    return false;
+}
+
+/// Resolves router string ("Auto", "SM75" or "SM86") based on architecture ID, GPU name, configured preference,
+/// and whether the selected runtime binary supports dedicated SM75 kernels.
+inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "", const std::string& configuredRouter = "Auto", bool hasSm75Support = true)
 {
     if (configuredRouter == "SM75" || configuredRouter == "sm75")
-        return "SM75";
+    {
+        // Coerce to Auto if loaded runtime has no SM75 kernel family (e.g. 310.9) to prevent runtime abort
+        return hasSm75Support ? "SM75" : "Auto";
+    }
     if (configuredRouter == "SM86" || configuredRouter == "sm86")
         return "SM86";
 
+    // Auto router resolution:
+    // If running on Turing, only select SM75 if the runtime actually supports it (310.1).
+    // On 310.9, use "Auto" which is safe and prevents the abort message:
+    // "The 310.9 backend has no SM75 kernel family; use Router=Auto or SM86"
     if (IsTuringArch(archId))
-        return "SM75";
+        return hasSm75Support ? "SM75" : "Auto";
     if (IsAmpereArch(archId))
         return "SM86";
 
@@ -130,22 +178,28 @@ inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "
     {
         if (gpuName.find("RTX 20") != std::string::npos ||
             gpuName.find("GTX 16") != std::string::npos ||
-            gpuName.find("Turing") != std::string::npos)
-            return "SM75";
+            gpuName.find("TITAN RTX") != std::string::npos ||
+            gpuName.find("Turing") != std::string::npos ||
+            gpuName.find("TU10") != std::string::npos ||
+            gpuName.find("TU11") != std::string::npos)
+            return hasSm75Support ? "SM75" : "Auto";
 
         if (gpuName.find("RTX 30") != std::string::npos ||
-            gpuName.find("Ampere") != std::string::npos)
+            gpuName.find("Ampere") != std::string::npos ||
+            gpuName.find("GA10") != std::string::npos ||
+            gpuName.find("RTX A") != std::string::npos)
             return "SM86";
     }
 
     return "SM86";
 }
 
-/// Resolves router string ("SM75" or "SM86") for current hardware.
+/// Resolves router string for current hardware.
 std::string ResolveRouter();
 
 /// Generates dlssg_sm86.ini content from OptiScaler config values.
 std::string GenerateIniContent();
+std::string GenerateIniContent(bool hasSm75Support);
 
 /// Resolves optimal kernel image format for current hardware/environment when Auto is requested.
 std::string ResolveAutoKernelImage();
@@ -153,9 +207,12 @@ std::string ResolveAutoKernelImage();
 inline std::string ResolveAutoKernelImage(uint32_t archId, const std::string& name, bool onLinux)
 {
     return onLinux || IsTuringArch(archId) || name.find("RTX 20") != std::string::npos ||
-                   name.find("GTX 16") != std::string::npos || name.find("3080 Ti") != std::string::npos ||
+                   name.find("GTX 16") != std::string::npos || name.find("TITAN RTX") != std::string::npos ||
+                   name.find("Turing") != std::string::npos || name.find("TU10") != std::string::npos ||
+                   name.find("TU11") != std::string::npos || name.find("3080 Ti") != std::string::npos ||
                    name.find("3080Ti") != std::string::npos || name.find("Laptop") != std::string::npos ||
                    name.find("Mobile") != std::string::npos
                ? "PTX" : "Auto";
 }
 } // namespace AmpereMfgLoader
+

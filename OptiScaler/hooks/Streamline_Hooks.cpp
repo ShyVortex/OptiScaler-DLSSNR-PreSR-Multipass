@@ -881,9 +881,12 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     // TODO: do it better than "static" and hoping for the best
     static std::string config;
 
+    const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
     bool shouldSpoofArch =
         Config::Instance()->StreamlineSpoofing.value_or_default() &&
-        (State::Instance().activeFgInput == FGInput::NvngxFG || State::Instance().activeFgInput == FGInput::DLSSG);
+        (State::Instance().activeFgInput == FGInput::NvngxFG ||
+         State::Instance().activeFgInput == FGInput::DLSSG ||
+         ampereMfgActive);
 
     uint32_t currentArch = 0;
     if (shouldSpoofArch)
