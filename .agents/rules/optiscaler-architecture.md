@@ -22,14 +22,33 @@ description: Architecture, frame generation, and safety rules for OptiScaler
 4. **Preservation of MFG Unlockers Across Upstream Merges**:
    - Upstream author (`wilsjo2`) removed / omitted both the SM75-SM86 (Turing/Ampere) MFG unlocker and the Ada (RTX 40) MFG unlocker in subsequent commits.
    - When merging changes from upstream, **both** MFG unlocker components and all related work must **NEVER** be removed, overwritten, disabled, or regressed.
-   - Always preserve **SM75-SM86 MFG Unlocker**:
-     - `OptiScaler/framegen/dlssg/AmpereMfgLoader.h` and `AmpereMfgLoader.cpp`
-     - Config declarations, parsing, saving, and defaults (`Config.h`, `Config.cpp`, `OptiScaler.ini`)
-     - Linux 2X FG FSR Fallback (`AmpereMfgLoader::ShouldFallbackToFsrFg`, `dllmain.cpp`, `menu_common.cpp`)
-     - NVAPI hooks (`hkNvAPI_D3D12_SetFlipConfig`, DRS overrides in `NvApiHooks.cpp`) and Kernel hook bypasses (`Kernel_Hooks.cpp`)
-     - Menu UI section, sliders, and tonemapped status indicators (`menu_common.cpp`)
-     - Packaging and build integration (`OptiScaler.vcxproj`, `OptiScaler.vcxproj.filters`, `package_release.ps1`, workflows)
-     - Associated tests (`tests/dlssg_sm86_ini_smoke.cpp`, `tests/kernel_hooks_nvngx_dlssg_unit.cpp`)
+    - Always preserve **SM75-SM86 MFG Unlocker**:
+      - `OptiScaler/framegen/dlssg/AmpereMfgLoader.h` and `AmpereMfgLoader.cpp`
+      - Config declarations, parsing, saving, and defaults (`Config.h`, `Config.cpp`, `OptiScaler.ini`):
+        - `AmpereMfgMaxFrames` up to 5 (6X Multi-Frame Generation on 310.9 runtime)
+        - `AmpereMfgOptimized` (19–32% faster kernel execution pipeline)
+        - `AmpereMfgPreset` (UI recomposition preset: Auto / A / B)
+      - Linux 2X FG FSR Fallback (`AmpereMfgLoader::ShouldFallbackToFsrFg`, `dllmain.cpp`, `menu_common.cpp`)
+      - NVAPI hooks (`hkNvAPI_D3D12_SetFlipConfig`, DRS overrides in `NvApiHooks.cpp`) and Kernel hook bypasses (`Kernel_Hooks.cpp`)
+      - **Turing & Ampere Native DLSSG Interface Recognition (`menu_common.cpp`)**:
+        - `supportsDlssg` must recognize Turing (`0x160`, RTX 20 / GTX 16 / TITAN RTX) and Ampere (`0x170`, RTX 30) along with `ampereActive`.
+        - Never forcibly reset `FGOutput` to `NoFG` on Turing hardware.
+        - Preserve `"None (Real DLSSG / RTX 20/30 w/ SM75-86 mod)"` menu option.
+      - **Streamline Architecture Spoofing for External MFG (`Streamline_Hooks.cpp`)**:
+        - `hkdlssg_slOnPluginLoad`: `shouldSpoofArch` must include `ampereMfgActive` so `sl.dlss_g.dll` is spoofed during plugin load even when `activeFgInput == NoFG`.
+      - **Dual Runtime Architecture & Turing Router Safety (`AmpereMfgLoader.h`, `AmpereMfgLoader.cpp`)**:
+        - Prioritize `310.1` runtime folder (`dlssg_sm86/310.1/dlssg_sm86.dll`) on Turing cards for native SM75 kernels (`DLSSG_SM75_SLOTS`).
+        - When running on 310.9 runtime, `ResolveRouter` must output `Router=Auto` on Turing (never `Router=SM75`) to avoid runtime backend abort.
+        - Generate 0.3.0 companion INI format (`[General] Enabled=1`, `[FrameGeneration] Optimized=1`, `MaxGeneratedFrames=5`, `[Compatibility] Preset=Auto`).
+      - Packaging and build integration (`OptiScaler.vcxproj`, `OptiScaler.vcxproj.filters`, `package_release.ps1`, workflows):
+        - `package_release.ps1` must stage both root 310.9 DLL and `310.1/dlssg_sm86.dll`.
+      - Associated tests:
+        - `tests/dlssg_sm86_ini_smoke.cpp`
+        - `tests/kernel_hooks_nvngx_dlssg_unit.cpp`
+        - `tests/turing_menu_recognition_unit.cpp`
+        - `tests/streamline_turing_spoof_unit.cpp`
+        - `tests/turing_dual_runtime_unit.cpp`
+        - `tests/dlssg_sm86_v030_ini_unit.cpp`
    - Always preserve **Ada (RTX 40) MFG Unlocker**:
      - `OptiScaler/framegen/dlssg/MfgUnlock.h` and `MfgUnlock.cpp`
      - Build flag `OptiScalerRtx40Mfg` must default to `true` in `OptiScaler.vcxproj` (defines `OPTISCALER_RTX40_MFG`)
