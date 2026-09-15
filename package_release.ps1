@@ -10,7 +10,7 @@
 
 param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
-    [string]$Version = "v0.9.0",
+    [string]$Version = "v0.9.1",
     [switch]$SkipBuild,
     [switch]$IncludeDlssFrameGeneration,
     [switch]$AcceptNvidiaLicenses,
