@@ -3440,7 +3440,20 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
     // DLSSG output requirements
     auto constexpr dlssgOutputIndex = (uint32_t) FGOutput::DLSSG;
-    const bool supportsDlssg = primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100;
+    const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
+    const uint32_t archId = static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id);
+    const bool isAdaOrNewer = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
+    const bool isTuringOrAmpere = isNvidia && (
+        AmpereMfgLoader::IsTuringArch(archId) ||
+        AmpereMfgLoader::IsAmpereArch(archId) ||
+        primaryGpu.name.find("RTX 20") != std::string::npos ||
+        primaryGpu.name.find("GTX 16") != std::string::npos ||
+        primaryGpu.name.find("RTX 30") != std::string::npos ||
+        primaryGpu.name.find("TITAN RTX") != std::string::npos ||
+        primaryGpu.name.find("Turing") != std::string::npos ||
+        primaryGpu.name.find("Ampere") != std::string::npos);
+
+    const bool supportsDlssg = isAdaOrNewer || isTuringOrAmpere || ampereActive;
     const bool hasDlssgReplacement =
         state.nukemsFgFileAvailable || state.artursFgFileAvailable || FfxApiProxy::IsFGReady(false);
 
@@ -3502,7 +3515,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     // clang-format off
 
     nvngxOptions = {
-        { FGNvngxReplacement::None, "None (Real DLSSG)", "Real DLSSG, For RTX 40xx and above"},
+        { FGNvngxReplacement::None, "None (Real DLSSG)", "Real DLSSG (RTX 40 series, or RTX 20/30 with SM75/SM86 unlocker)"},
         { FGNvngxReplacement::Nukems, "Nukem's", "FSR 3 FG" },
         { FGNvngxReplacement::Arturs, "Enabler", "FSR 3 MFG mod" },
         { FGNvngxReplacement::FFX, "FSR 3/4 FG", "FSR 3/4 FG using the FFX upgrade\n\n"
