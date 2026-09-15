@@ -55,18 +55,18 @@ bool TestHasSupportedNrSubrects(const MockNgxParameters& parameters, bool before
 struct MockNrState
 {
     bool failed = false;
-    std::string reason;
+    const char* reason = "";
     bool modelRunning = false;
 
     void ReportPipelineSkip(const char* r)
     {
-        if (reason.empty() && r)
+        if ((reason == nullptr || reason[0] == '\0') && r)
             reason = r;
     }
 
     std::string PublishedReason() const
     {
-        return !reason.empty() ? reason : "";
+        return (reason != nullptr && reason[0] != '\0') ? reason : "";
     }
 };
 

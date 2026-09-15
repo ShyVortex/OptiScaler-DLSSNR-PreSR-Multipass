@@ -51,10 +51,11 @@ auto DlssNr_Dx12::State::ConsumeControls() -> void
 
 auto DlssNr_Dx12::State::Publish() -> void
 {
+    const bool hasReason = (nr.reason != nullptr && nr.reason[0] != '\0');
     DlssNr::PublishStatus(
         &shader, DlssNr::Backend::Dx12,
         { !nr.failed && modelRunning && enlargementStatus.empty(),
-          !nr.reason.empty() ? nr.reason : enlargementStatus,
+          hasReason ? std::string(nr.reason) : enlargementStatus,
           lastGpuTime,
           frames,
           { nr.exposureFrames, nr.exposureOfferedNow, nr.exposureEverOffered, nr.gameExposure, nr.gamePreExposure },

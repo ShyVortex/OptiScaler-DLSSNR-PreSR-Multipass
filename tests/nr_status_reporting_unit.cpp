@@ -36,14 +36,14 @@ struct MockModel
 struct MockNrState
 {
     bool failed = false;
-    std::string reason;
+    const char* reason = "";
     bool passCreateFailed[2] { false, false };
     MockModel models[2];
 
     void RetryAfterFailure()
     {
         failed = false;
-        reason.clear();
+        reason = "";
         for (auto& m : models)
             m.RetryAfterFailure();
         passCreateFailed[0] = false;
@@ -92,8 +92,8 @@ int main()
         bool ok = state.PrepareRunModels(true, 1505, 847);
         assert(!ok);
         assert(state.failed);
-        assert(state.reason == "the NVIDIA NGX driver could not create Neural Rendering");
-        assert(strstr(state.reason.c_str(), "display resolution") == nullptr);
+        assert(std::string(state.reason) == "the NVIDIA NGX driver could not create Neural Rendering");
+        assert(strstr(state.reason, "display resolution") == nullptr);
         std::cout << "  [PASS] Test 1: Pre-SR failure produces concise driver error\n";
     }
 
@@ -105,8 +105,8 @@ int main()
         bool ok = state.PrepareRunModels(false, 2560, 1440);
         assert(!ok);
         assert(state.failed);
-        assert(strstr(state.reason.c_str(), "display resolution") != nullptr);
-        assert(strstr(state.reason.c_str(), "Generate model before upscale") != nullptr);
+        assert(strstr(state.reason, "display resolution") != nullptr);
+        assert(strstr(state.reason, "Generate model before upscale") != nullptr);
         std::cout << "  [PASS] Test 2: Post-SR failure contains display resolution guidance\n";
     }
 
@@ -121,7 +121,7 @@ int main()
         // Run post-SR: fails
         state.PrepareRunModels(config.dlssNrRunBeforeSr, 2560, 1440);
         assert(state.failed);
-        const char* reason = state.reason.c_str();
+        const char* reason = state.reason;
 
         // UI detects failure with display resolution suggestion
         bool showQuickFix = (!config.dlssNrRunBeforeSr && strstr(reason, "display resolution") != nullptr);
@@ -131,7 +131,7 @@ int main()
         config.dlssNrRunBeforeSr = true;
         state.RetryAfterFailure();
         assert(!state.failed);
-        assert(state.reason.empty());
+        assert(state.reason == nullptr || state.reason[0] == '\0');
 
         // In Pre-SR at render resolution, driver succeeds
         state.models[0].prepareShouldFail = false;

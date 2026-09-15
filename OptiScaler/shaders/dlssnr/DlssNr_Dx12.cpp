@@ -446,7 +446,7 @@ void DlssNr_Dx12::ReportPipelineSkip(const char* reason)
     std::lock_guard ownersLock(nrOwnersMutex);
     std::lock_guard stateLock(_state->mutex);
     _state->ReportSkipOnce(reason);
-    if (_state->nr.reason.empty())
+    if (_state->nr.reason == nullptr || _state->nr.reason[0] == '\0')
         _state->nr.reason = reason;
     _state->Publish();
 }
