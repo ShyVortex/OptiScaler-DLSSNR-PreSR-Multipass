@@ -7,6 +7,7 @@
 #include <ankerl/unordered_dense.h>
 #include <misc/IdentifyGpu.h>
 #include <framegen/nvngx/Nvngx_FG.h>
+#include <framegen/dlssg/AmpereMfgLoader.h>
 
 #if defined(OPTISCALER_RTX40_MFG)
 #include <framegen/dlssg/MfgUnlock.h>
@@ -833,7 +834,8 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
         else if (ampereMfgActive)
         {
             int configuredFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-            countMax = (configuredFrames > 0 && configuredFrames <= 3) ? configuredFrames : 3;
+            const int ceiling = AmpereMfgLoader::Status().Is3101Runtime ? 3 : 5;
+            countMax = (configuredFrames > 0 && configuredFrames <= ceiling) ? configuredFrames : ceiling;
         }
 #if defined(OPTISCALER_RTX40_MFG)
         else if (adaMfgActive)

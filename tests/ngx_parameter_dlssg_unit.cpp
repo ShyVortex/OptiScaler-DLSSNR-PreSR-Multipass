@@ -59,7 +59,8 @@ void SimulateInitNGXParameters(
     bool ampereMfgActive,
     int ampereMaxFrames,
     bool isUnrealEngine = false,
-    bool adaMfgActive = false)
+    bool adaMfgActive = false,
+    bool is3101Runtime = false)
 {
     // Mutual exclusion: Ada unlock is disabled if Ampere unlock is enabled
     if (ampereMfgActive)
@@ -88,7 +89,8 @@ void SimulateInitNGXParameters(
         }
         else if (ampereMfgActive)
         {
-            countMax = (ampereMaxFrames > 0 && ampereMaxFrames <= 3) ? ampereMaxFrames : 3;
+            const int ceiling = is3101Runtime ? 3 : 5;
+            countMax = (ampereMaxFrames > 0 && ampereMaxFrames <= ceiling) ? ampereMaxFrames : ceiling;
         }
         else if (adaMfgActive)
         {
@@ -134,7 +136,7 @@ int main()
         printf("  [PASS] Case 1: External FG with AmpereMfgUnlock advertises FG capabilities (2X)\n");
     }
 
-    // Case 2: External FG with default 3X/4X capability (ampereMaxFrames = 3 or 0)
+    // Case 2: External FG with default capability (ampereMaxFrames = 0 -> ceiling: 5 on 310.9, 3 on 310.1)
     {
         MockParams params;
         SimulateInitNGXParameters(
@@ -143,12 +145,29 @@ int main()
             FGInput::NoFG,
             FGNvngxReplacement::None,
             /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/0); // Runtime default -> clamped to 3
+            /*ampereMaxFrames=*/0,
+            /*isUnrealEngine=*/false,
+            /*adaMfgActive=*/false,
+            /*is3101Runtime=*/true); // 310.1 runtime default -> 3
 
         assert(params.Get("FrameGeneration.Available") == 1);
         assert(params.Get("DLSSG.Available") == 1);
         assert(params.Get("DLSSG.MultiFrameCountMax") == 3);
-        printf("  [PASS] Case 2: External FG with default capability limit advertises max 3\n");
+
+        MockParams params3109;
+        SimulateInitNGXParameters(
+            params3109,
+            API::DX12,
+            FGInput::NoFG,
+            FGNvngxReplacement::None,
+            /*ampereMfgActive=*/true,
+            /*ampereMaxFrames=*/0,
+            /*isUnrealEngine=*/false,
+            /*adaMfgActive=*/false,
+            /*is3101Runtime=*/false); // 310.9 runtime default -> 5
+
+        assert(params3109.Get("DLSSG.MultiFrameCountMax") == 5);
+        printf("  [PASS] Case 2: External FG with default capability limit advertises runtime ceiling (3 on 310.1, 5 on 310.9)\n");
     }
 
     // Case 3: Standard OptiScaler without FG enabled (clean baseline)
@@ -240,6 +259,36 @@ int main()
         // Must use Ampere max frames (2), NOT Ada max frames (5)
         assert(params.Get("DLSSG.MultiFrameCountMax") == 2);
         printf("  [PASS] Case 7: Mutual exclusion between Ampere and Ada MFG strictly enforced\n");
+    }
+
+    // Case 8: Runtime Model Ceiling - 310.9 supports up to 5 (6X), 310.1 clamps to 3 (4X)
+    {
+        MockParams params3109;
+        SimulateInitNGXParameters(
+            params3109,
+            API::DX12,
+            FGInput::NoFG,
+            FGNvngxReplacement::None,
+            /*ampereMfgActive=*/true,
+            /*ampereMaxFrames=*/5,
+            /*isUnrealEngine=*/false,
+            /*adaMfgActive=*/false,
+            /*is3101Runtime=*/false);
+        assert(params3109.Get("DLSSG.MultiFrameCountMax") == 5);
+
+        MockParams params3101;
+        SimulateInitNGXParameters(
+            params3101,
+            API::DX12,
+            FGInput::NoFG,
+            FGNvngxReplacement::None,
+            /*ampereMfgActive=*/true,
+            /*ampereMaxFrames=*/5,
+            /*isUnrealEngine=*/false,
+            /*adaMfgActive=*/false,
+            /*is3101Runtime=*/true);
+        assert(params3101.Get("DLSSG.MultiFrameCountMax") == 3);
+        printf("  [PASS] Case 8: Runtime Model ceiling respected (5 on 310.9, 3 on 310.1)\n");
     }
 
     printf("[TEST] All NGX Frame Generation parameter unit tests passed successfully!\n");

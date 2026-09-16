@@ -416,7 +416,7 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
     }
 
     // Fallback when FGPresent is not hooked for V-sync
-    if (willPresent && Config::Instance()->ForceVsync.has_value())
+    if (willPresent && Config::Instance()->ForceVsync.has_value() && !State::Instance().externalFrameGeneration)
     {
         LOG_DEBUG("ForceVsync: {}, VsyncInterval: {}, SCAllowTearing: {}, realExclusiveFullscreen: {}",
                   Config::Instance()->ForceVsync.value(), Config::Instance()->VsyncInterval.value_or_default(),
@@ -530,6 +530,9 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
         _frameCounter++;
         State::Instance().frameCount = _frameCounter;
+
+        if (State::Instance().currentFG == nullptr)
+            State::Instance().scChanged = false;
     }
 
     LOG_DEBUG("Calling original present");
@@ -924,7 +927,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
     State::Instance().scChanged = true;
 
     if (!_composition && Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen &&
-        State::Instance().currentFG == nullptr)
+        State::Instance().currentFG == nullptr && !State::Instance().externalFrameGeneration)
     {
         LOG_DEBUG("Overriding flags");
         SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
@@ -1173,6 +1176,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::Present1(UINT SyncInterval, UI
 
         // When Reflex can't be used to limit, sleep in present
         if (!State::Instance().reflexLimitsFps && State::Instance().activeFgOutput == FGOutput::NoFG &&
+            !State::Instance().externalFrameGeneration &&
             !IdentifyGpu::getPrimaryGpu().usesDxvk && !XellHooks::canLimit())
             FrameLimit::sleep(false);
     }
@@ -1373,7 +1377,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
     State::Instance().scChanged = true;
 
     if (!_composition && Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen &&
-        State::Instance().currentFG == nullptr)
+        State::Instance().currentFG == nullptr && !State::Instance().externalFrameGeneration)
     {
         LOG_DEBUG("Overriding flags");
         SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
