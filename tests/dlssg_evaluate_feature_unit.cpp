@@ -98,6 +98,11 @@ void SimulateEvaluateFeature(
             frameCount = cfg.FGDLSSGOverrideInterpolationCount.value();
             inParameters->Set("DLSSG.MultiFrameCount", frameCount);
         }
+        else if (frameCount <= 0)
+        {
+            frameCount = 1;
+            inParameters->Set("DLSSG.MultiFrameCount", frameCount);
+        }
 
         state.dlssgDetectedInterpolationCount = frameCount;
         MockReflexHooks::setDlssgFrameCount(frameCount);
@@ -215,6 +220,25 @@ int main()
         assert(count == 1); // Unchanged!
         assert(MockReflexHooks::dlssgFrameCount == 0); // Unchanged!
         printf("  [PASS] Case 5: SuperSampling evaluation leaves DLSSG parameters untouched\n");
+    }
+
+    // Case 6: Unpopulated MultiFrameCount defaults to 1 (2X FG)
+    {
+        MockParameters params; // No DLSSG.MultiFrameCount set
+        MockConfig cfg;        // No override set
+
+        MockState state;
+        MockMfgUnlock::enabledForSession = true;
+        MockReflexHooks::dlssgFrameCount = 0;
+
+        SimulateEvaluateFeature(NVSDK_NGX_Feature_FrameGeneration, &params, state, cfg);
+
+        int count = 0;
+        assert(params.Get("DLSSG.MultiFrameCount", &count) == NVSDK_NGX_Result_Success);
+        assert(count == 1 && "Unpopulated MultiFrameCount must default to 1");
+        assert(MockReflexHooks::dlssgFrameCount == 1);
+        assert(state.dlssgDetectedInterpolationCount == 1);
+        printf("  [PASS] Case 6: Unpopulated MultiFrameCount automatically defaults to 1 (2X FG)\n");
     }
 
     printf("=== All DLSSG Evaluate Feature Unit Tests PASSED! ===\n");

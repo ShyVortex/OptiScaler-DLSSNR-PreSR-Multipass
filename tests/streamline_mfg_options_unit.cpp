@@ -5,33 +5,46 @@
 #include <optional>
 
 // Mock structures mimicking Streamline DLSSG API & OptiScaler state
-namespace sl {
-    enum class Result { eOk = 0, eError = -1 };
-    enum class DLSSGMode { eOff = 0, eOn = 1, eAuto = 2 };
+namespace sl
+{
+enum class Result
+{
+    eOk = 0,
+    eError = -1
+};
+enum class DLSSGMode
+{
+    eOff = 0,
+    eOn = 1,
+    eAuto = 2,
+    eDynamic = 3
+};
 
-    struct DLSSGOptions {
-        uint32_t structVersion = 1;
-        DLSSGMode mode = DLSSGMode::eOff;
-        uint32_t numFramesToGenerate = 1;
-    };
+struct DLSSGOptions
+{
+    uint32_t structVersion = 1;
+    DLSSGMode mode = DLSSGMode::eOff;
+    uint32_t numFramesToGenerate = 1;
+};
 
-    struct DLSSGState {
-        uint32_t structVersion = 1;
-        uint32_t numFramesToGenerateMax = 1;
-    };
-}
+struct DLSSGState
+{
+    uint32_t structVersion = 1;
+    uint32_t numFramesToGenerateMax = 1;
+};
+} // namespace sl
 
 // Mock Config
-struct MockConfig {
+struct MockConfig
+{
     std::optional<int> FGDLSSGOverrideInterpolationCount = std::nullopt;
 
-    void set_volatile_value(int val) {
-        FGDLSSGOverrideInterpolationCount = val;
-    }
+    void set_volatile_value(int val) { FGDLSSGOverrideInterpolationCount = val; }
 };
 
 // Mock MfgUnlock
-struct MockMfgUnlock {
+struct MockMfgUnlock
+{
     static bool enabledForSession;
     static unsigned int unlockedMax;
     static bool pending;
@@ -46,33 +59,31 @@ unsigned int MockMfgUnlock::unlockedMax = 0;
 bool MockMfgUnlock::pending = false;
 
 // Mock ReflexHooks
-struct MockReflexHooks {
+struct MockReflexHooks
+{
     static int dlssgFrameCount;
-    static void setDlssgFrameCount(int count) {
-        dlssgFrameCount = count;
-    }
+    static void setDlssgFrameCount(int count) { dlssgFrameCount = count; }
 };
 
 int MockReflexHooks::dlssgFrameCount = 0;
 
 // Mock OptiScaler State
-struct MockState {
+struct MockState
+{
     std::optional<int> dlssgMfgMax = std::nullopt;
     sl::DLSSGMode dlssgLastSetMode = sl::DLSSGMode::eOff;
 };
 
 // Simulates Streamline DLSSG GetState logic in OptiScaler
-sl::Result SimulateGetState(
-    uint32_t originalStructVersion,
-    sl::DLSSGState& outState,
-    MockState& optiState,
-    MockConfig& config)
+sl::Result SimulateGetState(uint32_t originalStructVersion, sl::DLSSGState& outState, MockState& optiState,
+                            MockConfig& config)
 {
     // Simulating the underlying game/driver SL returning 1 frame max (RTX 40 unmodded default)
     outState.numFramesToGenerateMax = 1;
 
     // RTX 40 MFG Unlock elevation logic
-    if (MockMfgUnlock::EnabledForSession()) {
+    if (MockMfgUnlock::EnabledForSession())
+    {
         unsigned int unlocked = MockMfgUnlock::UnlockedMax();
         if (unlocked == 0)
             unlocked = 5;
@@ -100,12 +111,21 @@ sl::Result SimulateGetState(
 }
 
 // Simulates Streamline DLSSG SetOptions logic in OptiScaler
-sl::Result SimulateSetOptions(
-    sl::DLSSGOptions& options,
-    MockState& state,
-    MockConfig& config)
+sl::Result SimulateSetOptions(sl::DLSSGOptions& options, MockState& state, MockConfig& config,
+                              bool enableDynamicMode = false)
 {
     sl::DLSSGOptions newOptions = options;
+    const auto originalStructVersion = options.structVersion;
+
+    if (enableDynamicMode)
+    {
+        newOptions.mode = sl::DLSSGMode::eDynamic;
+        newOptions.structVersion = std::max(newOptions.structVersion, 5u);
+    }
+    else
+    {
+        newOptions.structVersion = originalStructVersion;
+    }
 
     if (const auto maximum = MockMfgUnlock::UnlockedMax(); maximum > 0)
         state.dlssgMfgMax = std::max(state.dlssgMfgMax.value_or(0), static_cast<int>(maximum));
@@ -166,8 +186,8 @@ int main()
         assert(res == sl::Result::eOk);
         assert(state.dlssgMfgMax.has_value() && state.dlssgMfgMax.value() == 5);
         assert(config.FGDLSSGOverrideInterpolationCount.value() == 2); // Not clamped!
-        assert(opts.numFramesToGenerate == 2); // Correctly set to 3X
-        assert(MockReflexHooks::dlssgFrameCount == 2); // Reflex synced
+        assert(opts.numFramesToGenerate == 2);                         // Correctly set to 3X
+        assert(MockReflexHooks::dlssgFrameCount == 2);                 // Reflex synced
         printf("Test 1 Passed: Ada MFG with 3X override correctly applies 2 generated frames and updates Reflex.\n");
     }
 
@@ -231,7 +251,7 @@ int main()
         assert(res == sl::Result::eOk);
         assert(state.dlssgMfgMax.has_value() && state.dlssgMfgMax.value() == 1);
         assert(config.FGDLSSGOverrideInterpolationCount.value() == 1); // Clamped down to 1!
-        assert(opts.numFramesToGenerate == 1); // Only 1 generated frame
+        assert(opts.numFramesToGenerate == 1);                         // Only 1 generated frame
         assert(MockReflexHooks::dlssgFrameCount == 1);
         printf("Test 4 Passed: Ada MFG disabled correctly clamps excessive ratio to 1 (preserves normal guardrail).\n");
     }
@@ -257,6 +277,37 @@ int main()
         printf("Test 5 Passed: Override count 0 correctly sets DLSSGMode::eOff and 0 frames in Reflex.\n");
     }
 
-    printf("All 5 Streamline DLSSG Options unit tests PASSED successfully.\n");
+    // Test 6: Older Streamline versions (e.g. SL 2.4 structVersion 2 or 3) preserve structVersion
+    // when setting options unless Dynamic MFG is explicitly requested.
+    {
+        MockMfgUnlock::enabledForSession = true;
+        MockMfgUnlock::unlockedMax = 5;
+        MockMfgUnlock::pending = false;
+
+        MockState state;
+        MockConfig config;
+        config.FGDLSSGOverrideInterpolationCount = 2; // 3X
+
+        sl::DLSSGOptions optsV2;
+        optsV2.structVersion = 2;
+        optsV2.mode = sl::DLSSGMode::eOn;
+        optsV2.numFramesToGenerate = 1;
+
+        // Non-dynamic mode preserves structVersion 2
+        sl::Result res1 = SimulateSetOptions(optsV2, state, config, false);
+        assert(res1 == sl::Result::eOk);
+        assert(optsV2.structVersion == 2 && "Must preserve structVersion 2 for older Streamline runtimes");
+        assert(optsV2.numFramesToGenerate == 2);
+
+        // Dynamic mode elevates to structVersion 5
+        sl::DLSSGOptions optsV2Dyn = optsV2;
+        sl::Result res2 = SimulateSetOptions(optsV2Dyn, state, config, true);
+        assert(res2 == sl::Result::eOk);
+        assert(optsV2Dyn.structVersion == 5 && "Dynamic mode must elevate structVersion to 5");
+
+        printf("Test 6 Passed: structVersion is properly preserved for older Streamline versions (v2/v3).\n");
+    }
+
+    printf("All 6 Streamline DLSSG Options unit tests PASSED successfully.\n");
     return 0;
 }

@@ -3227,7 +3227,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ImGui::TextWrapped("Save Settings and restart to apply this change.");
         else if (!status.ModuleFound)
             ImGui::TextWrapped("Waiting for DLSSG to load.");
-        else if (status.AdvertiseMatched && status.ValidateMatched && status.KernelsRewritten)
+        else if (status.AdvertiseMatched && status.ValidateMatched)
             ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied.", status.SnippetVersion.c_str());
         else
             ImGui::TextWrapped("DLSSG %s: unlock unavailable for this runtime.", status.SnippetVersion.c_str());

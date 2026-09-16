@@ -1107,7 +1107,7 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 
     // Avoid reading past the game's struct's size
     sl::DLSSGOptions newOptions {};
-    auto newStructVer = newOptions.structVersion;
+    const auto originalStructVersion = options.structVersion;
 
     if (options.structVersion == 1)
         memcpy(&newOptions, &options, 104);
@@ -1118,7 +1118,9 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
     else
         newOptions = options;
 
-    newOptions.structVersion = newStructVer;
+    // Retain the caller's structVersion so older Streamline runtimes (v1..v3) do not
+    // reject the call with eErrorInvalidParameter, unless Dynamic MFG (v5) is actively requested.
+    newOptions.structVersion = originalStructVersion;
 
     auto& state = State::Instance();
 
@@ -1143,6 +1145,7 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
     if (enableDynamicMode)
     {
         newOptions.mode = sl::DLSSGMode::eDynamic;
+        newOptions.structVersion = std::max(newOptions.structVersion, (size_t) 5);
     }
 
     if (newOptions.mode == sl::DLSSGMode::eDynamic && Config::Instance()->FGDLSSGFramerateTargetDMFG.has_value())

@@ -1183,6 +1183,11 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
             frameCount = cfg.FGDLSSGOverrideInterpolationCount.value();
             InParameters->Set("DLSSG.MultiFrameCount", frameCount);
         }
+        else if (frameCount <= 0)
+        {
+            frameCount = 1;
+            InParameters->Set("DLSSG.MultiFrameCount", frameCount);
+        }
 
         State::Instance().dlssgDetectedInterpolationCount = frameCount;
         ReflexHooks::setDlssgFrameCount(frameCount);
