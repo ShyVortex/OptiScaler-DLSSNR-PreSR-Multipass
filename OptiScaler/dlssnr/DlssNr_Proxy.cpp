@@ -27,6 +27,8 @@ struct ProxyState
     DlssNr::Proxy::Settings settings {};
     unsigned int width = 0, height = 0;
     uint64_t creationEpoch = 0;
+    uint64_t creationFrameCount = 0;
+    uint64_t prepareCallCount = 0;
     ID3D12Device* device = nullptr;
     bool failed = false;
     bool reset = true;
@@ -202,6 +204,7 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         state.width = width;
         state.height = height;
         state.creationEpoch = submissionEpoch;
+        state.creationFrameCount = ++state.prepareCallCount;
         LOG_INFO("DLSS-NR: feature created at {}x{} through {}", width, height,
                  state.compatibility ? "direct compatibility runtime" : "NVIDIA NGX driver");
 
@@ -209,7 +212,8 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         return (unsigned int) NVSDK_NGX_Result_Success;
     }
 
-    *ready = submissionEpoch != state.creationEpoch;
+    ++state.prepareCallCount;
+    *ready = (submissionEpoch != state.creationEpoch) || (state.prepareCallCount > state.creationFrameCount);
     return (unsigned int) NVSDK_NGX_Result_Success;
 }
 
@@ -310,7 +314,8 @@ unsigned int Context::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* 
 bool Context::HasFeature() const { return _impl->state.feature != nullptr; }
 bool Context::Ready(uint64_t epoch) const
 {
-    return HasFeature() && !_impl->state.failed && epoch != _impl->state.creationEpoch;
+    return HasFeature() && !_impl->state.failed &&
+           (epoch != _impl->state.creationEpoch || _impl->state.prepareCallCount > _impl->state.creationFrameCount);
 }
 void Context::AdvanceEpoch(uint64_t epoch) { _impl->TickRetired(epoch); }
 
