@@ -424,16 +424,24 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
                 (UniqueAddress(module, kAdvertisePattern309) && UniqueAddress(module, kValidatePattern309)) ||
                 (UniqueAddress(module, kAdvertisePattern) && UniqueAddress(module, kValidatePattern));
 
+            const bool enableKernelRewrite = Config::Instance()->FGDLSSGAdaBlackwellKernels.value_or_default();
+
             if (knownGates)
             {
-                // Retargeting and both gates form one feature; a count-only unlock repeats frames.
-                g_status.KernelsRewritten = RewriteBlackwellKernels(module);
-
-                if (g_status.KernelsRewritten == 0)
+                if (enableKernelRewrite)
                 {
-                    LOG_WARN("MFG unlock: no compatible interpolation kernels; frame-count gates left unchanged");
-                    return;
+                    g_status.KernelsRewritten = RewriteBlackwellKernels(module);
+                    if (g_status.KernelsRewritten == 0)
+                    {
+                        LOG_WARN("MFG unlock: no compatible interpolation kernels; frame-count gates left unchanged");
+                        return;
+                    }
                 }
+                else
+                {
+                    g_status.KernelsRewritten = 0;
+                }
+
                 const bool advertise = PatchAdvertise(module);
                 const bool validate = PatchValidate(module);
                 g_status.AdvertiseMatched = advertise;
@@ -452,7 +460,11 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
                     g_status.AdvertiseMatched = true;
                     g_status.ValidateMatched = true;
                     g_status.ArchGatesPatched = true;
-                    g_status.KernelsRewritten = RewriteBlackwellKernels(module);
+                    if (enableKernelRewrite)
+                        g_status.KernelsRewritten = RewriteBlackwellKernels(module);
+                    else
+                        g_status.KernelsRewritten = 0;
+
                     LOG_INFO("MFG unlock: nvngx_dlssg.dll arch gates patched for {} generated frames (kernels rewritten: {})",
                              kMaxGeneratedFrames, g_status.KernelsRewritten);
                 }
@@ -473,8 +485,10 @@ unsigned int MfgUnlock::UnlockedMax()
     if (status.ArchGatesPatched && status.AdvertiseMatched && status.ValidateMatched)
         return kMaxGeneratedFrames;
 
-    return status.AdvertiseMatched && status.ValidateMatched && status.KernelsRewritten > 0
-               ? kMaxGeneratedFrames : 0;
+    if (status.AdvertiseMatched && status.ValidateMatched)
+        return kMaxGeneratedFrames;
+
+    return 0;
 }
 
 bool MfgUnlock::Pending()

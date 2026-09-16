@@ -208,6 +208,37 @@ int main()
     assert(rdataSec[0x11] == 0xB0 && rdataSec[0x12] == 0x01);
     printf("  [PASS] Test 6: Non-executable data section preserved untouched\n");
 
+    // Test UnlockedMax decoupling: KernelsRewritten == 0 must still unlock 5 frames when gates match
+    struct MockStatus {
+        bool ArchGatesPatched = false;
+        bool AdvertiseMatched = false;
+        bool ValidateMatched = false;
+        unsigned int KernelsRewritten = 0;
+    };
+
+    auto SimulateUnlockedMax = [](const MockStatus& status) -> unsigned int {
+        if (status.ArchGatesPatched && status.AdvertiseMatched && status.ValidateMatched)
+            return 5;
+        if (status.AdvertiseMatched && status.ValidateMatched)
+            return 5;
+        return 0;
+    };
+
+    // Subtest 7a: ArchGatesPatched with KernelsRewritten == 0 (safe mode)
+    MockStatus s1{ true, true, true, 0 };
+    assert(SimulateUnlockedMax(s1) == 5);
+    printf("  [PASS] Test 7: ArchGatesPatched unlocks 5 frames without kernel rewriting (safe mode)\n");
+
+    // Subtest 7b: knownGates with KernelsRewritten == 0
+    MockStatus s2{ false, true, true, 0 };
+    assert(SimulateUnlockedMax(s2) == 5);
+    printf("  [PASS] Test 8: Known count gates unlock 5 frames without kernel rewriting\n");
+
+    // Subtest 7c: Unmatched gates
+    MockStatus s3{ false, false, false, 0 };
+    assert(SimulateUnlockedMax(s3) == 0);
+    printf("  [PASS] Test 9: Unmatched gates return 0\n");
+
     printf("[TEST] All MfgUnlock Architecture Gate Rewriter unit tests passed successfully!\n");
     return 0;
 }

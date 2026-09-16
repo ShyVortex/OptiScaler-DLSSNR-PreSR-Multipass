@@ -834,8 +834,12 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::SetFullscreenState(BOOL Fullsc
         const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
         const bool isDlssgMod = State::Instance().externalFrameGeneration ||
                                 State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                                State::Instance().activeFgOutput == FGOutput::DLSSG;
-        if (!(presentOwnsLock && isDlssgMod))
+                                State::Instance().activeFgOutput == FGOutput::DLSSG ||
+                                State::Instance().activeFgInput == FGInput::DLSSG ||
+                                Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
+                                Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
+                                State::Instance().dlssgDetectedInterpolationCount > 0;
+        if (!presentOwnsLock && !isDlssgMod)
         {
             OwnedLockGuard lock(_localMutex, 3);
         }
@@ -897,8 +901,12 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
     const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
     const bool isDlssgMod = State::Instance().externalFrameGeneration ||
                             State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                            State::Instance().activeFgOutput == FGOutput::DLSSG;
-    if (!(presentOwnsLock && isDlssgMod))
+                            State::Instance().activeFgOutput == FGOutput::DLSSG ||
+                            State::Instance().activeFgInput == FGInput::DLSSG ||
+                            Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
+                            Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
+                            State::Instance().dlssgDetectedInterpolationCount > 0;
+    if (!presentOwnsLock && !isDlssgMod)
     {
         OwnedLockGuard lock(_localMutex, 1);
     }
@@ -1339,8 +1347,12 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
     const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
     const bool isDlssgMod = State::Instance().externalFrameGeneration ||
                             State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                            State::Instance().activeFgOutput == FGOutput::DLSSG;
-    if (!(presentOwnsLock && isDlssgMod))
+                            State::Instance().activeFgOutput == FGOutput::DLSSG ||
+                            State::Instance().activeFgInput == FGInput::DLSSG ||
+                            Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
+                            Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
+                            State::Instance().dlssgDetectedInterpolationCount > 0;
+    if (!presentOwnsLock && !isDlssgMod)
     {
         OwnedLockGuard lock(_localMutex, 2);
     }
