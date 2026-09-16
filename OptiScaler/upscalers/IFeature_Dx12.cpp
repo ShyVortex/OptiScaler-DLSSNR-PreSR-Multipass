@@ -51,7 +51,27 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
 {
     const bool interop = timingQueue != nullptr;
     if (!interop)
-        submissionEpoch = State::Instance().frameCount;
+    {
+        if (submissionEpoch == 0)
+        {
+            static uint64_t s_lastSeenSwapchain = 0;
+            static uint64_t s_evalFrameCounter = 0;
+
+            const uint64_t scFrames = State::Instance().swapchainFrameCount;
+            if (scFrames > 0 && scFrames != s_lastSeenSwapchain)
+            {
+                s_lastSeenSwapchain = scFrames;
+                submissionEpoch = scFrames;
+                State::Instance().frameCount = scFrames;
+            }
+            else
+            {
+                // Wrapped swapchain is either bypassed or not advancing frame count (e.g. external FG).
+                submissionEpoch = ++s_evalFrameCounter;
+                State::Instance().frameCount = submissionEpoch;
+            }
+        }
+    }
     if (timingQueue == nullptr)
         timingQueue = State::Instance().currentCommandQueue;
     if (!IsInited())

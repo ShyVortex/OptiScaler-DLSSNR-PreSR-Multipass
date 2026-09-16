@@ -247,6 +247,7 @@ class State
     bool fakenvapiReloadLowLatency = false;
     UINT64 reflexFrameId = 0;
     UINT64 frameCount = 0;
+    UINT64 swapchainFrameCount = 0;
     bool vkAntiLagSupported = false;
 
     // for realtime changes

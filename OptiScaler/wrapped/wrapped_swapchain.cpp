@@ -462,6 +462,7 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
             if (willPresent)
             {
                 _frameCounter++;
+                State::Instance().swapchainFrameCount = _frameCounter;
                 State::Instance().frameCount = _frameCounter;
             }
 
@@ -529,6 +530,7 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 #endif
 
         _frameCounter++;
+        State::Instance().swapchainFrameCount = _frameCounter;
         State::Instance().frameCount = _frameCounter;
 
         if (State::Instance().currentFG == nullptr)
