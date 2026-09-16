@@ -6,7 +6,7 @@ on:
       version:
         description: 'Package Version Tag'
         required: true
-        default: 'v0.9.1'
+        default: 'v0.9.2'
         type: string
       include_ampere_mfg:
         description: 'Include RTX 20/30 (SM75/SM86) MFG (dlssg_sm86.dll)'
