@@ -40,13 +40,18 @@ std::vector<std::filesystem::path> CompatibilityRuntime::CandidatePaths()
     return candidates;
 }
 
+std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(const std::filesystem::path& candidate, ID3D12Device* device)
+{
+    return Open(candidate, device,
+                NVNGXProxy::D3D12_GetCapabilityParameters(), NVNGXProxy::D3D12_DestroyParameters(),
+                State::Instance().NVNGX_ApplicationDataPath);
+}
+
 std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device* device)
 {
     for (const auto& candidate : CandidatePaths())
     {
-        if (auto runtime = Open(candidate, device,
-                                NVNGXProxy::D3D12_GetCapabilityParameters(), NVNGXProxy::D3D12_DestroyParameters(),
-                                State::Instance().NVNGX_ApplicationDataPath))
+        if (auto runtime = TryOpen(candidate, device))
             return runtime;
     }
     LOG_INFO("NR compatibility: no supported direct runtime available; preserving driver failure");

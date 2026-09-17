@@ -16,8 +16,13 @@ namespace CompatibilityMock {
 bool available=false;
 unsigned opens=0,creates=0,evaluates=0,releases=0,destroyed=0;
 NVSDK_NGX_Result createResult=NVSDK_NGX_Result_Success;
+std::vector<std::filesystem::path> candidates;
 }
 namespace DlssNr {
+std::vector<std::filesystem::path> CompatibilityRuntime::CandidatePaths() { return CompatibilityMock::candidates; }
+std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(const std::filesystem::path&, ID3D12Device* d) {
+    return CompatibilityRuntime::TryOpen(d);
+}
 std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device*) {
     ++CompatibilityMock::opens;
     return CompatibilityMock::available ? std::shared_ptr<CompatibilityRuntime>(new CompatibilityRuntime()) : nullptr;

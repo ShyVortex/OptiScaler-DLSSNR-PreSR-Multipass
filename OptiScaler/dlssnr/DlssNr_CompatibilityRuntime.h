@@ -19,6 +19,7 @@ class CompatibilityRuntime
 
     static std::vector<std::filesystem::path> CandidatePaths();
     static std::shared_ptr<CompatibilityRuntime> TryOpen(ID3D12Device* device);
+    static std::shared_ptr<CompatibilityRuntime> TryOpen(const std::filesystem::path& path, ID3D12Device* device);
     static std::shared_ptr<CompatibilityRuntime> Open(const std::filesystem::path& path, ID3D12Device* device,
                                                      Allocate allocate, Destroy destroy,
                                                      const std::filesystem::path& dataPath = {});

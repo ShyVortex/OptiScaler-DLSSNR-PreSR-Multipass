@@ -180,13 +180,43 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         LOG_INFO("NR diagnostic CreateFeature(18): result=0x{:08X} handle={}", (unsigned)created, (void*)state.feature);
         if (NVSDK_NGX_FAILED(created) && !state.feature)
         {
-            state.compatibility = CompatibilityRuntime::TryOpen(device);
-            if (state.compatibility)
+            const auto candidates = CompatibilityRuntime::CandidatePaths();
+            if (!candidates.empty())
             {
-                SetCreationParameters(state.params, settings, width, height);
-                created = state.compatibility->Create(cmdList, state.params, &state.feature);
-                LOG_INFO("NR compatibility: CreateFeature(18) result=0x{:08X} handle={}",
-                         (unsigned)created, (void*)state.feature);
+                for (const auto& candidate : candidates)
+                {
+                    state.compatibility = CompatibilityRuntime::TryOpen(candidate, device);
+                    if (!state.compatibility)
+                        continue;
+
+                    SetCreationParameters(state.params, settings, width, height);
+                    created = state.compatibility->Create(cmdList, state.params, &state.feature);
+                    LOG_INFO("NR compatibility: candidate {} CreateFeature(18) result=0x{:08X} handle={}",
+                             candidate.string(), (unsigned)created, (void*)state.feature);
+
+                    if (created == NVSDK_NGX_Result_Success && state.feature != nullptr)
+                        break;
+
+                    LOG_WARN("NR compatibility: candidate {} CreateFeature(18) failed (0x{:08X}); releasing runtime to attempt next candidate",
+                             candidate.string(), (unsigned)created);
+                    if (state.feature)
+                    {
+                        state.compatibility->Release(state.feature);
+                        state.feature = nullptr;
+                    }
+                    state.compatibility.reset();
+                }
+            }
+            else
+            {
+                state.compatibility = CompatibilityRuntime::TryOpen(device);
+                if (state.compatibility)
+                {
+                    SetCreationParameters(state.params, settings, width, height);
+                    created = state.compatibility->Create(cmdList, state.params, &state.feature);
+                    LOG_INFO("NR compatibility: CreateFeature(18) result=0x{:08X} handle={}",
+                             (unsigned)created, (void*)state.feature);
+                }
             }
         }
         NgxDiagnostics::RuntimeReport(cmdList, device, "after CreateFeature(18)");
