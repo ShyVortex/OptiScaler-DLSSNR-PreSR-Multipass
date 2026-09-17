@@ -786,11 +786,11 @@ class Config
     CustomOptional<bool> FGDLSSGAdaBlackwellKernels { false };
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
-    CustomOptional<int>  FGDLSSGAmpereMfgMaxFrames { 5 };       // 0-5: 0=runtime default (5=6X on 310.9, 3=4X on 310.1), 1=2X, 2=3X, 3=4X, 4=5X, 5=6X
+    CustomOptional<int>  FGDLSSGAmpereMfgMaxFrames { 3 };       // 0-5: 0=runtime default (3=4X factory default, up to 5=6X on 310.9), 1=2X, 2=3X, 3=4X, 4=5X, 5=6X
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgKernelImage;     // Auto / PTX / Cubin
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgRouter;          // Auto / SM86 / SM75
     CustomOptional<bool> FGDLSSGAmpereMfgHardwareBilinear { false };        // Optional approximate sampling (SM86 only)
-    CustomOptional<bool> FGDLSSGAmpereMfgOptimized { true };                // 0.3.0: 19-32% faster kernel pipeline (recommended)
+    CustomOptional<int>  FGDLSSGAmpereMfgOptimized { 1 };       // 0.3.2 consistency tiers: 0=stock, 1=bit-identical (recommended default), 2=fast lossy (>50 dB), 3=fastest lossy
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgPreset;          // 0.3.0: UI recomposition preset: Auto / A / B
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };

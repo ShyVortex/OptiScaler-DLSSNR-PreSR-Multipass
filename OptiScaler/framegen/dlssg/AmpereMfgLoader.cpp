@@ -83,7 +83,7 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
     int hwBilinear = cfg->FGDLSSGAmpereMfgHardwareBilinear.value_or_default() ? 1 : 0;
     const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
     std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
-    const bool optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(true);
+    const int optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(1);
     const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
     int logLevel = 1;
 

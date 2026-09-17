@@ -105,12 +105,12 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     return ss.str();
 }
 
-/// Formats dlssg_sm86.ini content with 0.3.0 specification ([General], [FrameGeneration] Optimized, MaxGeneratedFrames up to 5, [Compatibility] Preset).
-inline std::string FormatIniContent030(int maxFrames, bool optimized = true, const std::string& preset = "Auto",
+/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3, MaxGeneratedFrames up to 5, [Compatibility] Preset).
+inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const std::string& preset = "Auto",
                                        const std::string& kernelImg = "Auto", int hwBilinear = 0,
                                        const std::string& router = "Auto", int logLevel = 1)
 {
-    // Clamping of MaxGeneratedFrames for 0.3.0: 1 to 5 (5 = 6X)
+    // Clamping of MaxGeneratedFrames for 0.3.x: 1 to 5 (5 = 6X)
     if (maxFrames <= 0 || maxFrames > 5)
         maxFrames = 5;
 
@@ -130,12 +130,12 @@ inline std::string FormatIniContent030(int maxFrames, bool optimized = true, con
     else if (validPreset == "b")
         validPreset = "B";
 
-    int validOptimized = optimized ? 1 : 0;
+    int validOptimized = (optimized >= 0 && optimized <= 3) ? optimized : 1;
     int validHwBilinear = (hwBilinear == 1) ? 1 : 0;
     int validLogLevel = (logLevel >= 0 && logLevel <= 3) ? logLevel : 1;
 
     std::ostringstream ss;
-    ss << "; DLSSG SM86 0.3.0 configuration. Restart the game after changing this file.\n";
+    ss << "; DLSSG SM86 0.3.x configuration. Restart the game after changing this file.\n";
     ss << "[General]\n";
     ss << "Enabled=1\n\n";
     ss << "[FrameGeneration]\n";

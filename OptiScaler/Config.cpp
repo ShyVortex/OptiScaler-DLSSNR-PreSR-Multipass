@@ -96,7 +96,10 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGDLSSGAmpereMfgRouter.set_from_config("Auto");
             }
             FGDLSSGAmpereMfgHardwareBilinear.set_from_config(readBool("DLSSG", "AmpereMfgHardwareBilinear"));
-            FGDLSSGAmpereMfgOptimized.set_from_config(readBool("DLSSG", "AmpereMfgOptimized"));
+            if (auto intOpt = readInt("DLSSG", "AmpereMfgOptimized"); intOpt.has_value())
+                FGDLSSGAmpereMfgOptimized.set_from_config(intOpt.value());
+            else if (auto boolOpt = readBool("DLSSG", "AmpereMfgOptimized"); boolOpt.has_value())
+                FGDLSSGAmpereMfgOptimized.set_from_config(boolOpt.value() ? 1 : 0);
             if (auto amperePreset = readString("DLSSG", "AmpereMfgPreset"); amperePreset.has_value())
             {
                 if (lstrcmpiA(amperePreset.value().c_str(), "a") == 0)
@@ -1028,7 +1031,7 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgKernelImage", Instance()->FGDLSSGAmpereMfgKernelImage.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgRouter", Instance()->FGDLSSGAmpereMfgRouter.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgHardwareBilinear", GetBoolValue(Instance()->FGDLSSGAmpereMfgHardwareBilinear.value_for_config()).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgOptimized", GetBoolValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgOptimized", GetIntValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgPreset", Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
