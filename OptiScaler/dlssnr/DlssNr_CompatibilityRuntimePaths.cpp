@@ -8,18 +8,43 @@
 
 namespace DlssNr
 {
-std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device* device)
+std::vector<std::filesystem::path> CompatibilityRuntime::CandidatePaths()
 {
     std::vector<std::filesystem::path> paths;
-    for (const auto& path : State::Instance().NVNGX_FeatureInfo_Paths) paths.emplace_back(path);
-    paths.push_back(Util::ExePath().parent_path());
+    // 1. Explicit user config override has highest priority
+    if (Config::Instance()->MainDllPath.has_value())
+        paths.emplace_back(Config::Instance()->MainDllPath.value());
+    // 2. OptiScaler dedicated directory (where OptiScaler DLL and components reside)
     paths.push_back(Util::DllPath().parent_path());
-    if (Config::Instance()->MainDllPath.has_value()) paths.emplace_back(Config::Instance()->MainDllPath.value());
+    // 3. Real game executable directory (where users place modded DLLs beside the exe)
+    paths.push_back(Util::ExePath().parent_path());
+    // 4. Game internal Streamline / feature directories as lowest-priority fallback
+    for (const auto& path : State::Instance().NVNGX_FeatureInfo_Paths)
+        paths.emplace_back(path);
+
+    std::vector<std::filesystem::path> candidates;
     std::set<std::wstring> visited;
-    for (const auto& path : paths)
+    for (const auto& dir : paths)
     {
-        if (!visited.insert(Util::ToLower(std::filesystem::absolute(path).lexically_normal().wstring())).second) continue;
-        if (auto runtime = Open(path / L"nvngx_dlssnr.dll", device,
+        if (dir.empty())
+            continue;
+        std::error_code ec;
+        auto candidate = std::filesystem::absolute(dir / L"nvngx_dlssnr.dll", ec).lexically_normal();
+        if (ec)
+            continue;
+        if (!visited.insert(Util::ToLower(candidate.wstring())).second)
+            continue;
+        if (std::filesystem::exists(candidate, ec) && !std::filesystem::is_directory(candidate, ec))
+            candidates.push_back(candidate);
+    }
+    return candidates;
+}
+
+std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device* device)
+{
+    for (const auto& candidate : CandidatePaths())
+    {
+        if (auto runtime = Open(candidate, device,
                                 NVNGXProxy::D3D12_GetCapabilityParameters(), NVNGXProxy::D3D12_DestroyParameters(),
                                 State::Instance().NVNGX_ApplicationDataPath))
             return runtime;

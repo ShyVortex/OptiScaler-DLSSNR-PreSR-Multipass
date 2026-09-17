@@ -17,6 +17,7 @@ class CompatibilityRuntime
     using Allocate = NVSDK_NGX_Result (*)(NVSDK_NGX_Parameter**);
     using Destroy = NVSDK_NGX_Result (*)(NVSDK_NGX_Parameter*);
 
+    static std::vector<std::filesystem::path> CandidatePaths();
     static std::shared_ptr<CompatibilityRuntime> TryOpen(ID3D12Device* device);
     static std::shared_ptr<CompatibilityRuntime> Open(const std::filesystem::path& path, ID3D12Device* device,
                                                      Allocate allocate, Destroy destroy,
