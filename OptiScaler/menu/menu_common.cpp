@@ -3297,20 +3297,32 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             // MaxGeneratedFrames slider
             int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-            const char* frameLabels[] = { "Capability default (6X)", "1 (2X)", "2 (3X)", "3 (4X)", "4 (5X)", "5 (6X)" };
-            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Capability default (6X)";
+            const char* frameLabels[] = { "Factory default (4X)", "1 (2X)", "2 (3X)", "3 (4X)", "4 (5X)", "5 (6X)" };
+            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Factory default (4X)";
             if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 5, currentLabel))
                 config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
             ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X, 4=5X, 5=6X). The game chooses the actual count.\n"
-                           "0 = Default capability limit (allows up to 6X on 310.9 runtime, 4X on 310.1).\n"
+                           "0 = Factory default limit (4X / 3 generated frames). Up to 6X (5 generated frames) can be selected.\n"
                            "Save Settings and restart to apply.");
 
-            // Optimized Kernels checkbox (0.3.0)
-            bool optimized = config->FGDLSSGAmpereMfgOptimized.value_or(true);
-            if (ImGui::Checkbox("Optimized Kernels (19-32% faster)##sm86", &optimized))
+            // Optimized Kernels combo (0.3.2)
+            const char* optimizedTiers[] = {
+                "0 - Stock (Original numerics, no acceleration)",
+                "1 - Bit-identical (Recommended default, 19-32% faster)",
+                "2 - Fast lossy (310.9 only, >50 dB PSNR)",
+                "3 - Fastest lossy (Maximum performance)"
+            };
+            int optimized = config->FGDLSSGAmpereMfgOptimized.value_or(1);
+            if (optimized < 0 || optimized > 3)
+                optimized = 1;
+
+            if (ImGui::Combo("Optimized Kernels##sm86", &optimized, optimizedTiers, 4))
                 config->FGDLSSGAmpereMfgOptimized = optimized;
-            ShowHelpMarker("Recommended. Uses the validated fastest kernel pipeline for ~19-32% GPU latency reduction.\n"
-                           "Output is bit-identical to stock numerics. Turn off to use original stock kernels.\n"
+            ShowHelpMarker("Optimization consistency tier for generated frames:\n"
+                           "0 - Stock: Original stock numerics, no kernel acceleration (conservative).\n"
+                           "1 - Bit-identical: Recommended default. Fastest kernel pipeline with 0 dB deviation (~19-32% GPU latency reduction).\n"
+                           "2 - Fast lossy: Faster image-processing kernels with PSNR > 50 dB against stock output (310.9 runtime only).\n"
+                           "3 - Fastest lossy: All lossy accelerations enabled, including texture-unit bilinear sampling.\n"
                            "Save Settings and restart to apply.");
 
             // UI Recomposition Preset combo (0.3.0)

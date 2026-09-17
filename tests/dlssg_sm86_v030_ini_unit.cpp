@@ -42,35 +42,56 @@ int main()
         std::printf("  [PASS] Case 2: MaxGeneratedFrames 1-5 (2X-6X) clamping verified\n");
     }
 
-    // Test 3: Optimized kernels switch (19-32% latency reduction)
+    // Test 3: Optimized kernels 4-tier consistency levels (0.3.2) and backward compatibility
     {
+        // Boolean compatibility
         std::string optTrue = FormatIniContent030(5, true);
         assert(optTrue.find("Optimized=1\n") != std::string::npos);
 
         std::string optFalse = FormatIniContent030(5, false);
         assert(optFalse.find("Optimized=0\n") != std::string::npos);
 
-        std::printf("  [PASS] Case 3: Optimized kernels switch (1 vs 0) verified\n");
+        // 4 consistency tiers: 0=stock, 1=bit-identical, 2=fast lossy, 3=fastest lossy
+        std::string opt0 = FormatIniContent030(5, 0);
+        assert(opt0.find("Optimized=0\n") != std::string::npos);
+
+        std::string opt1 = FormatIniContent030(5, 1);
+        assert(opt1.find("Optimized=1\n") != std::string::npos);
+
+        std::string opt2 = FormatIniContent030(5, 2);
+        assert(opt2.find("Optimized=2\n") != std::string::npos);
+
+        std::string opt3 = FormatIniContent030(5, 3);
+        assert(opt3.find("Optimized=3\n") != std::string::npos);
+
+        // Out-of-range values safely clamp to default tier 1 (Bit-identical)
+        std::string optNegative = FormatIniContent030(5, -1);
+        assert(optNegative.find("Optimized=1\n") != std::string::npos);
+
+        std::string optTooLarge = FormatIniContent030(5, 4);
+        assert(optTooLarge.find("Optimized=1\n") != std::string::npos);
+
+        std::printf("  [PASS] Case 3: Optimized kernels 4-tier consistency levels (0, 1, 2, 3) and clamping verified\n");
     }
 
     // Test 4: UI Recomposition Preset validation (Auto, A, B)
     {
-        std::string pAuto = FormatIniContent030(5, true, "Auto");
+        std::string pAuto = FormatIniContent030(5, 1, "Auto");
         assert(pAuto.find("Preset=Auto\n") != std::string::npos);
 
-        std::string pA = FormatIniContent030(5, true, "A");
+        std::string pA = FormatIniContent030(5, 1, "A");
         assert(pA.find("Preset=A\n") != std::string::npos);
 
-        std::string paLower = FormatIniContent030(5, true, "a");
+        std::string paLower = FormatIniContent030(5, 1, "a");
         assert(paLower.find("Preset=A\n") != std::string::npos);
 
-        std::string pB = FormatIniContent030(5, true, "B");
+        std::string pB = FormatIniContent030(5, 1, "B");
         assert(pB.find("Preset=B\n") != std::string::npos);
 
-        std::string pbLower = FormatIniContent030(5, true, "b");
+        std::string pbLower = FormatIniContent030(5, 1, "b");
         assert(pbLower.find("Preset=B\n") != std::string::npos);
 
-        std::string pInvalid = FormatIniContent030(5, true, "invalid");
+        std::string pInvalid = FormatIniContent030(5, 1, "invalid");
         assert(pInvalid.find("Preset=Auto\n") != std::string::npos);
 
         std::printf("  [PASS] Case 4: UI Recomposition Preset validation (Auto, A, B) verified\n");
@@ -132,6 +153,22 @@ int main()
         std::printf("  [PASS] Case 8: Decoupled 0.3.1 ceiling: 310.9 with SM75 preserves 6X, 310.1 clamps to 4X\n");
     }
 
-    std::printf("=== All DLSSG SM86 0.3.0 INI & Configuration Unit Tests PASSED! ===\n");
+    // Test 9: Factory default 4X (3 frames) resolution in 0.3.2
+    {
+        // Default maxCeiling is 3 (4X)
+        assert(ResolveMaxGeneratedFrames(0) == 3);
+        assert(ResolveMaxGeneratedFrames(-1) == 3);
+        assert(ResolveMaxGeneratedFrames(3) == 3);
+        assert(ResolveMaxGeneratedFrames(1) == 1);
+        assert(ResolveMaxGeneratedFrames(2) == 2);
+
+        // Explicit ceiling 5 allows 5 (6X) when user requests it
+        assert(ResolveMaxGeneratedFrames(5, false, 5) == 5);
+        assert(ResolveMaxGeneratedFrames(0, false, 5) == 5);
+
+        std::printf("  [PASS] Case 9: Factory default 4X (3 frames) resolution and override to 6X verified\n");
+    }
+
+    std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
     return 0;
 }
