@@ -19,6 +19,21 @@
 #include <magic_enum.hpp>
 #endif
 
+#include <Util.h>
+#include <intrin.h>
+
+#pragma intrinsic(_ReturnAddress)
+
+#ifndef NV_GPU_ARCHITECTURE_GA100
+#define NV_GPU_ARCHITECTURE_GA100 0x00000170
+#endif
+#ifndef NV_GPU_ARCHITECTURE_AD100
+#define NV_GPU_ARCHITECTURE_AD100 0x00000190
+#endif
+#ifndef NV_GPU_ARCHITECTURE_GB200
+#define NV_GPU_ARCHITECTURE_GB200 0x000001b0
+#endif
+
 NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle hPhysicalGpu,
                                                            NV_GPU_ARCH_INFO* pGpuArchInfo)
 {
@@ -42,8 +57,52 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
                 Config::Instance()->DisableFlipMetering.set_volatile_value(true);
         }
 
-        LOG_DEBUG("Original arch: {0:X} impl: {1:X} rev: {2:X}!", pGpuArchInfo->architecture,
-                  pGpuArchInfo->implementation, pGpuArchInfo->revision);
+        LOG_DEBUG("Original arch: {0:X} impl: {1:X} rev: {2:X}!", static_cast<uint32_t>(pGpuArchInfo->architecture),
+                  static_cast<uint32_t>(pGpuArchInfo->implementation), static_cast<uint32_t>(pGpuArchInfo->revision));
+
+        // When external mods (e.g. dlssg_sm86) spoof architecture to Ada (0x190) or Blackwell (0x1b0)
+        // to enable Streamline DLSS-G, non-FG callers (like nvngx_dlss for Super Resolution or nvngx_dlssd for Ray Reconstruction)
+        // must NOT see the spoofed architecture. Otherwise, DLSS SR/RR loads Blackwell/Ada-only cubin shaders
+        // (e.g. DLTSS NW E5M3_SKIP FP8 kernels) that execute illegal instructions on Ampere/Turing hardware,
+        // causing DXGI_ERROR_DEVICE_HUNG (0x887A0006) crashes on startup (e.g. in The Last of Us Part II).
+        if (pGpuArchInfo->architecture >= NV_GPU_ARCHITECTURE_AD100)
+        {
+            const auto primaryGpu = IdentifyGpu::getPrimaryGpu();
+            const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ?
+                                      primaryGpu.nvidiaArchInfo.architecture_id :
+                                      primaryGpu.nvidiaArchInfo.architecture;
+
+            if (primaryGpu.vendorId == VendorId::Nvidia && realArch != 0 && realArch < NV_GPU_ARCHITECTURE_AD100)
+            {
+                const void* retAddr = _ReturnAddress();
+                std::string caller = Util::WhoIsTheCaller(const_cast<void*>(retAddr));
+                std::string callerLower = caller;
+                std::transform(callerLower.begin(), callerLower.end(), callerLower.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                const bool isFgCaller = (callerLower.find("sl.common") != std::string::npos ||
+                                         callerLower.find("sl.dlss_g") != std::string::npos ||
+                                         callerLower.find("sl.interposer") != std::string::npos ||
+                                         callerLower.find("dlssg_sm86") != std::string::npos);
+
+                if (!isFgCaller)
+                {
+                    const auto spoofedArch = pGpuArchInfo->architecture;
+                    pGpuArchInfo->architecture = static_cast<NV_GPU_ARCHITECTURE>(realArch);
+                    pGpuArchInfo->architecture_id = static_cast<NV_GPU_ARCHITECTURE>(realArch);
+                    pGpuArchInfo->implementation = primaryGpu.nvidiaArchInfo.implementation;
+                    pGpuArchInfo->implementation_id = primaryGpu.nvidiaArchInfo.implementation_id;
+                    pGpuArchInfo->revision = primaryGpu.nvidiaArchInfo.revision;
+                    pGpuArchInfo->revision_id = primaryGpu.nvidiaArchInfo.revision_id;
+
+                    LOG_INFO("Restored physical GPU arch for non-FG caller '{}': arch: {:X} impl: {:X} rev: {:X} (was spoofed: {:X})",
+                             caller, static_cast<uint32_t>(pGpuArchInfo->architecture),
+                             static_cast<uint32_t>(pGpuArchInfo->implementation),
+                             static_cast<uint32_t>(pGpuArchInfo->revision),
+                             static_cast<uint32_t>(spoofedArch));
+                }
+            }
+        }
 
         // for DLSS on 16xx cards
         // Can't spoof ada for DLSSG here as that breaks DLSS/DLSSD
@@ -51,8 +110,8 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
             pGpuArchInfo->implementation > NV_GPU_ARCH_IMPLEMENTATION_TU106)
         {
             pGpuArchInfo->implementation = NV_GPU_ARCH_IMPLEMENTATION_TU106;
-            LOG_INFO("Spoofed arch: {0:X} impl: {1:X} rev: {2:X}!", pGpuArchInfo->architecture,
-                     pGpuArchInfo->implementation, pGpuArchInfo->revision);
+            LOG_INFO("Spoofed arch: {0:X} impl: {1:X} rev: {2:X}!", static_cast<uint32_t>(pGpuArchInfo->architecture),
+                     static_cast<uint32_t>(pGpuArchInfo->implementation), static_cast<uint32_t>(pGpuArchInfo->revision));
         }
     }
 
