@@ -17,22 +17,63 @@ auto DlssNr_Dx12::State::ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed) -> v
     if (nr.output == nullptr || nr.output->GetDesc().Format == needed)
         return;
 
-    LOG_INFO("DLSS-NR rebuilding surfaces: format {} -> {} (inject point changed)",
-             (int) nr.output->GetDesc().Format, (int) needed);
+    const auto currentFormat = nr.output->GetDesc().Format;
+    LOG_INFO("DLSS-NR adapting surfaces: format {} -> {}",
+             static_cast<uint32_t>(currentFormat), static_cast<uint32_t>(needed));
 
     ForgetCalibration();
 
-    for (auto& model : nr.models)
-        model.RetryAfterFailure();
-    std::fill(std::begin(nr.passCreateFailed), std::end(nr.passCreateFailed), false);
-    modelRunning = false;
+    // Check if we have cached surfaces matching the requested format and current dimensions
+    if (nr.altSurfaces.format == needed &&
+        nr.altSurfaces.width == nr.width && nr.altSurfaces.height == nr.height &&
+        nr.altSurfaces.workWidth == nr.workWidth && nr.altSurfaces.workHeight == nr.workHeight)
+    {
+        std::swap(nr.output, nr.altSurfaces.output);
+        std::swap(nr.passScratch, nr.altSurfaces.passScratch);
+        std::swap(nr.passClamp, nr.altSurfaces.passClamp);
+        std::swap(nr.colorCopy, nr.altSurfaces.colorCopy);
+        std::swap(nr.hdrCopy, nr.altSurfaces.hdrCopy);
+        std::swap(nr.activeColor, nr.altSurfaces.activeColor);
+        std::swap(nr.colorSmall, nr.altSurfaces.colorSmall);
+        std::swap(nr.outputNative, nr.altSurfaces.outputNative);
+        nr.altSurfaces.format = currentFormat;
+    }
+    else
+    {
+        ParkNrResource(nr.altSurfaces.output);
+        ParkNrResource(nr.altSurfaces.passScratch);
+        ParkNrResource(nr.altSurfaces.passClamp);
+        ParkNrResource(nr.altSurfaces.colorCopy);
+        ParkNrResource(nr.altSurfaces.hdrCopy);
+        ParkNrResource(nr.altSurfaces.activeColor);
+        ParkNrResource(nr.altSurfaces.colorSmall);
+        ParkNrResource(nr.altSurfaces.outputNative);
 
-    for (ID3D12Resource** r : { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.colorSmall,
-                                &nr.outputNative, &nr.activeColor })
-        ParkNrResource(*r);
+        nr.altSurfaces.format = currentFormat;
+        nr.altSurfaces.width = nr.width;
+        nr.altSurfaces.height = nr.height;
+        nr.altSurfaces.workWidth = nr.workWidth;
+        nr.altSurfaces.workHeight = nr.workHeight;
+        nr.altSurfaces.output = nr.output;
+        nr.altSurfaces.passScratch = nr.passScratch;
+        nr.altSurfaces.passClamp = nr.passClamp;
+        nr.altSurfaces.colorCopy = nr.colorCopy;
+        nr.altSurfaces.hdrCopy = nr.hdrCopy;
+        nr.altSurfaces.activeColor = nr.activeColor;
+        nr.altSurfaces.colorSmall = nr.colorSmall;
+        nr.altSurfaces.outputNative = nr.outputNative;
+
+        nr.output = nullptr;
+        nr.passScratch = nullptr;
+        nr.passClamp = nullptr;
+        nr.colorCopy = nullptr;
+        nr.hdrCopy = nullptr;
+        nr.activeColor = nullptr;
+        nr.colorSmall = nullptr;
+        nr.outputNative = nullptr;
+    }
 
     nr.passScratchFailed = false;
-
     nr.reset = true;
 }
 
@@ -273,6 +314,16 @@ auto DlssNr_Dx12::State::ReleaseResources() -> void
         ParkNrResource(nr.heldColor);
     }
     nr.heldActive = false;
+
+    ParkNrResource(nr.altSurfaces.output);
+    ParkNrResource(nr.altSurfaces.passScratch);
+    ParkNrResource(nr.altSurfaces.passClamp);
+    ParkNrResource(nr.altSurfaces.colorCopy);
+    ParkNrResource(nr.altSurfaces.hdrCopy);
+    ParkNrResource(nr.altSurfaces.activeColor);
+    ParkNrResource(nr.altSurfaces.colorSmall);
+    ParkNrResource(nr.altSurfaces.outputNative);
+    nr.altSurfaces = {};
 
     if (nr.meter != nullptr)
     {
