@@ -147,6 +147,10 @@ auto DlssNr_Dx12::State::ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D1
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!swapchain || !queue)
         return;
+    // When external frame generation (e.g. dlssg_sm86 or native DLSSG) is active,
+    // editing the underlying display swapchain here races/overwrites DLSSG generated backbuffers.
+    if (::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG)
+        return;
     // Native Streamline owns an app-facing buffer set. Its before-present hook handles NR.
     // Editing the underlying display swapchain here races/is overwritten by DLSSG's own copies.
     if (DlssNr::StreamlinePicture::RenderQueue(swapchain))
@@ -164,7 +168,9 @@ auto DlssNr_Dx12::State::ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain) -
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!swapchain || !late.device || !late.producerQueue ||
         !Config::Instance()->DlssNrFinishedPicture.value_or_default() ||
-        !Config::Instance()->DlssNrEnabled.value_or_default())
+        !Config::Instance()->DlssNrEnabled.value_or_default() ||
+        ::State::Instance().externalFrameGeneration ||
+        ::State::Instance().activeFgOutput == FGOutput::DLSSG)
         return;
     const bool heldPicture = Config::Instance()->DlssNrHoldFrame.value_or_default() && inputHold.active &&
                              late.heldValid && late.heldGeneration == inputHold.generation;

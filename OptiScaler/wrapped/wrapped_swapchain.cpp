@@ -495,10 +495,15 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         if (auto currentFeature = State::Instance().currentFeature; currentFeature != nullptr)
             currentFeature->TickFrozenCheck();
 
-        if (cq && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
-            DlssNr::ApplyToFinishedPicture(pSwapChain, cq);
-        else if (isD3D11 && State::Instance().swapchainInteropApi == SwapchainInteropApi::None)
-            DlssNr::ApplyToFinishedPictureDx11(pSwapChain);
+        const bool externalFgActive = State::Instance().externalFrameGeneration ||
+                                      State::Instance().activeFgOutput == FGOutput::DLSSG;
+        if (!externalFgActive)
+        {
+            if (cq && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
+                DlssNr::ApplyToFinishedPicture(pSwapChain, cq);
+            else if (isD3D11 && State::Instance().swapchainInteropApi == SwapchainInteropApi::None)
+                DlssNr::ApplyToFinishedPictureDx11(pSwapChain);
+        }
 
         // Draw overlay
         MenuOverlayDx::Present(pSwapChain, SyncInterval, Flags, pPresentParameters, pDevice, hWnd, isUWP);
