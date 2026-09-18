@@ -3401,6 +3401,27 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Enabled: Explicitly forces early Blackwell architecture spoofing across all GPUs.\n"
                            "Disabled: Keeps the real GPU architecture (SpoofArchToGame=0).\n"
                            "Save Settings and restart to apply.");
+
+            // Mod Logging Level combo
+            const char* logLevelOptions[] = {
+                "0 - Off",
+                "1 - Default (Info / Errors)",
+                "2 - Debug",
+                "3 - Trace / Verbose (Kernel & Evaluate Telemetry)"
+            };
+            int currentLogLevel = config->FGDLSSGAmpereMfgLogLevel.value_or(1);
+            if (currentLogLevel < 0 || currentLogLevel > 3)
+                currentLogLevel = 1;
+            if (ImGui::Combo("Mod Logging Level##sm86", &currentLogLevel, logLevelOptions, 4))
+            {
+                config->FGDLSSGAmpereMfgLogLevel = currentLogLevel;
+            }
+            ShowHelpMarker("Controls sdli1995's dlssg_sm86 logging level written to dlssg_sm86.ini [Logging] Level:\n"
+                           "0: Off (minimal logging)\n"
+                           "1: Default (info and error logging)\n"
+                           "2: Debug\n"
+                           "3: Trace / Verbose (detailed per-frame kernel execution and evaluate logs for troubleshooting)\n"
+                           "Save Settings and restart to apply.");
         }
 
         ImGui::Unindent();

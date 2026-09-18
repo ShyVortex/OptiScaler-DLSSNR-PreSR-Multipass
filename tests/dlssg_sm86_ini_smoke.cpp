@@ -80,6 +80,12 @@ int main()
         std::string diagLog = FormatIniContent(3, "PTX", 0, "SM86", 2);
         assert(diagLog.find("Level=2") != std::string::npos);
 
+        std::string traceLog = FormatIniContent(3, "PTX", 0, "SM86", 3);
+        assert(traceLog.find("Level=3") != std::string::npos);
+
+        std::string offLog = FormatIniContent(3, "PTX", 0, "SM86", 0);
+        assert(offLog.find("Level=0") != std::string::npos);
+
         std::string invalidLog = FormatIniContent(3, "PTX", 0, "SM86", -1);
         assert(invalidLog.find("Level=1") != std::string::npos);
     }

@@ -208,6 +208,21 @@ int main()
         std::printf("  [PASS] Case 10: Streamline 2.8+ arch spoofing (SpoofArchToGame: auto omitted, 1, 0) verified\n");
     }
 
+    // Test 11: dlssg_sm86 logging level configuration (0-3) and clamping
+    {
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 0).find("[Logging]\nLevel=0\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1).find("[Logging]\nLevel=1\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 2).find("[Logging]\nLevel=2\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 3).find("[Logging]\nLevel=3\n") != std::string::npos);
+
+        // Clamping invalid levels to default 1
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", -1).find("[Logging]\nLevel=1\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 4).find("[Logging]\nLevel=1\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 99).find("[Logging]\nLevel=1\n") != std::string::npos);
+
+        std::printf("  [PASS] Case 11: dlssg_sm86 logging level (0-3) and clamping verified\n");
+    }
+
     std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
     return 0;
 }

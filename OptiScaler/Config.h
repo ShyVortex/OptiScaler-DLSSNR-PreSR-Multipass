@@ -793,6 +793,7 @@ class Config
     CustomOptional<int>  FGDLSSGAmpereMfgOptimized { 1 };       // 0.3.2 consistency tiers: 0=stock, 1=bit-identical (recommended default), 2=fast lossy (>50 dB), 3=fastest lossy
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgPreset;          // 0.3.0: UI recomposition preset: Auto / A / B
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgSpoofArchToGame; // 0.3.3: Streamline/Game arch spoofing: auto / 1 / 0
+    CustomOptional<int>  FGDLSSGAmpereMfgLogLevel { 1 };        // dlssg_sm86 logging level: 0=Off, 1=Default/Info, 2=Debug, 3=Trace/Verbose
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };
     CustomOptional<bool> FGDrawUIOverFG { false };

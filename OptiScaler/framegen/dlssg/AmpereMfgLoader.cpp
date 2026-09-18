@@ -86,10 +86,12 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
     const int optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(1);
     const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
     const std::string spoofArch = cfg->FGDLSSGAmpereMfgSpoofArchToGame.value_or("Auto");
-    int logLevel = 1;
+    int logLevel = cfg->FGDLSSGAmpereMfgLogLevel.value_or(1);
+    if (logLevel < 0 || logLevel > 3)
+        logLevel = 1;
 
-    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {} (hasSm75Support: {}, is3101Runtime: {}) for GPU: {}",
-             maxFrames, optimized, preset, router, spoofArch, hasSm75Support, is3101Runtime, IdentifyGpu::getPrimaryGpu().name);
+    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {}, LogLevel: {} (hasSm75Support: {}, is3101Runtime: {}) for GPU: {}",
+             maxFrames, optimized, preset, router, spoofArch, logLevel, hasSm75Support, is3101Runtime, IdentifyGpu::getPrimaryGpu().name);
 
     return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch);
 }

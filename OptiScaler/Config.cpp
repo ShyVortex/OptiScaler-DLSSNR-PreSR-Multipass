@@ -133,6 +133,15 @@ bool Config::Reload(std::filesystem::path iniPath)
                 }
             }
 
+            if (auto intLog = readInt("DLSSG", "AmpereMfgLogLevel"); intLog.has_value())
+            {
+                int val = intLog.value();
+                if (val >= 0 && val <= 3)
+                    FGDLSSGAmpereMfgLogLevel.set_from_config(val);
+                else
+                    FGDLSSGAmpereMfgLogLevel.reset();
+            }
+
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
                 ExternalFrameGeneration.set_from_config(true);
@@ -1057,6 +1066,7 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgOptimized", GetIntValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgPreset", Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgSpoofArchToGame", Instance()->FGDLSSGAmpereMfgSpoofArchToGame.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgLogLevel", GetIntValue(Instance()->FGDLSSGAmpereMfgLogLevel.value_for_config()).c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())
