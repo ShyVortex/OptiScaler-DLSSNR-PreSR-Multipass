@@ -85,12 +85,13 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
     std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
     const int optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(1);
     const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
+    const std::string spoofArch = cfg->FGDLSSGAmpereMfgSpoofArchToGame.value_or("Auto");
     int logLevel = 1;
 
-    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {} (hasSm75Support: {}, is3101Runtime: {}) for GPU: {}",
-             maxFrames, optimized, preset, router, hasSm75Support, is3101Runtime, IdentifyGpu::getPrimaryGpu().name);
+    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {} (hasSm75Support: {}, is3101Runtime: {}) for GPU: {}",
+             maxFrames, optimized, preset, router, spoofArch, hasSm75Support, is3101Runtime, IdentifyGpu::getPrimaryGpu().name);
 
-    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel);
+    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch);
 }
 
 std::string GenerateIniContent(bool hasSm75Support)

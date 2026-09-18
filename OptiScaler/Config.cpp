@@ -109,6 +109,29 @@ bool Config::Reload(std::filesystem::path iniPath)
                 else
                     FGDLSSGAmpereMfgPreset.set_from_config("Auto");
             }
+            if (auto spoofArch = readString("DLSSG", "AmpereMfgSpoofArchToGame"); spoofArch.has_value())
+            {
+                if (lstrcmpiA(spoofArch.value().c_str(), "1") == 0 ||
+                    lstrcmpiA(spoofArch.value().c_str(), "true") == 0 ||
+                    lstrcmpiA(spoofArch.value().c_str(), "on") == 0 ||
+                    lstrcmpiA(spoofArch.value().c_str(), "enable") == 0 ||
+                    lstrcmpiA(spoofArch.value().c_str(), "enabled") == 0)
+                {
+                    FGDLSSGAmpereMfgSpoofArchToGame.set_from_config("1");
+                }
+                else if (lstrcmpiA(spoofArch.value().c_str(), "0") == 0 ||
+                         lstrcmpiA(spoofArch.value().c_str(), "false") == 0 ||
+                         lstrcmpiA(spoofArch.value().c_str(), "off") == 0 ||
+                         lstrcmpiA(spoofArch.value().c_str(), "disable") == 0 ||
+                         lstrcmpiA(spoofArch.value().c_str(), "disabled") == 0)
+                {
+                    FGDLSSGAmpereMfgSpoofArchToGame.set_from_config("0");
+                }
+                else
+                {
+                    FGDLSSGAmpereMfgSpoofArchToGame.set_from_config("auto");
+                }
+            }
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
@@ -1033,6 +1056,7 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgHardwareBilinear", GetBoolValue(Instance()->FGDLSSGAmpereMfgHardwareBilinear.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgOptimized", GetIntValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgPreset", Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgSpoofArchToGame", Instance()->FGDLSSGAmpereMfgSpoofArchToGame.value_for_config_or("auto").c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())

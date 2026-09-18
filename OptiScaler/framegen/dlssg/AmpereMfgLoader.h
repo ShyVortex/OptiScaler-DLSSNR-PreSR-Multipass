@@ -105,10 +105,11 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     return ss.str();
 }
 
-/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3, MaxGeneratedFrames up to 5, [Compatibility] Preset).
+/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3, MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame).
 inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const std::string& preset = "Auto",
                                        const std::string& kernelImg = "Auto", int hwBilinear = 0,
-                                       const std::string& router = "Auto", int logLevel = 1)
+                                       const std::string& router = "Auto", int logLevel = 1,
+                                       const std::string& spoofArch = "Auto")
 {
     // Clamping of MaxGeneratedFrames for 0.3.x: 1 to 5 (5 = 6X)
     if (maxFrames <= 0 || maxFrames > 5)
@@ -145,7 +146,12 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     ss << "Preset=" << validPreset << "\n";
     ss << "Router=" << validRouter << "\n";
     ss << "KernelImage=" << validKernel << "\n";
-    ss << "HardwareBilinear=" << validHwBilinear << "\n\n";
+    ss << "HardwareBilinear=" << validHwBilinear << "\n";
+    if (spoofArch == "1" || spoofArch == "true")
+        ss << "SpoofArchToGame=1\n";
+    else if (spoofArch == "0" || spoofArch == "false")
+        ss << "SpoofArchToGame=0\n";
+    ss << "\n";
     ss << "[Logging]\n";
     ss << "Level=" << validLogLevel << "\n";
     ss << "Directory=dlssg_sm86\\logs\n\n";
