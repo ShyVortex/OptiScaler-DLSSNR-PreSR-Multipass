@@ -117,12 +117,21 @@ int main()
     // Test 6: Linux DRS multi-frame resolution with 0.3.0 6X ceiling
     {
         uint32_t val = 0;
-        // Request 5 generated frames (6X) on Linux
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5) == true);
+        // Setting 0x104D6667 without explicit override must return false (preserves in-game 2X FG)
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5) == false);
+
+        // Setting 0x104D6667 with explicit user override 5 (6X) on Linux
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5, 5) == true);
         assert(val == 5);
 
-        // Clamping to ceiling
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 8, true, true, val, 5) == true);
+        // Clamping explicit override to 0.3.0 ceiling (5)
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5, 8) == true);
+        assert(val == 5);
+
+        // Dynamic ceiling 0x10562D0F properly scales to 0.3.0 ceiling (5 frames / 6X)
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5) == true);
+        assert(val == 5);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 8, true, true, val, 5) == true);
         assert(val == 5);
 
         std::printf("  [PASS] Case 6: Linux DRS override properly scales to 0.3.0 ceiling (5 frames / 6X)\n");

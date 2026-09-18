@@ -50,19 +50,46 @@ constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562
 
 /// Evaluates whether a DRS query matches a DLSSG multi-frame setting and resolves
 /// the overridden value when running on Linux with Ampere MFG unlock enabled.
-inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, uint32_t& outValue, int maxCeiling = 3)
+inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux,
+                                          bool mfgUnlockEnabled, uint32_t& outValue, int maxCeiling = 3,
+                                          int explicitOverrideCount = 0)
 {
     if (!onLinux || !mfgUnlockEnabled)
         return false;
 
-    // Do not override maximum dynamic multi-frame count when configured for single-frame (<= 1),
-    // because Streamline requires dynamic max > 1 to enable Dynamic MFG.
-    if (settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID && configuredMaxFrames <= 1)
-        return false;
-
-    if (settingId == DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID ||
-        settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID)
+    // Static multi-frame multiplier override:
+    // 0x104D6667 forcibly overrides Streamline's frame generation multiplier.
+    // We only override it when:
+    // 1. An explicit user override is configured (FGDLSSGOverrideInterpolationCount > 0), OR
+    // 2. The user configured single-frame generation (configuredMaxFrames == 1), where the Linux 2X
+    //    elevation workaround in dlssg_sm86.ini requires setting DRS to 1 to force single-frame 2X FG.
+    // If configuredMaxFrames > 1 (e.g. 3 or 5) and no explicit override is set, we do NOT intercept 0x104D6667,
+    // allowing the game's in-engine FG setting (e.g. Cyberpunk 2077 2X FG) to control the multiplier without
+    // causing extreme swapchain pacing judder and micro-stutter.
+    if (settingId == DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID)
     {
+        if (explicitOverrideCount > 0)
+        {
+            int clamped = explicitOverrideCount > maxCeiling ? maxCeiling : explicitOverrideCount;
+            outValue = static_cast<uint32_t>(clamped);
+            return true;
+        }
+        if (configuredMaxFrames == 1)
+        {
+            outValue = 1;
+            return true;
+        }
+        return false;
+    }
+
+    // Dynamic multi-frame ceiling override:
+    // 0x10562D0F sets the maximum generated frame ceiling that Streamline can dynamically select.
+    // Do not override when configured for single-frame (<= 1), because Streamline requires dynamic max > 1.
+    if (settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID)
+    {
+        if (configuredMaxFrames <= 1)
+            return false;
+
         int clamped = configuredMaxFrames;
         if (clamped <= 0 || clamped > maxCeiling)
             clamped = maxCeiling;

@@ -131,8 +131,9 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
     const bool onLinux = State::Instance().isRunningOnLinux || IdentifyGpu::getPrimaryGpu().usesVkd3dProton;
     const bool mfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
     const int configuredFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+    const int explicitOverride = Config::Instance()->FGDLSSGOverrideInterpolationCount.value_or(0);
     uint32_t targetFrames = 0;
-    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames))
+    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames, 5, explicitOverride))
     {
         if (pSetting)
         {

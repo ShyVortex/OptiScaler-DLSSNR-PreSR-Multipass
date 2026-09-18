@@ -1,4 +1,4 @@
-#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+﻿#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -194,15 +194,29 @@ int main()
         uint32_t val = 0;
 
         // On Linux with Ampere MFG unlock enabled:
-        // Setting 0x104D6667 (Override DLSSG multi-frame count)
+        // Setting 0x104D6667 (Override DLSSG multi-frame count, static multiplier):
+        // 1. When configuredMaxFrames == 1 (2X FG), MUST override to 1 (Linux 2X elevation workaround)
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 1, true, true, val) == true);
         assert(val == 1);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 2, true, true, val) == true);
+
+        // 2. When configuredMaxFrames > 1 without explicit override, must NOT intercept 0x104D6667
+        //    to avoid hijacking in-engine 2X FG toggles (e.g. Cyberpunk 2077) which causes micro-stutter
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 2, true, true, val) == false);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val) == false);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val) == false);
+
+        // 3. When an explicit user override is configured (e.g. FGDLSSGOverrideInterpolationCount = 2 for 3X FG),
+        //    MUST override 0x104D6667 to the requested count
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 2) == true);
         assert(val == 2);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 3) == true);
         assert(val == 3);
 
-        // Setting 0x10562D0F (Override maximum DLSSG dynamic multi frame count):
+        // Explicit override clamping to maxCeiling
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 5) == true);
+        assert(val == 3);
+
+        // Setting 0x10562D0F (Override maximum DLSSG dynamic multi frame count, dynamic ceiling):
         // When configured for 1, must NOT override so Dynamic MFG is not falsely declared unsupported
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, true, val) == false);
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 2, true, true, val) == true);
@@ -210,10 +224,8 @@ int main()
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 3, true, true, val) == true);
         assert(val == 3);
 
-        // Clamping on out-of-range configured frames
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 0, true, true, val) == true);
-        assert(val == 3);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 4, true, true, val) == true);
+        // Dynamic ceiling clamping on out-of-range configured frames
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 4, true, true, val, 3) == true);
         assert(val == 3);
 
         // Unrelated setting IDs must NOT be intercepted
