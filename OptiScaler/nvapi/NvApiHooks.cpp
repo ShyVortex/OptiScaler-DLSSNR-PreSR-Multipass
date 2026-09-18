@@ -88,8 +88,8 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
                 if (!isFgCaller)
                 {
                     const auto spoofedArch = pGpuArchInfo->architecture;
-                    pGpuArchInfo->architecture = static_cast<NV_GPU_ARCHITECTURE>(realArch);
-                    pGpuArchInfo->architecture_id = static_cast<NV_GPU_ARCHITECTURE>(realArch);
+                    pGpuArchInfo->architecture = static_cast<decltype(pGpuArchInfo->architecture)>(realArch);
+                    pGpuArchInfo->architecture_id = static_cast<decltype(pGpuArchInfo->architecture_id)>(realArch);
                     pGpuArchInfo->implementation = primaryGpu.nvidiaArchInfo.implementation;
                     pGpuArchInfo->implementation_id = primaryGpu.nvidiaArchInfo.implementation_id;
                     pGpuArchInfo->revision = primaryGpu.nvidiaArchInfo.revision;
