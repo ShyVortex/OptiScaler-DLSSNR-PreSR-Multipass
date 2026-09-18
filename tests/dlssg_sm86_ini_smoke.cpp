@@ -247,30 +247,52 @@ int main()
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, false, val) == false);
     }
 
-    // 12. ShouldFallbackToFsrFg: Linux 2X FG fallback to OptiScaler internal FSR FG
+    // 12. ShouldFallbackToFsrFg: Linux FG fallback to OptiScaler internal FG (FSR FG / XeFG)
     {
+        // Default "auto" setting:
         // On Linux with Ampere MFG unlock enabled and configured for 1 frame: MUST fall back
-        assert(ShouldFallbackToFsrFg(1, true, true) == true);
+        assert(ShouldFallbackToFsrFg(1, true, true, "auto") == true);
+        assert(ShouldFallbackToFsrFg(0, true, true, "auto") == true);
 
-        // On Linux with multi-frame (2 or 3): MUST NOT fall back (uses native Dynamic MFG)
-        assert(ShouldFallbackToFsrFg(2, true, true) == false);
-        assert(ShouldFallbackToFsrFg(3, true, true) == false);
+        // On Linux with multi-frame (2, 3, 5) in "auto" mode: MUST NOT fall back (uses native Dynamic MFG)
+        assert(ShouldFallbackToFsrFg(2, true, true, "auto") == false);
+        assert(ShouldFallbackToFsrFg(3, true, true, "auto") == false);
+        assert(ShouldFallbackToFsrFg(5, true, true, "auto") == false);
 
-        // On Windows (onLinux = false): MUST NEVER fall back (uses native dlssg_sm86)
-        assert(ShouldFallbackToFsrFg(1, false, true) == false);
-        assert(ShouldFallbackToFsrFg(2, false, true) == false);
-        assert(ShouldFallbackToFsrFg(3, false, true) == false);
+        // Force Enabled ("true", "1", "on"): ALWAYS falls back on Linux, even with multi-frame
+        assert(ShouldFallbackToFsrFg(1, true, true, "true") == true);
+        assert(ShouldFallbackToFsrFg(2, true, true, "true") == true);
+        assert(ShouldFallbackToFsrFg(3, true, true, "1") == true);
+        assert(ShouldFallbackToFsrFg(5, true, true, "on") == true);
+
+        // Force Disabled ("false", "0", "off"): NEVER falls back, even with 1 frame
+        assert(ShouldFallbackToFsrFg(1, true, true, "false") == false);
+        assert(ShouldFallbackToFsrFg(1, true, true, "0") == false);
+        assert(ShouldFallbackToFsrFg(1, true, true, "off") == false);
+
+        // On Windows (onLinux = false): MUST NEVER fall back regardless of setting
+        assert(ShouldFallbackToFsrFg(1, false, true, "auto") == false);
+        assert(ShouldFallbackToFsrFg(1, false, true, "true") == false);
+        assert(ShouldFallbackToFsrFg(2, false, true, "true") == false);
 
         // When Ampere MFG unlock is disabled: MUST NOT fall back
-        assert(ShouldFallbackToFsrFg(1, true, false) == false);
-        assert(ShouldFallbackToFsrFg(2, true, false) == false);
+        assert(ShouldFallbackToFsrFg(1, true, false, "auto") == false);
+        assert(ShouldFallbackToFsrFg(1, true, false, "true") == false);
+
+        // ResolveFallbackFgType:
+        assert(ResolveFallbackFgType("fsrfg") == "fsrfg");
+        assert(ResolveFallbackFgType("xefg") == "xefg");
+        assert(ResolveFallbackFgType("XeFG") == "xefg");
+        assert(ResolveFallbackFgType("XEFG") == "xefg");
+        assert(ResolveFallbackFgType("auto") == "fsrfg");
+        assert(ResolveFallbackFgType("") == "fsrfg");
     }
 
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", true) == "PTX");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", false) == "Auto");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3070 Laptop GPU", false) == "PTX");
     assert(ResolveAutoKernelImage(0x160, "NVIDIA GeForce RTX 2080", false) == "PTX");
-    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture, environment routing, Linux 2X elevation, DRS override and FSR FG fallback)");
+    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture, environment routing, Linux 2X elevation, DRS override, configurable FSR/XeFG fallback)");
     return 0;
 }
 

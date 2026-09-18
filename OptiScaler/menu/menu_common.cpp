@@ -3161,7 +3161,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-    const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive);
+    const std::string fallbackSetting = config->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
+    const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive, fallbackSetting);
 
     if (ampereActive)
     {
@@ -3272,11 +3273,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             if (ampereFallbackToFsrFg)
             {
-                ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "Linux 2x FG FSR Fallback ON");
-                ShowHelpMarker("On Linux/Proton with 1 generated frame (2X FG), native dlssg_sm86 driver hooks\n"
-                               "are replaced by OptiScaler's internal FSR FG pipeline (DLSSG -> FSR FG)\n"
-                               "for crash-free, flicker-free presentation.\n"
-                               "To use native Ampere MFG instead, set Max Generated Frames to 2 (3X) or 3 (4X).");
+                const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+                const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
+                ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "Linux FG Fallback ON (%s)", fallbackTypeName);
+                ShowHelpMarker("On Linux/Proton, native dlssg_sm86 driver hooks are replaced by OptiScaler's\n"
+                               "internal FG pipeline (DLSSG -> FSR FG / XeFG) for crash-free, flicker-free presentation.\n"
+                               "Use the settings below to adjust fallback behavior or pipeline target.");
             }
             else
             {
@@ -3422,6 +3424,52 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "2: Debug\n"
                            "3: Trace / Verbose (detailed per-frame kernel execution and evaluate logs for troubleshooting)\n"
                            "Save Settings and restart to apply.");
+
+            // Linux Fallback settings (Linux only)
+            if (onLinux)
+            {
+                const char* fallbackModes[] = {
+                    "Auto (Fallback on 2X only)",
+                    "Force Enabled (Recommended on Proton)",
+                    "Force Disabled (Real SM86 mod)"
+                };
+                std::string currentModeStr = config->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
+                int currentMode = 0;
+                if (currentModeStr == "true" || currentModeStr == "1" || currentModeStr == "on")
+                    currentMode = 1;
+                else if (currentModeStr == "false" || currentModeStr == "0" || currentModeStr == "off")
+                    currentMode = 2;
+
+                if (ImGui::Combo("Linux FG Fallback Mode##sm86", &currentMode, fallbackModes, 3))
+                {
+                    if (currentMode == 1)
+                        config->FGDLSSGAmpereMfgLinuxFsrFallback = "true";
+                    else if (currentMode == 2)
+                        config->FGDLSSGAmpereMfgLinuxFsrFallback = "false";
+                    else
+                        config->FGDLSSGAmpereMfgLinuxFsrFallback = "auto";
+                }
+                ShowHelpMarker("Control fallback to OptiScaler's internal FG pipeline on Linux/Proton:\n"
+                               "Auto: Falls back to internal FG only when configured for 2X FG (MaxFrames=1).\n"
+                               "Force Enabled: Always uses internal FG, bypassing native dlssg_sm86 for smooth pacing.\n"
+                               "Force Disabled: Always uses external dlssg_sm86 mod.\n"
+                               "Save Settings and restart to apply.");
+
+                const char* fallbackPipelines[] = {
+                    "FSR FG (Fast, stable, built-in)",
+                    "XeFG (Intel XeSS FG, requires libxess_fg.dll)"
+                };
+                std::string currentPipeStr = config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg");
+                int currentPipe = (currentPipeStr == "xefg") ? 1 : 0;
+                if (ImGui::Combo("Fallback Pipeline##sm86", &currentPipe, fallbackPipelines, 2))
+                {
+                    config->FGDLSSGAmpereMfgLinuxFallbackType = (currentPipe == 1) ? "xefg" : "fsrfg";
+                }
+                ShowHelpMarker("Select internal FG pipeline used during Linux fallback:\n"
+                               "FSR FG: Recommended default. Fast, low overhead, built into OptiScaler.\n"
+                               "XeFG: Intel XeSS FG. Requires libxess_fg.dll in game folder.\n"
+                               "Save Settings and restart to apply.");
+            }
         }
 
         ImGui::Unindent();
@@ -3432,7 +3480,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         if (state.externalFrameGeneration)
             ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
         else if (ampereFallbackToFsrFg)
-            ImGui::TextWrapped("Linux 2x FG FSR Fallback is active. Multiplier is controlled via Max Generated Frames above or in-game settings.");
+        {
+            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
+            ImGui::TextWrapped("Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames above or in-game settings.", fallbackTypeName);
+        }
         return;
     }
 

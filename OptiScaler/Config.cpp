@@ -142,6 +142,34 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGDLSSGAmpereMfgLogLevel.reset();
             }
 
+            if (auto linuxFallback = readString("DLSSG", "AmpereMfgLinuxFsrFallback"); linuxFallback.has_value())
+            {
+                if (lstrcmpiA(linuxFallback.value().c_str(), "true") == 0 ||
+                    lstrcmpiA(linuxFallback.value().c_str(), "1") == 0 ||
+                    lstrcmpiA(linuxFallback.value().c_str(), "on") == 0)
+                {
+                    FGDLSSGAmpereMfgLinuxFsrFallback.set_from_config("true");
+                }
+                else if (lstrcmpiA(linuxFallback.value().c_str(), "false") == 0 ||
+                         lstrcmpiA(linuxFallback.value().c_str(), "0") == 0 ||
+                         lstrcmpiA(linuxFallback.value().c_str(), "off") == 0)
+                {
+                    FGDLSSGAmpereMfgLinuxFsrFallback.set_from_config("false");
+                }
+                else
+                {
+                    FGDLSSGAmpereMfgLinuxFsrFallback.set_from_config("auto");
+                }
+            }
+
+            if (auto fallbackType = readString("DLSSG", "AmpereMfgLinuxFallbackType"); fallbackType.has_value())
+            {
+                if (lstrcmpiA(fallbackType.value().c_str(), "xefg") == 0)
+                    FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("xefg");
+                else
+                    FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("fsrfg");
+            }
+
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
                 ExternalFrameGeneration.set_from_config(true);
@@ -1067,6 +1095,8 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgPreset", Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgSpoofArchToGame", Instance()->FGDLSSGAmpereMfgSpoofArchToGame.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgLogLevel", GetIntValue(Instance()->FGDLSSGAmpereMfgLogLevel.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgLinuxFsrFallback", Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType", Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())

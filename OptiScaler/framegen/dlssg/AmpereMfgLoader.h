@@ -38,11 +38,30 @@ inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ =
     return configuredMaxFrames;
 }
 
-/// Returns true if single-frame 2X FG on Linux should fall back to OptiScaler's
-/// internal FSR FG pipeline (DLSSG input -> FSR FG output) instead of sideloading dlssg_sm86.
-inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled)
+/// Returns true if Linux FG should fall back to OptiScaler's internal FG pipeline (DLSSG input -> FSRFG/XeFG output)
+/// instead of sideloading dlssg_sm86.
+/// Mode: "auto" (default, falls back when configuredMaxFrames <= 1), "true"/"on"/"1" (force fallback), "false"/"off"/"0" (force external dlssg_sm86).
+inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, const std::string& fallbackSetting = "auto")
 {
-    return onLinux && mfgUnlockEnabled && (configuredMaxFrames == 1);
+    if (!onLinux || !mfgUnlockEnabled)
+        return false;
+
+    if (fallbackSetting == "true" || fallbackSetting == "1" || fallbackSetting == "on" || fallbackSetting == "True")
+        return true;
+
+    if (fallbackSetting == "false" || fallbackSetting == "0" || fallbackSetting == "off" || fallbackSetting == "False")
+        return false;
+
+    // "auto": fall back to internal FG on Linux when configured for single-frame (2X FG)
+    return (configuredMaxFrames <= 1);
+}
+
+/// Resolves the fallback pipeline type string ("fsrfg" or "xefg")
+inline std::string ResolveFallbackFgType(const std::string& fallbackType = "fsrfg")
+{
+    if (fallbackType == "xefg" || fallbackType == "XeFG" || fallbackType == "XEFG")
+        return "xefg";
+    return "fsrfg";
 }
 
 constexpr uint32_t DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID = 0x104D6667;

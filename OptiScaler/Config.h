@@ -794,6 +794,8 @@ class Config
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgPreset;          // 0.3.0: UI recomposition preset: Auto / A / B
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgSpoofArchToGame; // 0.3.3: Streamline/Game arch spoofing: auto / 1 / 0
     CustomOptional<int>  FGDLSSGAmpereMfgLogLevel { 1 };        // dlssg_sm86 logging level: 0=Off, 1=Default/Info, 2=Debug, 3=Trace/Verbose
+    CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFsrFallback; // Linux fallback mode: auto / true / false
+    CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFallbackType; // Target pipeline: fsrfg / xefg
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };
     CustomOptional<bool> FGDrawUIOverFG { false };

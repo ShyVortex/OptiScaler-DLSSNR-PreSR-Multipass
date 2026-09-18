@@ -1875,7 +1875,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         const bool onLinux = State::Instance().isRunningOnLinux;
         const bool ampereMfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
         const int ampereMaxFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-        const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(ampereMaxFrames, onLinux, ampereMfgUnlock);
+        const std::string ampereFallbackSetting = Config::Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
+        const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(ampereMaxFrames, onLinux, ampereMfgUnlock, ampereFallbackSetting);
 
         // Initial state of FG
         State::Instance().externalFrameGeneration = (Config::Instance()->ExternalFrameGeneration.value_or_default() || ampereMfgUnlock) && !ampereFallbackToFsrFg;
@@ -1895,14 +1896,19 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         }
         else if (ampereFallbackToFsrFg)
         {
-            // On Linux / Proton with 1 generated frame, native DLSS-G fails or crashes in DXVK-NVAPI/Streamline.
-            // Automatically fall back to OptiScaler's internal FSR FG pipeline (DLSSG input -> FSR FG output).
+            // On Linux / Proton, unpaced 2X DLSS-G fails or drops frames without hardware flip metering.
+            // Automatically fall back to OptiScaler's internal FG pipeline (DLSSG input -> FSR FG / XeFG output).
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
             cfg->FGInput.set_volatile_value(FGInput::DLSSG);
-            cfg->FGOutput.set_volatile_value(FGOutput::FSRFG);
+            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            if (fallbackType == "xefg")
+                cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
+            else
+                cfg->FGOutput.set_volatile_value(FGOutput::FSRFG);
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
-            LOG_INFO("AmpereMfgLoader: On Linux with 2X FG (MaxFrames=1), falling back to internal FSR FG (FGInput=DLSSG, FGOutput=FSRFG)");
+            LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} (FGInput=DLSSG, FGOutput={})",
+                     ampereFallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"), (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();

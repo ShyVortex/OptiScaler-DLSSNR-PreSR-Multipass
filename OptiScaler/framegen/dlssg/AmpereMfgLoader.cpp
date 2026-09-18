@@ -122,12 +122,15 @@ void TrySetup()
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
     const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
 
-    if (ShouldFallbackToFsrFg(configuredFrames, onLinux, true))
+    const std::string fallbackSetting = cfg->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
+    const std::string fallbackType = ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+    if (ShouldFallbackToFsrFg(configuredFrames, onLinux, true, fallbackSetting))
     {
         s_status.Enabled = true;
         s_status.FsrFallbackActive = true;
         s_status.ErrorMessage.clear();
-        LOG_INFO("AmpereMfgLoader: On Linux with 1 generated frame, falling back to OptiScaler internal FSR FG instead of sideloading dlssg_sm86");
+        LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of sideloading dlssg_sm86",
+                 fallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"));
         return;
     }
 
