@@ -169,6 +169,36 @@ int main()
         std::printf("  [PASS] Case 9: Factory default 4X (3 frames) resolution and override to 6X verified\n");
     }
 
+    // Test 10: Streamline 2.8+ architecture spoofing (SpoofArchToGame in 0.3.3)
+    {
+        // Default "Auto": SpoofArchToGame key omitted matching factory INI convention
+        std::string iniAuto = FormatIniContent030(3, 1, "Auto", "Auto", 0, "Auto", 1, "Auto");
+        assert(iniAuto.find("SpoofArchToGame") == std::string::npos);
+
+        std::string iniDefault = FormatIniContent030(3, 1);
+        assert(iniDefault.find("SpoofArchToGame") == std::string::npos);
+
+        // Explicit "1" or "true": SpoofArchToGame=1 emitted
+        std::string iniEnabled1 = FormatIniContent030(3, 1, "Auto", "Auto", 0, "Auto", 1, "1");
+        assert(iniEnabled1.find("SpoofArchToGame=1\n") != std::string::npos);
+
+        std::string iniEnabledTrue = FormatIniContent030(3, 1, "Auto", "Auto", 0, "Auto", 1, "true");
+        assert(iniEnabledTrue.find("SpoofArchToGame=1\n") != std::string::npos);
+
+        // Explicit "0" or "false": SpoofArchToGame=0 emitted
+        std::string iniDisabled0 = FormatIniContent030(3, 1, "Auto", "Auto", 0, "Auto", 1, "0");
+        assert(iniDisabled0.find("SpoofArchToGame=0\n") != std::string::npos);
+
+        std::string iniDisabledFalse = FormatIniContent030(3, 1, "Auto", "Auto", 0, "Auto", 1, "false");
+        assert(iniDisabledFalse.find("SpoofArchToGame=0\n") != std::string::npos);
+
+        // Invalid or empty string: treated as absent/auto (omitted)
+        std::string iniOther = FormatIniContent030(3, 1, "Auto", "Auto", 0, "Auto", 1, "invalid");
+        assert(iniOther.find("SpoofArchToGame") == std::string::npos);
+
+        std::printf("  [PASS] Case 10: Streamline 2.8+ arch spoofing (SpoofArchToGame: auto omitted, 1, 0) verified\n");
+    }
+
     std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
     return 0;
 }

@@ -3380,6 +3380,27 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
                            "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
                            "Save Settings and restart to apply.");
+
+            // Game Architecture Spoofing combo (0.3.3)
+            const char* spoofArchOptions[] = {
+                "Auto (Spoof RTX 50 on Turing/Ampere)",
+                "Enabled (Force SpoofArchToGame=1)",
+                "Disabled (Keep real GPU arch, SpoofArchToGame=0)"
+            };
+            std::string currentSpoofArch = config->FGDLSSGAmpereMfgSpoofArchToGame.value_or("auto");
+            int spoofArchIdx = (currentSpoofArch == "1" || currentSpoofArch == "true") ? 1 :
+                               (currentSpoofArch == "0" || currentSpoofArch == "false") ? 2 : 0;
+            if (ImGui::Combo("Game Arch Spoofing##sm86", &spoofArchIdx, spoofArchOptions, 3))
+            {
+                const char* storedSpoofOptions[] = { "auto", "1", "0" };
+                config->FGDLSSGAmpereMfgSpoofArchToGame = std::string(storedSpoofOptions[spoofArchIdx]);
+            }
+            ShowHelpMarker("Controls architecture reporting to the game and Streamline 2.8+ at startup:\n"
+                           "Auto: Installs an early NVAPI trampoline so Turing (RTX 20) and Ampere (RTX 30) report\n"
+                           "      Blackwell (RTX 50, 0x1b0), preventing games like FF7 Rebirth from dropping the DLSS-G plugin.\n"
+                           "Enabled: Explicitly forces early Blackwell architecture spoofing across all GPUs.\n"
+                           "Disabled: Keeps the real GPU architecture (SpoofArchToGame=0).\n"
+                           "Save Settings and restart to apply.");
         }
 
         ImGui::Unindent();
