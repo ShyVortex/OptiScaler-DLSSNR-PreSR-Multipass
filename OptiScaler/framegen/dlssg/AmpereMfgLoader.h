@@ -203,6 +203,7 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     ss << "Directory=dlssg_sm86\\logs\n\n";
     ss << "[Runtime]\n";
     ss << "Mode=Bundled\n";
+    ss << "CacheDirectory=\n";
 
     return ss.str();
 }

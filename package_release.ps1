@@ -309,7 +309,15 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $notices) {
         Copy-Item -LiteralPath $notices -Destination "$sm86DestDir\THIRD_PARTY_NOTICES.txt"
     }
-    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, 310.1 runtime (if present), and notices staged"
+    $readme = "$sm86Src\README.en.md"
+    if (Test-Path -LiteralPath $readme) {
+        Copy-Item -LiteralPath $readme -Destination "$sm86DestDir\README.en.md"
+    }
+    $docs = "$sm86Src\docs"
+    if (Test-Path -LiteralPath $docs) {
+        Copy-Item -LiteralPath $docs -Destination "$sm86DestDir\docs" -Recurse -Force
+    }
+    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, 310.1 runtime (if present), documentation, and notices staged"
 }
 
 $checksumLines = Get-ChildItem -LiteralPath $stage -Recurse -File |
