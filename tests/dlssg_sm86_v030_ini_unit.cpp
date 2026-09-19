@@ -17,9 +17,9 @@ int main()
         assert(ini030.find("[FrameGeneration]\nOptimized=1\nMaxGeneratedFrames=5\n") != std::string::npos);
         assert(ini030.find("[Compatibility]\nPreset=Auto\nRouter=Auto\nKernelImage=Auto\nHardwareBilinear=0\n") != std::string::npos);
         assert(ini030.find("[Logging]\nLevel=1\nDirectory=dlssg_sm86\\logs\n") != std::string::npos);
-        assert(ini030.find("[Runtime]\nMode=Bundled\n") != std::string::npos);
+        assert(ini030.find("[Runtime]\nMode=Bundled\nCacheDirectory=\n") != std::string::npos);
 
-        std::printf("  [PASS] Case 1: 0.3.0 INI full section structure verified ([General], [FrameGeneration], [Compatibility], [Logging], [Runtime])\n");
+        std::printf("  [PASS] Case 1: 0.3.x INI full section structure verified ([General], [FrameGeneration], [Compatibility], [Logging], [Runtime])\n");
     }
 
     // Test 2: MaxGeneratedFrames clamping up to 5 (6X Multi-Frame Generation)
@@ -221,6 +221,27 @@ int main()
         assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 99).find("[Logging]\nLevel=1\n") != std::string::npos);
 
         std::printf("  [PASS] Case 11: dlssg_sm86 logging level (0-3) and clamping verified\n");
+    }
+
+    // Test 12: v0.3.4 updates: CacheDirectory key and 0.3.4 binary validation
+    {
+        std::string iniDefault = FormatIniContent030(3, 1);
+        assert(iniDefault.find("[Runtime]\nMode=Bundled\nCacheDirectory=\n") != std::string::npos);
+
+        std::filesystem::path rootDll = "dlssg_for_sm86/version.dll";
+        std::filesystem::path sm863101Dll = "dlssg_for_sm86/310.1/version.dll";
+        if (std::filesystem::exists(rootDll) && std::filesystem::exists(sm863101Dll))
+        {
+            assert(HasSm75KernelFamily(rootDll) && "v0.3.4 root 310.9 runtime must have SM75 kernel support");
+            assert(!Is3101Runtime(rootDll) && "v0.3.4 root runtime must be 310.9, not 310.1");
+            assert(HasSm75KernelFamily(sm863101Dll) && "v0.3.4 310.1 runtime must have SM75 kernel support");
+            assert(Is3101Runtime(sm863101Dll) && "v0.3.4 310.1 runtime must be 310.1");
+            std::printf("  [PASS] Case 12: v0.3.4 binary signatures and CacheDirectory INI field verified\n");
+        }
+        else
+        {
+            std::printf("  [PASS] Case 12: v0.3.4 CacheDirectory field verified (binaries not in CWD)\n");
+        }
     }
 
     std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
