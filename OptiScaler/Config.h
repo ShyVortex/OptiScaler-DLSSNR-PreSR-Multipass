@@ -786,11 +786,11 @@ class Config
     CustomOptional<bool> FGDLSSGAdaBlackwellKernels { false };
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
-    CustomOptional<int>  FGDLSSGAmpereMfgMaxFrames { 3 };       // 0-5: 0=runtime default (3=4X factory default on 0.3.1-0.3.4, up to 5=6X on 310.9), 1=2X, 2=3X, 3=4X, 4=5X, 5=6X
+    CustomOptional<int>  FGDLSSGAmpereMfgMaxFrames { 3 };       // 0-5: 0=runtime default (3=4X factory default on 0.3.1-0.3.5, up to 5=6X on 310.9), 1=2X, 2=3X, 3=4X, 4=5X, 5=6X
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgKernelImage;     // Auto / PTX / Cubin
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgRouter;          // Auto / SM86 / SM75
     CustomOptional<bool> FGDLSSGAmpereMfgHardwareBilinear { false };        // Optional approximate sampling (SM86 only)
-    CustomOptional<int>  FGDLSSGAmpereMfgOptimized { 1 };       // 0.3.2-0.3.4 consistency tiers: 0=stock, 1=bit-identical (recommended default), 2=fast lossy (>50 dB), 3=fastest lossy
+    CustomOptional<int>  FGDLSSGAmpereMfgOptimized { 1 };       // 0.3.2-0.3.5 consistency tiers: 0=stock, 1=bit-identical (recommended default), 2=fast lossy (>50 dB), 3=fastest lossy
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgPreset;          // 0.3.0: UI recomposition preset: Auto / A / B
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgSpoofArchToGame; // 0.3.3: Streamline/Game arch spoofing: auto / 1 / 0
     CustomOptional<int>  FGDLSSGAmpereMfgLogLevel { 1 };        // dlssg_sm86 logging level: 0=Off, 1=Default/Info, 2=Debug, 3=Trace/Verbose
