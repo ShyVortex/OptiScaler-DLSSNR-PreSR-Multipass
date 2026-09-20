@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 
 #include "DLSSG_Dx12.h"
+#include "Kcd2Hdr.h"
 #if defined(OPTISCALER_RTX40_MFG)
 #include "MfgUnlock.h"
 #endif
@@ -67,6 +68,7 @@ HWND DLSSG_Dx12::Hwnd() { return _hwnd; }
 bool DLSSG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQueue, DXGI_SWAP_CHAIN_DESC* desc,
                                  IDXGISwapChain** swapChain, bool readyToRelease)
 {
+    Kcd2Hdr::ApplyQuirk();
     if (State::Instance().currentFGSwapchain != nullptr && _hwnd == desc->OutputWindow)
     {
         if (Config::Instance()->FGPreserveSwapChain.value_or_default())
@@ -182,6 +184,7 @@ bool DLSSG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmd
                                   DXGI_SWAP_CHAIN_DESC1* desc, DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
                                   IDXGISwapChain1** swapChain, bool readyToRelease)
 {
+    Kcd2Hdr::ApplyQuirk();
     if (State::Instance().currentFGSwapchain != nullptr && _hwnd == hwnd)
     {
         if (Config::Instance()->FGPreserveSwapChain.value_or_default())

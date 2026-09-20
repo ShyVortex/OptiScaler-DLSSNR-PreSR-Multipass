@@ -64,6 +64,7 @@ enum class GameQuirk : uint64_t
     IgnoreTagsWithoutHudlessForFG,
     ForceFGRenderSizeMVs,
     CreateSLOnThe2ndDevice,
+    Kcd2DlssgHdr10,
     // Don't forget to add the new entry to printQuirks
     _
 };
@@ -89,6 +90,9 @@ struct QuirkEntry
 
 // exeName has to be lowercase
 static const QuirkEntry quirkTable[] = {
+
+    // Native DLSSG requires HDR10; the game's HDR toggle otherwise restores scRGB.
+    QUIRK_ENTRY("kingdomcome.exe", GameQuirk::Kcd2DlssgHdr10),
 
     // Red Dead Redemption 2
     // Spoofing causes FSR2 inputs crash, DLSS inputs need OptiPatcher to avoid artifacts/crashes anyway
