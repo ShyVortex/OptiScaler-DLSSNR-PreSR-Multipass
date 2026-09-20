@@ -20,6 +20,7 @@
 #include "DlssNr_Common.h"
 #include "DlssNr_Spatial.h"
 #include <dlssnr/DlssNrFeature_Dx12.h>
+#include <dlssnr/DlssNr_DescriptorSlots.h>
 #include <memory>
 
 #include <d3d12.h>
@@ -27,8 +28,8 @@
 #include <shaders/Shader_Dx12.h>
 #include <shaders/Shader_Dx12Utils.h>
 
-// A maximal spatial frame uses 11 codec dispatches: meter 2, encode 1, pack 2, clamps 2,
-// unpack 1, private enlargement 2 and resolve 1. Twelve queued frames need 132 slots.
+// Recording and fence completion control reuse. A maximal spatial frame uses 11 codec dispatches: meter 2, encode 1,
+// pack 2, clamps 2, unpack 1, private enlargement 2 and resolve 1. Twelve queued frames need 132 slots.
 #define DLSSNR_NUM_OF_HEAPS 132
 
 class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
@@ -46,7 +47,7 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     // encode and downsample would run with the resolve's parameters.
     ID3D12Resource* _constantBuffers[DLSSNR_NUM_OF_HEAPS] = {};
 
-    uint32_t _heapIndex = 0;
+    DlssNr::DescriptorSlots<DLSSNR_NUM_OF_HEAPS> _descriptorSlots;
 
     // The shader reads five inputs and writes two, and not every mode uses all of them. Unused slots
     // still need a view bound -- an unbound descriptor is not an empty read, it is a read from

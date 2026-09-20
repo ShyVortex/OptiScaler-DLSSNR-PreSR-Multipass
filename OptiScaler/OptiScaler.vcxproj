@@ -922,6 +922,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="dlssnr\DlssNr_Capture.h" />
     <ClInclude Include="dlssnr\DlssNr_PipelineCapture.h" />
     <ClCompile Include="dlssnr\DlssNr_GpuLifetime.cpp" />
+    <ClInclude Include="dlssnr\DlssNr_DescriptorSlots.h" />
     <ClInclude Include="dlssnr\DlssNr_GpuLifetime.h" />
     <ClInclude Include="dlssnr\DlssNr_GpuSubmission.h" />
     <ClInclude Include="dlssnr\DlssNr_HoldParameters_Dx12.h" />

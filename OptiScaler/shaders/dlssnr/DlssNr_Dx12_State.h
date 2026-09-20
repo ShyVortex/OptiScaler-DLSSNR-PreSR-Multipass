@@ -400,7 +400,7 @@ struct DlssNr_Dx12::State
         ID3D12Resource* exposure = nullptr;
         DlssNrConstants exposureConstants {};
     };
-    void EncodeInput(EncodeContext& context);
+    bool EncodeInput(EncodeContext& context);
     DlssNrConstants MakeResolveConstants(const EncodeContext& context, unsigned int effectivePasses);
     OptiScaler::RollingVitals vitals;
     void EndGpuTiming(ID3D12GraphicsCommandList* cmdList);

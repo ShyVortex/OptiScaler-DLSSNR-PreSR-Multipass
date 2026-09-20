@@ -50,12 +50,15 @@ struct Owner
 {
     unsigned id;
     bool throws = false;
+    bool throwsOnBegin = false;
     unsigned begins = 0, completions = 0;
     ID3D12CommandQueue* seenQueue = nullptr;
     std::vector<unsigned>& order;
     DlssNr::GpuSubmission BeginFinishedCommands(UINT, ID3D12CommandList* const*)
     {
         ++begins;
+        if (throwsOnBegin)
+            throw Failure { id };
         return DlssNr::GpuSubmission(
             [this](ID3D12CommandQueue* queue)
             {
@@ -80,6 +83,7 @@ struct State
         return state;
     }
 };
+#define LOG_ERROR(...) ((void) 0)
 
 namespace DlssNr
 {
@@ -93,9 +97,9 @@ static void Run(bool firstThrows, bool secondThrows, bool abandon)
                : secondThrows ? "primary and cleanup failures"
                               : "primary failure";
     std::vector<unsigned> order;
-    Owner first { 1, firstThrows, 0, 0, nullptr, order };
-    Owner second { 2, secondThrows, 0, 0, nullptr, order };
-    Owner third { 3, false, 0, 0, nullptr, order };
+    Owner first { 1, firstThrows, false, 0, 0, nullptr, order };
+    Owner second { 2, secondThrows, false, 0, 0, nullptr, order };
+    Owner third { 3, false, false, 0, 0, nullptr, order };
     nrOwners = { &first, &second, &third };
     ID3D12CommandQueue queue;
     ID3D12CommandList commands;
@@ -145,7 +149,26 @@ int main()
     scenario = "empty registry";
     auto empty = DlssNr::BeginFinishedPictureSubmission(0, nullptr);
     Expect(!empty, "an empty owner registry must produce an empty token");
-    Expect(nrNotificationDepth == 0 && collections == 9, "preparation and callback scopes must unwind exactly once");
+    scenario = "pre-submit preparation failure";
+    std::vector<unsigned> order;
+    Owner first { 1, false, false, 0, 0, nullptr, order };
+    Owner second { 2, false, true, 0, 0, nullptr, order };
+    nrOwners = { &first, &second };
+    bool escaped = false;
+    try
+    {
+        (void) DlssNr::BeginFinishedPictureSubmission(0, nullptr);
+    }
+    catch (...)
+    {
+        escaped = true;
+    }
+    Expect(!escaped, "pre-submit bookkeeping failures must not cross the COM hook boundary");
+    Expect(first.completions == 1 && first.seenQueue == nullptr,
+           "already captured owners must be abandoned when later preparation fails");
+    Expect(!RegistryLocked() && nrNotificationDepth == 0,
+           "preparation failure must release the registry lock and notification scope");
+    Expect(nrNotificationDepth == 0 && collections == 10, "preparation and callback scopes must unwind exactly once");
     std::printf("%u checks, %u failures (CPU-only production owner aggregation)\n", checks, failures);
     return failures ? 1 : 0;
 }

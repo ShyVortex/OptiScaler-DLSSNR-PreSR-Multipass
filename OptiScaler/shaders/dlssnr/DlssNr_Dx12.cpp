@@ -158,9 +158,10 @@ bool DlssNr_Dx12::DispatchCompute(ID3D12GraphicsCommandList* InCmdList, const Dl
         return false;
 
     const bool reuse = immutableSlot && *immutableSlot != UINT32_MAX;
-    const uint32_t slot = reuse ? *immutableSlot : _heapIndex;
-    if (!reuse)
-        _heapIndex = (_heapIndex + 1) % DLSSNR_NUM_OF_HEAPS;
+    const auto acquired = _descriptorSlots.Acquire(InCmdList, immutableSlot);
+    if (!acquired)
+        return false;
+    const uint32_t slot = *acquired;
 
     FrameDescriptorHeap& currentHeap = _frameHeaps[slot];
     if (!reuse)
@@ -198,8 +199,10 @@ bool DlssNr_Dx12::DispatchCompute(ID3D12GraphicsCommandList* InCmdList, const Dl
             return false;
         }
 
-        if (immutableSlot)
-            *immutableSlot = slot;
+        // Do not expose immutable reuse until every descriptor and the constant
+        // buffer are initialized; a failed setup must make the caller retry.
+        if (immutableSlot && !_descriptorSlots.PublishImmutable(InCmdList, slot, *immutableSlot))
+            return false;
     }
 
     ID3D12DescriptorHeap* heaps[] = { currentHeap.GetHeapCSU() };
@@ -257,7 +260,7 @@ bool DlssNr_Dx12::ReadyToDestroy()
         return false;
     if (!_state->retiredEnlargers.empty() || (_state->enlarger && !_state->enlarger->lifetime.Idle()))
         return false;
-    if (!_state->lifetime.Idle() || !_state->deferredSr.lifetime.Idle())
+    if (!_state->lifetime.Idle() || !_state->deferredSr.lifetime.Idle() || !_descriptorSlots.Idle())
         return false;
     for (auto& model : _state->nr.models)
         if (!model.Idle())
@@ -271,6 +274,7 @@ bool DlssNr_Dx12::ReadyToDestroy()
 void DlssNr_Dx12::FinishSubmitted()
 {
     std::lock_guard lock(_state->mutex);
+    _descriptorSlots.FinishSubmitted();
     _state->lifetime.FinishSubmitted();
     _state->deferredSr.lifetime.FinishSubmitted();
     _state->captureFrames.FinishSubmitted();
@@ -298,7 +302,7 @@ DlssNr_Dx12::~DlssNr_Dx12()
         activeNrOwner = nullptr;
     DlssNr::ClearStatus(this);
     const bool finished = _state->WaitForFinishedPicture();
-    if (!finished || _state->pendingSubmissions || !_state->lifetime.Idle())
+    if (!finished || _state->pendingSubmissions || !_state->lifetime.Idle() || !_descriptorSlots.Idle())
     {
         LOG_WARN("DLSS-NR: abandoning GPU ownership with unresolved command recordings at teardown");
         _state.release();
@@ -695,14 +699,46 @@ void DlssNr_Dx12::DiagnosePipeline(unsigned stage, ID3D12GraphicsCommandList* cm
         });
 }
 
-void DlssNr_Dx12::ResetFinishedCommands(ID3D12CommandList* cmd) { _state->FinishedPictureResetCommandList(cmd); }
+void DlssNr_Dx12::ResetFinishedCommands(ID3D12CommandList* cmd)
+{
+    _descriptorSlots.ResetRecording(cmd);
+    _state->FinishedPictureResetCommandList(cmd);
+}
 void DlssNr_Dx12::SubmitFinishedCommands(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
     BeginFinishedCommands(count, lists).Complete(queue);
 }
 DlssNr::GpuSubmission DlssNr_Dx12::BeginFinishedCommands(UINT count, ID3D12CommandList* const* lists)
 {
-    return _state->BeginFinishedPictureSubmission(count, lists);
+    auto state = _state->BeginFinishedPictureSubmission(count, lists);
+    auto descriptors = _descriptorSlots.BeginSubmission(count, lists);
+    if (!state && !descriptors)
+        return {};
+    auto pending = std::make_shared<std::array<DlssNr::GpuSubmission, 2>>();
+    (*pending)[0] = std::move(descriptors);
+    (*pending)[1] = std::move(state);
+    return DlssNr::GpuSubmission(
+        [pending](ID3D12CommandQueue* queue)
+        {
+            // Descriptor children complete before parent retirement may release the codec.
+            try
+            {
+                for (auto& child : *pending)
+                    child.Complete(queue);
+            }
+            catch (...)
+            {
+                for (auto& child : *pending)
+                    try
+                    {
+                        child.Complete(nullptr);
+                    }
+                    catch (...)
+                    {
+                    }
+                throw;
+            }
+        });
 }
 bool DlssNr_Dx12::WaitFinished() { return _state->WaitForFinishedPicture(); }
 void DlssNr_Dx12::ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE space,
@@ -740,50 +776,66 @@ void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12Comma
 {
     BeginFinishedPictureSubmission(count, lists).Complete(queue);
 }
-GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists)
+GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists) noexcept
 {
     if (::State::Instance().isShuttingDown)
         return {};
-    std::lock_guard lock(nrOwnersMutex);
-    NrNotificationScope notification;
-    const auto owners = nrOwners;
-    std::shared_ptr<std::vector<GpuSubmission>> pending;
-    for (auto* owner : owners)
+    try
     {
-        auto submission = owner->BeginFinishedCommands(count, lists);
-        if (!submission)
-            continue;
-        if (!pending)
-            pending = std::make_shared<std::vector<GpuSubmission>>();
-        pending->push_back(std::move(submission));
-    }
-    if (!pending)
-        return {};
-    return GpuSubmission(
-        [pending](ID3D12CommandQueue* queue)
+        std::lock_guard lock(nrOwnersMutex);
+        NrNotificationScope notification;
+        const auto owners = nrOwners;
+        std::shared_ptr<std::vector<GpuSubmission>> pending;
+        for (auto* owner : owners)
         {
-            std::lock_guard lock(nrOwnersMutex);
-            NrNotificationScope notification;
-            try
+            auto submission = owner->BeginFinishedCommands(count, lists);
+            if (!submission)
+                continue;
+            if (!pending)
+                pending = std::make_shared<std::vector<GpuSubmission>>();
+            pending->push_back(std::move(submission));
+        }
+        if (!pending)
+            return {};
+        return GpuSubmission(
+            [pending](ID3D12CommandQueue* queue)
             {
-                for (auto& submission : *pending)
-                    submission.Complete(queue);
-            }
-            catch (...)
-            {
-                // Drain under the registry lock and notification scope: child cleanup
-                // can release NGX objects and re-enter queue/reset hooks.
-                for (auto& submission : *pending)
-                    try
-                    {
-                        submission.Complete(nullptr);
-                    }
-                    catch (...)
-                    {
-                    }
-                throw; // Preserve the original failure; failed child pins stay quarantined.
-            }
-        });
+                std::lock_guard lock(nrOwnersMutex);
+                NrNotificationScope notification;
+                try
+                {
+                    for (auto& submission : *pending)
+                        submission.Complete(queue);
+                }
+                catch (...)
+                {
+                    // Drain under the registry lock and notification scope: child cleanup
+                    // can release NGX objects and re-enter queue/reset hooks.
+                    for (auto& submission : *pending)
+                        try
+                        {
+                            submission.Complete(nullptr);
+                        }
+                        catch (...)
+                        {
+                        }
+                    throw; // Preserve the original failure; failed child pins stay quarantined.
+                }
+            });
+    }
+    catch (...)
+    {
+        // This runs before the real ExecuteCommandLists call. Bookkeeping failure
+        // must not prevent the application submission or cross the COM hook.
+        try
+        {
+            LOG_ERROR("DLSS-NR submission preparation failed; captured ownership remains quarantined");
+        }
+        catch (...)
+        {
+        }
+        return {};
+    }
 }
 bool WaitForFinishedPicture()
 {
