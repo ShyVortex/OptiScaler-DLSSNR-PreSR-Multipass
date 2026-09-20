@@ -16,6 +16,7 @@ param(
     [switch]$AcceptNvidiaLicenses,
     [switch]$IncludeAmpereMfg,
     [switch]$AcceptAmpereMfgLicenses,
+    [switch]$UpdateAmpereMfg,
     [string]$HybridAssetsDirectory,
     [string]$StreamlineArchive
 )
@@ -289,6 +290,19 @@ if ($HybridAssetsDirectory) {
 if ($IncludeAmpereMfg) {
     $sm86Src = "$root\dlssg_for_sm86"
     $sm86Dll = "$sm86Src\version.dll"
+    if ($UpdateAmpereMfg -or (-not (Test-Path -LiteralPath $sm86Dll))) {
+        Write-Host "Acquiring verified SM75/SM86 0.3.5 runtime from upstream..."
+        if (-not (Test-Path -LiteralPath $sm86Src)) {
+            New-Item -ItemType Directory -Force -Path $sm86Src | Out-Null
+        }
+        if (-not (Test-Path -LiteralPath "$sm86Src\.git")) {
+            git init $sm86Src
+            git -C $sm86Src remote add origin https://github.com/sdli1995/dlssg_for_sm86.git
+        }
+        git -C $sm86Src fetch --depth 1 origin 9621db573e07ed54f50c15bbb585ed9a7bdfac28
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.3.5 runtime' }
+        git -C $sm86Src checkout --detach FETCH_HEAD
+    }
     if (-not (Test-Path -LiteralPath $sm86Dll)) {
         throw "Ampere/Turing SM86/SM75 binary not found at $sm86Dll"
     }
