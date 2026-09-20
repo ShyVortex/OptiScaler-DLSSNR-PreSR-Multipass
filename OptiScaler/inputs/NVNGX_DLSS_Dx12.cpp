@@ -23,6 +23,8 @@
 #include <imgui/ImGuiNotify.hpp>
 
 #include <hooks/D3D12_Hooks.h>
+#include <hooks/Reflex_Hooks.h>
+#include <hooks/Streamline_Hooks.h>
 
 #include <dxgi1_4.h>
 #include <shared_mutex>
@@ -38,6 +40,71 @@ static int evalCounter = 0;
 static bool shutdown = false;
 static bool _skipInit = false;
 static wchar_t const** paths;
+
+static int ResolveDlssgEvaluationMaximum(const std::optional<int>& nativeMaximum)
+{
+    const auto safeNativeMaximum = static_cast<unsigned int>(std::max(1, nativeMaximum.value_or(1)));
+#if defined(OPTISCALER_RTX40_MFG)
+    MfgUnlock::TryApply();
+    return static_cast<int>(MfgUnlock::EffectiveMax(safeNativeMaximum));
+#else
+    return static_cast<int>(safeNativeMaximum);
+#endif
+}
+
+#if defined(OPTISCALER_RTX40_MFG)
+static bool CanEvaluateDlssg(MfgUnlock::Failure failure)
+{
+    return failure != MfgUnlock::Failure::RollbackFailed;
+}
+#endif
+
+static bool ShouldApplyDlssgEvaluationOverride(bool gameDlssgOptionsObserved, FGInput activeInput,
+                                               FGOutput activeOutput)
+{
+    return !gameDlssgOptionsObserved && activeInput != FGInput::DLSSG && activeOutput != FGOutput::DLSSG;
+}
+
+static int ResolveDlssgEvaluationFrameCount(int gameFrameCount, const std::optional<int>& overrideFrameCount,
+                                            int verifiedMaximum, bool trustNativeFrameCount)
+{
+    if (overrideFrameCount.has_value() || !trustNativeFrameCount)
+    {
+        const int requestedFrameCount = overrideFrameCount.value_or(gameFrameCount);
+        return std::clamp(requestedFrameCount, 1, std::max(1, verifiedMaximum));
+    }
+
+    // Do not reject a valid native count merely because our cached capability
+    // is absent or stale. Only values supplied by OptiScaler use that bound.
+    return std::max(1, gameFrameCount);
+}
+
+static std::optional<uint64_t> DirectDlssgOverrideGeneration(const std::optional<int>& overrideFrameCount,
+                                                             uint64_t generation)
+{
+    return !overrideFrameCount.has_value() || overrideFrameCount.value() > 0
+               ? std::optional<uint64_t> { generation }
+               : std::nullopt;
+}
+
+static NVSDK_NGX_Result CommitDlssgEvaluationResult(NVSDK_NGX_Result result, int submittedFrameCount,
+                                                    const std::optional<uint64_t>& overrideGeneration)
+{
+    if (result == NVSDK_NGX_Result_Success)
+    {
+        State::Instance().dlssgDetectedInterpolationCount = submittedFrameCount;
+        ReflexHooks::setDlssgFrameCount(submittedFrameCount);
+        if (overrideGeneration.has_value())
+            StreamlineHooks::acceptDlssgOverrides(overrideGeneration.value());
+    }
+    else
+    {
+        LOG_ERROR("DLSSG evaluation rejected submitted interpolation count {}, result: {:X}", submittedFrameCount,
+                  static_cast<unsigned>(result));
+    }
+
+    return result;
+}
 
 class ScopedInitDx12
 {
@@ -1142,8 +1209,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     const uint32_t handleId = InFeatureHandle->Id;
     LOG_DEBUG("EvaluateFeature - Handle: {}, CmdList: {:p}", handleId, (void*) InCmdList);
 
-    const State& state = State::Instance();
-    const Config& cfg = *Config::Instance();
+    auto& state = State::Instance();
 
     const auto tracked = HandleToFeature.Read(handleId);
     const auto feature = tracked.feature;
@@ -1165,6 +1231,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
 
     static std::optional<float> lastDlssgCameraNear {};
     static std::optional<float> lastDlssgCameraFar {};
+    std::optional<int> submittedDlssgFrameCount {};
+    std::optional<uint64_t> overrideGeneration {};
 
     if (feature == NVSDK_NGX_Feature_FrameGeneration)
     {
@@ -1173,24 +1241,33 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         int frameCount = 0;
         InParameters->Get("DLSSG.MultiFrameCount", &frameCount);
 
+        const int verifiedMaximum = ResolveDlssgEvaluationMaximum(state.dlssgMfgMax);
+        state.dlssgMfgMax = verifiedMaximum;
+
+        bool trustNativeFrameCount = true;
 #if defined(OPTISCALER_RTX40_MFG)
-        if (MfgUnlock::EnabledForSession() && !State::Instance().dlssgMfgMax.has_value())
-            State::Instance().dlssgMfgMax = 5;
+        const auto patchFailure = MfgUnlock::LastFailure();
+        if (!CanEvaluateDlssg(patchFailure))
+        {
+            LOG_ERROR("DLSSG evaluation refused after an incomplete MFG patch rollback");
+            return NVSDK_NGX_Result_Fail;
+        }
+        trustNativeFrameCount = patchFailure == MfgUnlock::Failure::None;
 #endif
 
-        if (cfg.FGDLSSGOverrideInterpolationCount.has_value())
+        std::optional<int> overrideFrameCount {};
+        if (ShouldApplyDlssgEvaluationOverride(StreamlineHooks::hasGameDlssgOptions(), state.activeFgInput,
+                                               state.activeFgOutput))
         {
-            frameCount = cfg.FGDLSSGOverrideInterpolationCount.value();
-            InParameters->Set("DLSSG.MultiFrameCount", frameCount);
+            const auto overrides = StreamlineHooks::getDlssgOverrides();
+            overrideFrameCount = overrides.values.generatedFrames;
+            overrideGeneration = DirectDlssgOverrideGeneration(overrideFrameCount, overrides.generation);
         }
-        else if (frameCount <= 0)
-        {
-            frameCount = 1;
-            InParameters->Set("DLSSG.MultiFrameCount", frameCount);
-        }
-
-        State::Instance().dlssgDetectedInterpolationCount = frameCount;
-        ReflexHooks::setDlssgFrameCount(frameCount);
+        const int resolvedFrameCount = ResolveDlssgEvaluationFrameCount(
+            frameCount, overrideFrameCount, verifiedMaximum, trustNativeFrameCount);
+        if (resolvedFrameCount != frameCount || overrideFrameCount.has_value())
+            InParameters->Set("DLSSG.MultiFrameCount", resolvedFrameCount);
+        submittedDlssgFrameCount = resolvedFrameCount;
 
         float dlssgCameraNear = 0.0f;
         float dlssgCameraFar = 0.0f;
@@ -1213,27 +1290,36 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         }
     }
 
+    const auto finishEvaluation = [&](NVSDK_NGX_Result result) {
+        return submittedDlssgFrameCount.has_value()
+                   ? CommitDlssgEvaluationResult(result, submittedDlssgFrameCount.value(), overrideGeneration)
+                   : result;
+    };
+
     // Native DLSS passthrough
     if (handleId < DLSS_MOD_ID_OFFSET)
     {
-        if (cfg.DLSSEnabled.value_or_default() && NVNGXProxy::D3D12_EvaluateFeature() != nullptr)
+        if (Config::Instance()->DLSSEnabled.value_or_default() &&
+            NVNGXProxy::D3D12_EvaluateFeature() != nullptr)
         {
             LOG_DEBUG("Passthrough to native DLSS EvaluateFeature for handle {}", handleId);
 
             // SR and RR handles are always IFeature_Dx12 instances. This branch contains only
             // unrelated native NGX features, which must never run Neural Rendering.
-            return NVNGXProxy::D3D12_EvaluateFeature()(InCmdList, InFeatureHandle, InParameters, InCallback);
+            return finishEvaluation(
+                NVNGXProxy::D3D12_EvaluateFeature()(InCmdList, InFeatureHandle, InParameters, InCallback));
         }
 
         LOG_DEBUG("Native DLSS EvaluateFeature not available for handle {}", handleId);
-        return NVSDK_NGX_Result_FAIL_FeatureNotFound;
+        return finishEvaluation(NVSDK_NGX_Result_FAIL_FeatureNotFound);
     }
 
     // DLSSG replacements passthrough
-    if (State::Instance().activeFgNvngx != FGNvngxReplacement::None && handleId >= NVNGX_PROVIDER_ID_OFFSET)
+    if (state.activeFgNvngx != FGNvngxReplacement::None && handleId >= NVNGX_PROVIDER_ID_OFFSET)
     {
         LOG_DEBUG("Passthrough to DLSSG Replacement's EvaluateFeature for handle {}", handleId);
-        return Nvngx_FG::D3D12_EvaluateFeature(InCmdList, InFeatureHandle, InParameters, InCallback);
+        return finishEvaluation(
+            Nvngx_FG::D3D12_EvaluateFeature(InCmdList, InFeatureHandle, InParameters, InCallback));
     }
 
     if (lastDlssgCameraNear.has_value())
@@ -1244,7 +1330,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
 
     // OptiScaler internal handling
     // NR is dispatched inside IFeature_Dx12, shared by NGX, FSR/XeSS inputs and the API bridges.
-    return TryEvaluateOptiFeature(InCmdList, InFeatureHandle, InParameters, InCallback);
+    return finishEvaluation(TryEvaluateOptiFeature(InCmdList, InFeatureHandle, InParameters, InCallback));
 }
 
 #pragma endregion
