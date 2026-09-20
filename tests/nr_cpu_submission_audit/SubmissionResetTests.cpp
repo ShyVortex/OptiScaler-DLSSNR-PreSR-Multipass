@@ -249,6 +249,40 @@ bool completedTokenIsIdempotent()
     return f.released == 1 && f.otherQueue->signalled == 0;
 }
 
+template <class Submission> bool CompleteAtHookBoundary(Submission& pending)
+{
+    bool escaped = false;
+    if constexpr (requires(Submission& value) { value.CompleteNoThrow(nullptr); })
+    {
+        return !pending.CompleteNoThrow(nullptr); // throwing callback was contained and reported
+    }
+    else
+    {
+        try
+        {
+            pending.Complete(nullptr);
+        }
+        catch (...)
+        {
+            escaped = true;
+        }
+        return !escaped;
+    }
+}
+
+bool completionExceptionsCanBeContainedAtHookBoundary()
+{
+    bool invoked = false;
+    DlssNr::GpuSubmission pending(
+        [&](ID3D12CommandQueue*)
+        {
+            invoked = true;
+            throw 7;
+        });
+    const bool contained = CompleteAtHookBoundary(pending);
+    return invoked && contained && !pending;
+}
+
 int main()
 {
     const auto control = exercise(false);
@@ -280,5 +314,7 @@ int main()
     check("device removal quarantines ownership", unprovableCompletionIsQuarantined(1));
     check("abandoned token quarantines ownership", unprovableCompletionIsQuarantined(2));
     check("completed token is idempotent", completedTokenIsIdempotent());
+    check("completion exceptions can be contained at hook boundary",
+          completionExceptionsCanBeContainedAtHookBoundary());
     return passed ? 0 : 1;
 }

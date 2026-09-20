@@ -35,6 +35,20 @@ class GpuSubmission
         if (callback)
             callback(queue);
     }
+    // COM queue hooks must not propagate allocation or cleanup failures after the
+    // real ExecuteCommandLists call has already returned.
+    bool CompleteNoThrow(ID3D12CommandQueue* queue) noexcept
+    {
+        try
+        {
+            Complete(queue);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
 
   private:
     void Abandon() noexcept

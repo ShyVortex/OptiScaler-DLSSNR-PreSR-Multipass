@@ -12,8 +12,8 @@ auto DlssNr_Dx12::State::LateContext::Say(const char* message) -> void
 
 auto DlssNr_Dx12::State::LateContext::Finished(const Slot& slot) -> bool
 {
-    return !slot.fence ||
-           (slot.fence->GetCompletedValue() != UINT64_MAX && slot.fence->GetCompletedValue() >= slot.done);
+    return !slot.pendingSubmissions && (!slot.fence || (slot.fence->GetCompletedValue() != UINT64_MAX &&
+                                                        slot.fence->GetCompletedValue() >= slot.done));
 }
 
 auto DlssNr_Dx12::State::LateContext::Cancel() -> void

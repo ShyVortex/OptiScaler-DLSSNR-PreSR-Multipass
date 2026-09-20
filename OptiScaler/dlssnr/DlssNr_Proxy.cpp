@@ -294,6 +294,10 @@ unsigned int Context::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* devi
 Context::Context() : _impl(std::make_unique<Impl>()) {}
 Context::~Context() { _impl->Release(); }
 void Context::Release() { _impl->Release(); }
+GpuSubmission Context::BeginSubmission(UINT count, ID3D12CommandList* const* lists)
+{
+    return _impl->lifetime.BeginSubmission(count, lists);
+}
 void Context::Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
     _impl->lifetime.Submitted(queue, count, lists);

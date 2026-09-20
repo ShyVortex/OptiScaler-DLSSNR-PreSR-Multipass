@@ -27,3 +27,17 @@ failed signals, device removal, abandoned tokens, and idempotent completion.
 This establishes the bookkeeping defect and its CPU-level correction. It does
 not establish that this ordering caused a game hang, reproduce a driver failure,
 or validate GPU scheduling.
+
+`run-state-allocation.ps1` mechanically extracts the production state
+submission and retired-enlarger collection methods. Its CPU fixture injects
+`std::bad_alloc` at every observed allocation site and checks that owner,
+initialization, copy, and hold pins remain balanced. It also verifies invalid
+initialization selection, retired metadata pins, and collector retry after an
+allocation failure:
+
+```powershell
+.\tests\nr_cpu_submission_audit\run-state-allocation.ps1
+```
+
+The extraction helper counts braces and therefore must be updated if braces are
+introduced in comments or string literals within either extracted method.

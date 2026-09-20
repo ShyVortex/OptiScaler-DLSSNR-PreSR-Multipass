@@ -237,6 +237,11 @@ void DlssNr_Dx12::Retire(std::unique_ptr<DlssNr_Dx12> owner)
     {
         std::lock_guard stateLock(owner->_state->mutex);
         owner->_state->late.Cancel();
+        // These lists belong to NR and cannot be replayed after retirement. Closing
+        // their logical recordings retains every submitted fence, without resetting GPU allocators.
+        for (auto& slot : owner->_state->late.slots)
+            if (slot.commands)
+                owner->ResetFinishedCommands(slot.commands.Get());
     }
     RetiredNrOwners().push_back(std::move(owner));
     LOG_INFO("DLSS-NR: retaining retired GPU owner until recordings finish; {} waiting", RetiredNrOwners().size());
@@ -245,6 +250,8 @@ void DlssNr_Dx12::Retire(std::unique_ptr<DlssNr_Dx12> owner)
 bool DlssNr_Dx12::ReadyToDestroy()
 {
     std::lock_guard lock(_state->mutex);
+    if (_state->pendingSubmissions)
+        return false;
     _state->CollectEnlargers();
     if (_state->collectingEnlargers)
         return false;
@@ -291,7 +298,7 @@ DlssNr_Dx12::~DlssNr_Dx12()
         activeNrOwner = nullptr;
     DlssNr::ClearStatus(this);
     const bool finished = _state->WaitForFinishedPicture();
-    if (!finished || !_state->lifetime.Idle())
+    if (!finished || _state->pendingSubmissions || !_state->lifetime.Idle())
     {
         LOG_WARN("DLSS-NR: abandoning GPU ownership with unresolved command recordings at teardown");
         _state.release();
@@ -691,7 +698,11 @@ void DlssNr_Dx12::DiagnosePipeline(unsigned stage, ID3D12GraphicsCommandList* cm
 void DlssNr_Dx12::ResetFinishedCommands(ID3D12CommandList* cmd) { _state->FinishedPictureResetCommandList(cmd); }
 void DlssNr_Dx12::SubmitFinishedCommands(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
-    _state->FinishedPictureSubmitted(queue, count, lists);
+    BeginFinishedCommands(count, lists).Complete(queue);
+}
+DlssNr::GpuSubmission DlssNr_Dx12::BeginFinishedCommands(UINT count, ID3D12CommandList* const* lists)
+{
+    return _state->BeginFinishedPictureSubmission(count, lists);
 }
 bool DlssNr_Dx12::WaitFinished() { return _state->WaitForFinishedPicture(); }
 void DlssNr_Dx12::ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE space,
@@ -727,13 +738,52 @@ void FinishedPictureResetCommandList(ID3D12CommandList* cmd)
 }
 void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
+    BeginFinishedPictureSubmission(count, lists).Complete(queue);
+}
+GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists)
+{
     if (::State::Instance().isShuttingDown)
-        return;
+        return {};
     std::lock_guard lock(nrOwnersMutex);
     NrNotificationScope notification;
     const auto owners = nrOwners;
+    std::shared_ptr<std::vector<GpuSubmission>> pending;
     for (auto* owner : owners)
-        owner->SubmitFinishedCommands(queue, count, lists);
+    {
+        auto submission = owner->BeginFinishedCommands(count, lists);
+        if (!submission)
+            continue;
+        if (!pending)
+            pending = std::make_shared<std::vector<GpuSubmission>>();
+        pending->push_back(std::move(submission));
+    }
+    if (!pending)
+        return {};
+    return GpuSubmission(
+        [pending](ID3D12CommandQueue* queue)
+        {
+            std::lock_guard lock(nrOwnersMutex);
+            NrNotificationScope notification;
+            try
+            {
+                for (auto& submission : *pending)
+                    submission.Complete(queue);
+            }
+            catch (...)
+            {
+                // Drain under the registry lock and notification scope: child cleanup
+                // can release NGX objects and re-enter queue/reset hooks.
+                for (auto& submission : *pending)
+                    try
+                    {
+                        submission.Complete(nullptr);
+                    }
+                    catch (...)
+                    {
+                    }
+                throw; // Preserve the original failure; failed child pins stay quarantined.
+            }
+        });
 }
 bool WaitForFinishedPicture()
 {

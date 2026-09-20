@@ -65,6 +65,7 @@ struct DlssNr_Dx12::State
         uint64_t lastFrame = 0;
         bool submitted = false, failed = false, depthInverted = false, readable = false, reset = true;
         bool structural = false;
+        unsigned pendingSubmissions = 0;
         ~Enlarger() { dlss.reset(); } // Release NGX before its borrowed input/output resources.
     };
     std::unique_ptr<Enlarger> enlarger;
@@ -117,6 +118,7 @@ struct DlssNr_Dx12::State
         uint64_t generation = 0;
         ID3D12CommandList* captureCommands = nullptr;
     } inputHold;
+    std::vector<uint64_t> pendingHoldGenerations;
 
     static bool SameHoldShape(const D3D12_RESOURCE_DESC& a, const D3D12_RESOURCE_DESC& b);
 
@@ -129,6 +131,8 @@ struct DlssNr_Dx12::State
     void CheckCaptureTrigger();
 
     DlssNr::GpuLifetime lifetime;
+    // Pins this State across the unlocked real Execute and re-entrant retirement.
+    unsigned pendingSubmissions = 0;
 
     void ParkNrResource(ID3D12Resource*& resource);
 
@@ -320,6 +324,7 @@ struct DlssNr_Dx12::State
             DlssNrFrameInfo frame {};
             uint64_t ready = 0, done = 0, serial = 0;
             bool pending = false, submitted = false, residualOnly = false, sceneLinear = true;
+            unsigned pendingSubmissions = 0;
         };
         std::array<Slot, 4> slots;
         ComPtr<ID3D12Device> device;
@@ -367,6 +372,7 @@ struct DlssNr_Dx12::State
     std::string FinishedPictureStatus();
 
     void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
+    DlssNr::GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists);
 
     DXGI_COLOR_SPACE_TYPE FinishedColorSpace(IDXGISwapChain* swapchain, DXGI_FORMAT format);
 
