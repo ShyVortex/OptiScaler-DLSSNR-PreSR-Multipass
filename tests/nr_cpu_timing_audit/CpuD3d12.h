@@ -60,6 +60,7 @@ struct CD3DX12_RESOURCE_DESC
 struct __declspec(uuid("81111111-1111-1111-1111-111111111111")) ID3D12Fence : IUnknown
 {
     virtual UINT64 GetCompletedValue() = 0;
+    virtual HRESULT SetEventOnCompletion(UINT64, HANDLE) { return E_NOTIMPL; }
 };
 struct __declspec(uuid("82222222-2222-2222-2222-222222222222")) ID3D12QueryHeap : IUnknown
 {

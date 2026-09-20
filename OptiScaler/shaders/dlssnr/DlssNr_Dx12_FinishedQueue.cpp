@@ -36,12 +36,10 @@ auto DlssNr_Dx12::State::FinishedPictureResetCommandList(ID3D12CommandList* cmd)
     if (!late.tracking.load())
         return;
     for (auto& slot : late.slots)
-        if (slot.pending && !slot.submitted && !slot.pendingSubmissions && slot.producer == identity)
-        {
-            slot.pending = false;
-            slot.done = slot.ready - 1; // discarded recording: no GPU signal was promised
-            late.reset = true;
-        }
+    {
+        slot.producerLifetime.ResetRecording(cmd);
+        late.DiscardUnsubmitted(slot);
+    }
 }
 
 auto DlssNr_Dx12::State::WaitForFinishedPicture() -> bool
@@ -54,6 +52,10 @@ auto DlssNr_Dx12::State::WaitForFinishedPicture() -> bool
     late.Cancel();
     for (auto& slot : late.slots)
     {
+        // Do not wait for game-owned recording resets or unfinished replay queues.
+        // In particular, the original ready/done signal cannot prove a replay finished.
+        if (!slot.producerLifetime.Idle())
+            return false;
         if (!slot.submitted || late.Finished(slot))
             continue;
         if (slot.fence->GetCompletedValue() == UINT64_MAX)
@@ -140,8 +142,15 @@ auto DlssNr_Dx12::State::BeginFinishedPictureSubmission(UINT count, ID3D12Comman
     std::vector<LateContext::Slot*> copies;
     if (late.tracking.load())
         for (auto& slot : late.slots)
-            if (slot.pending && !slot.submitted && matches(slot.producer))
+        {
+            // Presentation/cancellation does not close a replayable producer recording.
+            auto work = slot.producerLifetime.BeginSubmission(count, lists);
+            const bool recorded = bool(work);
+            add(std::move(work));
+            // An address reused after destruction is not the captured producer generation.
+            if (recorded && slot.pending && !slot.submitted && !slot.quarantined)
                 copies.push_back(&slot);
+        }
     add(std::move(parent));
     if (!pending && !initialization && !hold && copies.empty())
         return {};

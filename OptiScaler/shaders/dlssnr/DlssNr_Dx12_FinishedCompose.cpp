@@ -39,6 +39,14 @@ auto DlssNr_Dx12::State::ApplyFinishedColor(ID3D12Resource* color, ID3D12Command
     {
         if (!slot.pending || !slot.submitted)
             continue;
+        // A later replay could overwrite inputs while this separate composition reads them.
+        // Skip until the producer closes and completes, even on the same queue. Long-lived
+        // recordings can delay this optional route; the pre-SR route does not use these slots.
+        if (!late.Finished(slot))
+        {
+            late.Say("Waiting for producer command-list reset and completion; use pre-SR if this persists.");
+            continue;
+        }
         // Native FG's internal Present counter includes generated frames and is not an app-frame identity.
         if (!gameFrameHandoff && (epoch < slot.frame.SubmissionEpoch || epoch - slot.frame.SubmissionEpoch > 1))
         {
@@ -64,6 +72,8 @@ auto DlssNr_Dx12::State::ApplyFinishedColor(ID3D12Resource* color, ID3D12Command
         auto& held = *late.heldSlot;
         if (late.Finished(held))
             latest = &held;
+        else
+            late.Say("Waiting for producer command-list reset and completion; use pre-SR if this persists.");
     }
     if (!latest)
         return false; // loading screen, another swapchain, or this real frame was already consumed
@@ -306,6 +316,7 @@ auto DlssNr_Dx12::State::ApplyFinishedColor(ID3D12Resource* color, ID3D12Command
         late.Say("Could not finish the picture. Restart the game to retry.");
         slot.pending = true; // quarantine the slot; do not reuse possibly recorded NR resources
         slot.submitted = false;
+        slot.quarantined = true;
         return false;
     }
     ID3D12CommandList* lists[] = { cmd };

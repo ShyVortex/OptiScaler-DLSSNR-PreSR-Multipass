@@ -41,3 +41,18 @@ allocation failure:
 
 The extraction helper counts braces and therefore must be updated if braces are
 introduced in comments or string literals within either extracted method.
+
+## Finished-picture replay ownership
+
+The state runner also compiles production late-copy arm, cancellation, discard,
+readiness, reset, drain, and owner-retirement methods, plus acquisition and normal/
+held composition selection. Each slot uses the real `GpuLifetime`; COM/queue/fence
+boundaries remain CPU fixtures. Fifteen late-slot cases cover cross-queue replay,
+reset-before-completion, destruction, failed/abandoned submissions, device removal,
+discarded unsubmitted slots, exact address reuse, and failed-close quarantine.
+The allocation-failure sweep covers fourteen sites.
+
+Composition and reuse require closed producer recordings and completion of every
+captured execution. Long-lived replayable command lists can delay or skip this
+optional route; status explains the wait and suggests pre-SR if persistent.
+No new CPU/GPU wait is inserted. The ordinary pre-SR route does not use these slots.

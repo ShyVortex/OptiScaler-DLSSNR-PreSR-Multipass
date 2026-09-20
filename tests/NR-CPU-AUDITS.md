@@ -20,8 +20,11 @@ These checks demonstrate source-level lifetime and failure-handling behavior.
 They do not reproduce or identify the cause of a game hang or operating-system
 watchdog event.
 
-The pre-existing finished-picture late-copy slots are outside this suite. Their
-per-slot `pending`/`submitted` fence state does not currently renew its fence for
-a replay of the same still-open producer command list. The general lifetime,
-timing, and descriptor replay checks here do not establish that those special
-late-copy slots are replay-safe.
+Finished-picture late-copy slots now have production-backed CPU regressions for
+per-slot producer ownership, replay on every queue, reset races, cancellation,
+discarded recordings, reused addresses, normal/held composition selection and
+failed-close quarantine. Composition and slot reuse require producer reset or
+destruction plus completion of every captured execution. This conservative rule
+can delay or skip the optional finished-picture path for long-lived recordings;
+its status reports the wait. Ordinary pre-SR NR is unchanged. No new GPU waits
+are introduced, and these tests do not establish GPU scheduling or image quality.

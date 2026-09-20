@@ -265,8 +265,8 @@ bool DlssNr_Dx12::ReadyToDestroy()
     for (auto& model : _state->nr.models)
         if (!model.Idle())
             return false;
-    for (const auto& slot : _state->late.slots)
-        if (slot.submitted && !_state->late.Finished(slot))
+    for (auto& slot : _state->late.slots)
+        if (!slot.producerLifetime.Idle() || (slot.submitted && !_state->late.Finished(slot)))
             return false;
     return _state->late.dx11.Idle();
 }

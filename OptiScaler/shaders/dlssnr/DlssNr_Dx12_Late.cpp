@@ -10,10 +10,13 @@ auto DlssNr_Dx12::State::LateContext::Say(const char* message) -> void
     }
 }
 
-auto DlssNr_Dx12::State::LateContext::Finished(const Slot& slot) -> bool
+auto DlssNr_Dx12::State::LateContext::Finished(Slot& slot) -> bool
 {
-    return !slot.pendingSubmissions && (!slot.fence || (slot.fence->GetCompletedValue() != UINT64_MAX &&
-                                                        slot.fence->GetCompletedValue() >= slot.done));
+    // A completed producer can still replay its writes into these textures.
+    // Composition and reuse require reset/destruction and every execution's fence.
+    return !slot.pendingSubmissions && slot.producerLifetime.Idle() &&
+           (!slot.fence ||
+            (slot.fence->GetCompletedValue() != UINT64_MAX && slot.fence->GetCompletedValue() >= slot.done));
 }
 
 auto DlssNr_Dx12::State::LateContext::Cancel() -> void
@@ -32,6 +35,19 @@ auto DlssNr_Dx12::State::LateContext::Cancel() -> void
             owner.FinishedPictureResetCommandList(slot.commands.Get());
     }
     reset = true;
+}
+
+auto DlssNr_Dx12::State::LateContext::DiscardUnsubmitted(Slot& slot) -> void
+{
+    if (slot.pending && !slot.submitted && !slot.quarantined && !slot.pendingSubmissions &&
+        slot.producerLifetime.Idle())
+    {
+        // Reset or destruction discarded the capture without promising a GPU signal.
+        slot.pending = false;
+        slot.done = slot.ready - 1;
+        slot.producer = nullptr;
+        reset = true;
+    }
 }
 
 auto DlssNr_Dx12::State::LateContext::Clone(ComPtr<ID3D12Resource>& copy, ID3D12Resource* source) -> bool
@@ -73,11 +89,14 @@ auto DlssNr_Dx12::State::LateContext::Acquire(ID3D12GraphicsCommandList* cmd) ->
     ResTrack_Dx12::HookLateNrQueue(device.Get());
     Slot* next = nullptr;
     for (auto& slot : slots)
+    {
+        DiscardUnsubmitted(slot);
         if (!slot.pending && Finished(slot))
         {
             next = &slot;
             break;
         }
+    }
     if (!next)
     {
         Say("Waiting for the previous picture to finish.");
@@ -113,6 +132,7 @@ auto DlssNr_Dx12::State::LateContext::Acquire(ID3D12GraphicsCommandList* cmd) ->
 auto DlssNr_Dx12::State::LateContext::Arm(Slot& slot, ID3D12GraphicsCommandList* cmd) -> void
 {
     owner.lifetime.Record(cmd);
+    slot.producerLifetime.Record(cmd);
     slot.producer = cmd;
     ID3D12GraphicsCommandList* real = nullptr;
     if (Util::CheckForRealObject(__FUNCTION__, cmd, (IUnknown**) &real))

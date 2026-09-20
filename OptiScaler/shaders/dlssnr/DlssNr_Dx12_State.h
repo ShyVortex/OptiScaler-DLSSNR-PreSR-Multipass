@@ -309,6 +309,7 @@ struct DlssNr_Dx12::State
         template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;
         struct Slot
         {
+            DlssNr::GpuLifetime producerLifetime;
             ComPtr<ID3D12Resource> depth, motion, linear, encoded, residual, cleanScene;
             ComPtr<ID3D12Resource> response[2]; // per-slot ping-pong; reused only after its GPU fence
             unsigned responseIndex = 0, responseWidth = 0, responseHeight = 0;
@@ -324,6 +325,7 @@ struct DlssNr_Dx12::State
             DlssNrFrameInfo frame {};
             uint64_t ready = 0, done = 0, serial = 0;
             bool pending = false, submitted = false, residualOnly = false, sceneLinear = true;
+            bool quarantined = false;
             unsigned pendingSubmissions = 0;
         };
         std::array<Slot, 4> slots;
@@ -348,7 +350,9 @@ struct DlssNr_Dx12::State
 
         void Say(const char* message);
 
-        bool Finished(const Slot& slot);
+        bool Finished(Slot& slot);
+
+        void DiscardUnsubmitted(Slot& slot);
 
         void Cancel();
 
