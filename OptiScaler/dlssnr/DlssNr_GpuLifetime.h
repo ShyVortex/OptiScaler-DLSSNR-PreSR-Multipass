@@ -20,10 +20,15 @@ class GpuLifetime
     GpuLifetime(const GpuLifetime&) = delete;
     GpuLifetime& operator=(const GpuLifetime&) = delete;
     void Record(ID3D12GraphicsCommandList* commands);
+    // Tracker must outlive the probe; discarded work never satisfies it.
+    std::function<bool()> CompletionProbe(ID3D12GraphicsCommandList* commands);
     // One reusable monotonic fence per queue; aliases are normalized at every notification.
     // Only call after the real ExecuteCommandLists or a successful command-list Reset.
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     void ResetRecording(ID3D12CommandList* commands);
+    // Start tracking a replacement resource set. Older recordings still receive submit/reset
+    // notifications, but only recordings used again belong to the new generation.
+    void BeginGeneration();
     // Callback must capture raw ownership: unresolved callbacks are abandoned at destruction.
     void Retire(std::function<void()> destroy);
     void Collect();

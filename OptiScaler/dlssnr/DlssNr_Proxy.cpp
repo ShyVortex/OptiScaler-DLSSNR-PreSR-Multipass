@@ -29,6 +29,8 @@ struct ProxyState
     uint64_t creationEpoch = 0;
     uint64_t creationFrameCount = 0;
     uint64_t prepareCallCount = 0;
+    bool creationReady = false;
+    std::function<bool()> creationComplete;
     ID3D12Device* device = nullptr;
     bool failed = false;
     bool reset = true;
@@ -97,6 +99,11 @@ struct Context::Impl
 {
     ProxyState state;
     DlssNr::GpuLifetime lifetime;
+    bool CreationReady(uint64_t epoch)
+    {
+        return state.creationReady = state.creationReady || epoch != state.creationEpoch ||
+                                     (state.creationComplete && state.creationComplete());
+    }
     void RetireState();
     void TickRetired(uint64_t epoch);
     unsigned int Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
@@ -115,6 +122,7 @@ void Context::Impl::RetireState()
     if (state.feature != nullptr || state.params != nullptr)
         lifetime.Retire([retired = state]() mutable { DestroyState(retired); });
     state = {};
+    lifetime.BeginGeneration();
 }
 
 void Context::Impl::TickRetired([[maybe_unused]] uint64_t epoch) { lifetime.Collect(); }
@@ -235,6 +243,8 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         state.height = height;
         state.creationEpoch = submissionEpoch;
         state.creationFrameCount = ++state.prepareCallCount;
+        state.creationReady = false;
+        state.creationComplete = lifetime.CompletionProbe(cmdList);
         LOG_INFO("DLSS-NR: feature created at {}x{} through {}", width, height,
                  state.compatibility ? "direct compatibility runtime" : "NVIDIA NGX driver");
 
@@ -243,7 +253,7 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
     }
 
     ++state.prepareCallCount;
-    *ready = (submissionEpoch != state.creationEpoch) || (state.prepareCallCount > state.creationFrameCount);
+    *ready = CreationReady(submissionEpoch);
     return (unsigned int) NVSDK_NGX_Result_Success;
 }
 
@@ -344,8 +354,7 @@ unsigned int Context::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* 
 bool Context::HasFeature() const { return _impl->state.feature != nullptr; }
 bool Context::Ready(uint64_t epoch) const
 {
-    return HasFeature() && !_impl->state.failed &&
-           (epoch != _impl->state.creationEpoch || _impl->state.prepareCallCount > _impl->state.creationFrameCount);
+    return HasFeature() && !_impl->state.failed && _impl->CreationReady(epoch);
 }
 void Context::AdvanceEpoch(uint64_t epoch) { _impl->TickRetired(epoch); }
 
