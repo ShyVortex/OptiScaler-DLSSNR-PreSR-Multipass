@@ -223,7 +223,7 @@ int main()
         std::printf("  [PASS] Case 11: dlssg_sm86 logging level (0-3) and clamping verified\n");
     }
 
-    // Test 12: v0.3.4 updates: CacheDirectory key and 0.3.4 binary validation
+    // Test 12: v0.3.4-v0.3.5 updates: CacheDirectory key and 0.3.5 binary validation
     {
         std::string iniDefault = FormatIniContent030(3, 1);
         assert(iniDefault.find("[Runtime]\nMode=Bundled\nCacheDirectory=\n") != std::string::npos);
@@ -232,15 +232,15 @@ int main()
         std::filesystem::path sm863101Dll = "dlssg_for_sm86/310.1/version.dll";
         if (std::filesystem::exists(rootDll) && std::filesystem::exists(sm863101Dll))
         {
-            assert(HasSm75KernelFamily(rootDll) && "v0.3.4 root 310.9 runtime must have SM75 kernel support");
-            assert(!Is3101Runtime(rootDll) && "v0.3.4 root runtime must be 310.9, not 310.1");
-            assert(HasSm75KernelFamily(sm863101Dll) && "v0.3.4 310.1 runtime must have SM75 kernel support");
-            assert(Is3101Runtime(sm863101Dll) && "v0.3.4 310.1 runtime must be 310.1");
-            std::printf("  [PASS] Case 12: v0.3.4 binary signatures and CacheDirectory INI field verified\n");
+            assert(HasSm75KernelFamily(rootDll) && "v0.3.5 root 310.9 runtime must have SM75 kernel support");
+            assert(!Is3101Runtime(rootDll) && "v0.3.5 root runtime must be 310.9, not 310.1");
+            assert(HasSm75KernelFamily(sm863101Dll) && "v0.3.5 310.1 runtime must have SM75 kernel support");
+            assert(Is3101Runtime(sm863101Dll) && "v0.3.5 310.1 runtime must be 310.1");
+            std::printf("  [PASS] Case 12: v0.3.5 binary signatures and CacheDirectory INI field verified\n");
         }
         else
         {
-            std::printf("  [PASS] Case 12: v0.3.4 CacheDirectory field verified (binaries not in CWD)\n");
+            std::printf("  [PASS] Case 12: v0.3.5 CacheDirectory field verified (binaries not in CWD)\n");
         }
     }
 
