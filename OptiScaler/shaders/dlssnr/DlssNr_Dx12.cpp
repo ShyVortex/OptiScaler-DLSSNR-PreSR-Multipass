@@ -667,9 +667,17 @@ void DlssNr_Dx12::SubmitFinishedCommands(ID3D12CommandQueue* queue, UINT count, 
     _state->FinishedPictureSubmitted(queue, count, lists);
 }
 bool DlssNr_Dx12::WaitFinished() { return _state->WaitForFinishedPicture(); }
-void DlssNr_Dx12::ApplyFinished(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue)
+void DlssNr_Dx12::ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE space,
+                                bool gameFrameHandoff)
 {
-    _state->ApplyToFinishedPicture(swapchain, queue);
+    std::lock_guard lock(_state->mutex);
+    if (!Config::Instance()->DlssNrFinishedPicture.value_or_default() ||
+        !Config::Instance()->DlssNrEnabled.value_or_default() ||
+        ::State::Instance().externalFrameGeneration ||
+        ::State::Instance().activeFgOutput == FGOutput::DLSSG)
+        _state->late.Cancel();
+    else if (picture && queue)
+        _state->ApplyFinishedColor(picture, queue, space, gameFrameHandoff);
     _state->Publish();
 }
 void DlssNr_Dx12::ApplyFinishedDx11(IDXGISwapChain* swapchain)
@@ -713,17 +721,47 @@ bool WaitForFinishedPicture()
         ready = owner->WaitFinished() && ready;
     return ready;
 }
+static DXGI_COLOR_SPACE_TYPE ReadFinishedSpace(IDXGISwapChain* swapchain, ID3D12Resource* picture)
+{
+    static constexpr GUID colorSpaceKey = {
+        0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 }
+    };
+    auto space = picture->GetDesc().Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
+                                                                             : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    UINT size = sizeof(space);
+    swapchain->GetPrivateData(colorSpaceKey, &size, &space);
+    return space;
+}
 void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue)
 {
+    Microsoft::WRL::ComPtr<IDXGISwapChain3> chain;
+    Microsoft::WRL::ComPtr<ID3D12Resource> picture;
+    auto space = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    const auto& config = *Config::Instance();
+    const bool externalFgActive = ::State::Instance().externalFrameGeneration ||
+                                  ::State::Instance().activeFgOutput == FGOutput::DLSSG;
+
+    // Swapchain calls must precede NR locks: FG Present can submit commands while holding its own lock.
+    if (swapchain && queue && config.DlssNrEnabled.value_or_default() &&
+        config.DlssNrFinishedPicture.value_or_default() && !externalFgActive)
+    {
+        if (StreamlinePicture::RenderQueue(swapchain) || FAILED(swapchain->QueryInterface(IID_PPV_ARGS(&chain))) ||
+            FAILED(chain->GetBuffer(chain->GetCurrentBackBufferIndex(), IID_PPV_ARGS(&picture))))
+            return;
+        space = ReadFinishedSpace(swapchain, picture.Get());
+    }
     std::lock_guard lock(nrOwnersMutex);
     if (activeNrOwner)
-        activeNrOwner->ApplyFinished(swapchain, queue);
+        activeNrOwner->ApplyFinished(picture.Get(), queue, space);
 }
 void ApplyToStreamlinePicture(IDXGISwapChain* swapchain, ID3D12Resource* picture, ID3D12CommandQueue* queue)
 {
+    if (!swapchain || !picture || !queue)
+        return;
+    const auto space = ReadFinishedSpace(swapchain, picture);
     std::lock_guard lock(nrOwnersMutex);
     if (activeNrOwner)
-        activeNrOwner->ApplyStreamlineFinished(swapchain, picture, queue);
+        activeNrOwner->ApplyFinished(picture, queue, space, true);
 }
 void ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain)
 {

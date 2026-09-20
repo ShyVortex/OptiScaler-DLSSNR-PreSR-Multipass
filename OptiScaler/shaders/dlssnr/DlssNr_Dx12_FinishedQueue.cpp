@@ -2,12 +2,6 @@
 #include "DlssNr_Dx12_State.h"
 #include <dlssnr/DlssNr_StreamlinePicture.h>
 
-void DlssNr_Dx12::ApplyStreamlineFinished(IDXGISwapChain* swapchain, ID3D12Resource* picture, ID3D12CommandQueue* queue)
-{
-    std::lock_guard lock(_state->mutex);
-    if (swapchain && picture && queue)
-        _state->ApplyFinishedColor(picture, queue, _state->FinishedColorSpace(swapchain, picture->GetDesc().Format), true);
-}
 
 auto DlssNr_Dx12::State::FinishedPictureResetCommandList(ID3D12CommandList* cmd) -> void
 {
@@ -142,26 +136,6 @@ auto DlssNr_Dx12::State::FinishedColorSpace(IDXGISwapChain* swapchain, DXGI_FORM
     return space;
 }
 
-auto DlssNr_Dx12::State::ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue) -> void
-{
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    if (!swapchain || !queue)
-        return;
-    // When external frame generation (e.g. dlssg_sm86 or native DLSSG) is active,
-    // editing the underlying display swapchain here races/overwrites DLSSG generated backbuffers.
-    if (::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG)
-        return;
-    // Native Streamline owns an app-facing buffer set. Its before-present hook handles NR.
-    // Editing the underlying display swapchain here races/is overwritten by DLSSG's own copies.
-    if (DlssNr::StreamlinePicture::RenderQueue(swapchain))
-        return;
-    LateContext::ComPtr<IDXGISwapChain3> sc;
-    LateContext::ComPtr<ID3D12Resource> color;
-    if (FAILED(swapchain->QueryInterface(IID_PPV_ARGS(&sc))) ||
-        FAILED(sc->GetBuffer(sc->GetCurrentBackBufferIndex(), IID_PPV_ARGS(&color))))
-        return;
-    ApplyFinishedColor(color.Get(), queue, FinishedColorSpace(swapchain, color->GetDesc().Format));
-}
 
 auto DlssNr_Dx12::State::ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain) -> void
 {
