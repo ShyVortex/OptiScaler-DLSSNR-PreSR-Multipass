@@ -13,6 +13,15 @@
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
 
+static int ResolveNvngxAdvertisedMfgMaximum(bool adaMfgActive)
+{
+#if defined(OPTISCALER_RTX40_MFG)
+    return adaMfgActive ? static_cast<int>(MfgUnlock::EffectiveMax(1)) : 1;
+#else
+    return 1;
+#endif
+}
+
 /// @brief Calculates the resolution scaling ratio override based on the provided quality level and current
 /// configuration.
 /// @param input The performance quality value (e.g. Quality, Balanced, Performance).
@@ -806,6 +815,7 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
 #if defined(OPTISCALER_RTX40_MFG)
+    MfgUnlock::TryApply();
     const bool adaMfgActive = MfgUnlock::EnabledForSession();
 #else
     const bool adaMfgActive = false;
@@ -840,9 +850,8 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
 #if defined(OPTISCALER_RTX40_MFG)
         else if (adaMfgActive)
         {
-            countMax = 5;
-            if (!State::Instance().dlssgMfgMax.has_value())
-                State::Instance().dlssgMfgMax = 5;
+            countMax = ResolveNvngxAdvertisedMfgMaximum(adaMfgActive);
+            State::Instance().dlssgMfgMax = countMax;
         }
 #endif
         InParams->Set("DLSSG.MultiFrameCountMax", countMax);

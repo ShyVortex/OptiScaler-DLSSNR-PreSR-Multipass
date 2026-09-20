@@ -56,22 +56,23 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - All `#if defined(OPTISCALER_RTX40_MFG)` guarded code in `DLSSG_Dx12.cpp`, `Streamline_Hooks.cpp`, `LibraryLoad_Hooks.cpp`, `NVNGX_Parameter.cpp`, `NVNGX_DLSS_Dx12.cpp`, `menu_common.cpp`
      - INI entry `AdaMfgUnlock` in `OptiScaler.ini` (must not be stripped during packaging)
      - **Architecture Gate Rewriter (`MfgUnlock::PatchArchGates`)**:
-       - Instruction-level patching of `cmp eax/reg, 0x1b0` -> `0x190` across all executable sections of `sl.dlss_g.dll` and `nvngx_dlssg.dll`.
-       - Decoupled `UnlockedMax()` so arch-gate success returns 5 even if kernel rewrite is skipped or returns 0 on newer Streamline 2.14 / v310.9+ DLLs.
+       - Accept only complete, unique known advertise/validate signature families; do not restore broad architecture-comparison fallback patching.
+       - Plan gates and optional kernel changes together, check protections/cache operations, retain the module, and roll back on failure. Incomplete rollback must remain an explicit unsafe state.
+       - `UnlockedMax()` reports 5 only after the complete requested patch succeeds. Optional kernel rewriting remains separately configured; unknown layouts do not imply success.
      - **NGX Parameter Advertising (`NVNGX_Parameter.cpp`)**:
-       - `NVSDK_NGX_Parameter_Set_FG` must advertise `DLSSG.MultiFrameCountMax = 5` when `MfgUnlock::EnabledForSession()` is true, while strictly maintaining Ampere mutual exclusion.
-       - Populate `State::Instance().dlssgMfgMax = 5` so the ImGui menu ratio override combo box is unlocked for 2X-6X across all titles.
+       - Use `MfgUnlock::EffectiveMax()` for reported and cached capabilities, while strictly maintaining Ampere mutual exclusion. Configuration enablement alone does not establish an unlocked capability.
+       - Preserve larger legitimate native capabilities. Failed patch attempts must not trust a potentially altered native report.
      - **Streamline Option Clamping Guard & Pacing (`Streamline_Hooks.cpp`)**:
-       - `hkslDLSSGSetOptions` and `hkslDLSSGGetState` must default `state.dlssgMfgMax` to 5 when Ada MFG is active.
-       - Volatile clamping of `FGDLSSGOverrideInterpolationCount` to `state.dlssgMfgMax` must be guarded so 3X/4X overrides are not clamped to 1.
-       - Version 4 `sl::DLSSGState` initialized in `hkslDLSSGGetState` and `numFramesToGenerateMax` elevated to 5.
-       - Reflex pacing synchronized via `ReflexHooks::setDlssgFrameCount(overrideCount)` for any override count.
+       - Queue UI intent; apply it only through game-owned options calls. Do not replay cached game structures from the overlay.
+       - Copy only fields defined by each options ABI; legacy padding must not become new fields on promotion. Preserve unknown-version storage without slicing.
+       - Clamp overrides at use to verified capabilities. Learn capabilities from one game-owned GetState query, without consuming presented-frame counters through extra queries.
+       - Commit mode and Reflex pacing only after runtime acceptance. Acknowledge only the matching intent generation and only fields that were actually applied; ignored requests remain pending.
      - **NGX Evaluate & Reflex Synchronization (`NVNGX_DLSS_Dx12.cpp`)**:
-       - When `feature == NVSDK_NGX_Feature_FrameGeneration`, `FGDLSSGOverrideInterpolationCount` must be written to `InParameters->Set("DLSSG.MultiFrameCount", frameCount)` before passing to `NVNGXProxy::D3D12_EvaluateFeature`.
-       - Sync `ReflexHooks::setDlssgFrameCount(frameCount)` and `State::Instance().dlssgDetectedInterpolationCount`.
+       - Streamline-managed evaluation must preserve runtime-supplied counts rather than independently applying pending UI intent. Only direct-NGX ownership may apply the override here.
+       - Sync Reflex and detected interpolation count only after evaluation success. Clean patch failures clamp to one generated frame; incomplete rollback refuses evaluation.
      - **Associated Unit Tests**:
        - `tests/ngx_parameter_dlssg_unit.cpp`
-       - `tests/mfg_unlock_arch_gate_unit.cpp`
+       - `tests/mfg_unlock/run.ps1` (production-backed transaction and module-lifetime tests)
        - `tests/streamline_mfg_options_unit.cpp`
        - `tests/dlssg_evaluate_feature_unit.cpp`
 

@@ -217,7 +217,7 @@ HC_Dx12::HC_Dx12(std::string InName, ID3D12Device* InDevice) : Shader_Dx12(InNam
 bool HC_Dx12::Dispatch(IDXGISwapChain3* sc, ID3D12GraphicsCommandList* cmdList, ID3D12Resource* hudless,
                        D3D12_RESOURCE_STATES state)
 {
-    if (sc == nullptr || hudless == nullptr || !_init)
+    if (sc == nullptr || cmdList == nullptr || hudless == nullptr || !_init)
         return false;
 
     ScopedGpuTime_Dx12 scopedGpuTime(GpuTime.get(), cmdList);

@@ -3768,6 +3768,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         const bool dlssgInputOrOutput =
             state.activeFgOutput == FGOutput::DLSSG || state.activeFgInput == FGInput::DLSSG;
 
+        if (!dlssgInputOrOutput && StreamlineHooks::dlssgOptionsPending())
+        {
+            ImGui::TextWrapped("DLSSG override pending: waiting for the game's next options update. "
+                               "If it stays pending, toggle frame generation in the game's settings.");
+        }
+
         ImGui::BeginDisabled(state.dlssgGameDMFGSupported && config->FGDLSSGOverrideForceDMFG.value_or_default());
         if (state.dlssgMfgMax.has_value() && state.dlssgMfgMax.value() >= 1 && !dlssgInputOrOutput)
         {
@@ -3862,6 +3868,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             {
                 fpsTarget = 0.0f;
                 config->FGDLSSGFramerateTargetDMFG.reset();
+                StreamlineHooks::updateDlssgOptions();
             }
 
             ImGui::EndDisabled();

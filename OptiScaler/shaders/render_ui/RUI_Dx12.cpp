@@ -160,7 +160,7 @@ RUI_Dx12::RUI_Dx12(std::string InName, ID3D12Device* InDevice, bool preMultiplie
 bool RUI_Dx12::Dispatch(IDXGISwapChain3* sc, ID3D12GraphicsCommandList* cmdList, ID3D12Resource* hudless,
                         D3D12_RESOURCE_STATES state)
 {
-    if (sc == nullptr || hudless == nullptr || !_init)
+    if (sc == nullptr || cmdList == nullptr || hudless == nullptr || !_init)
         return false;
 
     ScopedGpuTime_Dx12 scopedGpuTime(GpuTime.get(), cmdList);
