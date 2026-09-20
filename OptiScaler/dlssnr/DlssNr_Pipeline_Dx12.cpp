@@ -241,7 +241,8 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
                 // A disabled/failed optional pass must still provide the next stage with the original frame.
                 shader.SetBufferState(commandList, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 NrBarrier(commandList, output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
-                commandList->CopyResource(output, input);
+                DlssNr::CopyActiveColor(commandList, output, input,
+                                        { (unsigned)input->GetDesc().Width, input->GetDesc().Height });
                 NrBarrier(commandList, output, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             }
             return true;
@@ -277,7 +278,7 @@ ID3D12Resource* PrepareDlssNrInput(DlssNr_Dx12& shader, ID3D12Device* device, ID
     }
     const auto desc = color->GetDesc();
     if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
-        desc.DepthOrArraySize != 1 || desc.MipLevels != 1 ||
+        desc.DepthOrArraySize != 1 ||
         !shader.CreateBufferResource(device, color, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
     {
         LOG_ERROR("DLSS-NR pre-SR input failed: CreateBufferResource failed for color buffer");
