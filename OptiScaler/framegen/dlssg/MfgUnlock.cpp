@@ -1,4 +1,4 @@
-﻿// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
+// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
 #include "pch.h"
 
 #if defined(OPTISCALER_RTX40_MFG)
@@ -8,87 +8,113 @@
 #include <Config.h>
 #include <State.h>
 #include <Util.h>
-#include <scanner/scanner.h>
 #include <misc/IdentifyGpu.h>
+#include <scanner/scanner.h>
+
 #include <mutex>
-
-
 
 namespace
 {
+// mov ebx,1 / mov r8d,3 / cmp edi,0x1b0 / cmovl r8d,ebx.
+constexpr std::string_view kAdvertisePattern =
+    "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
 
-// mov ebx,1 / mov r8d,3 / cmp edi,0x1b0 / cmovl r8d,ebx. The two counts and the architecture
-// constant together identify the legacy capability gate.
-constexpr std::string_view kAdvertisePattern = "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
-
-// cmp eax,0x1b0 / jl / cmp ebx,3 / jbe. The only comparison against the architecture constant that
-// is followed by a signed branch and a count test.
+// cmp eax,0x1b0 / jl / cmp ebx,3 / jbe.
 constexpr std::string_view kValidatePattern = "3D B0 01 00 00 7C ? 83 FB 03 76";
 
-// Five generated frames, the count both patched sites carry.
 constexpr uint8_t kMaxGeneratedFrames = 5;
 
-// 310.9 restructured both gates. The count is no longer an immediate next to the comparison: the
-// Blackwell branch starts at five and reads a configured value, and anything below Blackwell is sent
-// to a branch that publishes one.
-//     cmp ebp, 0x1b0
-//     jl  ada          <- neutralised, so every card takes the Blackwell branch
-//     mov edi, 0x5
+// 310.9 restructured the advertise gate to a rel32 jl and the capability gate to setae.
 constexpr std::string_view kAdvertisePattern309 = "81 FD B0 01 00 00 0F 8C ? ? ? ? BF 05 00 00 00";
-
-// The capability flag in the same build is a setae rather than a branch.
-//     cmp   eax, 0x1b0
-//     setae al
 constexpr std::string_view kValidatePattern309 = "3D B0 01 00 00 0F 93 C0";
 
+constexpr uint32_t kArchAda = 89;
+constexpr uint32_t kArchBlackwell = 120;
+constexpr uint32_t kArchParked = 122;
+constexpr size_t kImagePayloadSize = 8;
+constexpr size_t kImageArch = 28;
 
-
-// scanner::GetAddress only walks sections marked executable. Fatbins are data, so they need their own
-// search. Returns 0 unless exactly one non-executable section holds the sequence, once.
-uintptr_t FindDataBytes(HMODULE module, const uint8_t* needle, size_t length)
+struct PatternMatches
 {
-    auto base = reinterpret_cast<uint8_t*>(module);
-    auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-    auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    auto section = IMAGE_FIRST_SECTION(nt);
+    uintptr_t address = 0;
+    unsigned int count = 0;
+};
 
-    uintptr_t found = 0;
-    size_t hits = 0;
+struct Patch
+{
+    uint8_t* address = nullptr;
+    std::vector<uint8_t> original;
+    std::vector<uint8_t> replacement;
+    DWORD originalProtection = 0;
+    bool changed = false;
+};
 
-    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i)
-    {
-        const auto& s = section[i];
+enum class TransactionResult
+{
+    Succeeded,
+    FailedRolledBack,
+    FailedRollbackIncomplete
+};
 
-        if (s.Characteristics & IMAGE_SCN_MEM_EXECUTE)
-            continue;
-
-        uint8_t* start = base + s.VirtualAddress;
-        uint8_t* end = start + s.Misc.VirtualSize;
-
-        for (uint8_t* p = std::search(start, end, needle, needle + length); p != end;
-             p = std::search(p + 1, end, needle, needle + length))
-        {
-            found = reinterpret_cast<uintptr_t>(p);
-
-            if (++hits > 1)
-                return 0;
-        }
-    }
-
-    return hits == 1 ? found : 0;
-}
+enum class AttemptOutcome
+{
+    WaitingForModule,
+    Succeeded,
+    Unsupported,
+    FailedBeforeMutation,
+    FailedRolledBack,
+    FailedRollbackIncomplete
+};
 
 MfgUnlock::Status g_status {};
 std::recursive_mutex g_mutex;
+AttemptOutcome g_attemptOutcome = AttemptOutcome::WaitingForModule;
+HMODULE g_attemptedModule = nullptr;
+HMODULE g_retainedModule = nullptr;
 
-uintptr_t UniqueAddress(HMODULE module, std::string_view pattern)
+bool AcquireModuleReference(HMODULE module, HMODULE& acquired)
 {
-    const auto first = scanner::GetAddress(module, pattern);
-    return first && !scanner::GetAddress(module, pattern, 0, first + 1) ? first : 0;
+    acquired = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(module), &acquired))
+        return false;
+
+    if (acquired == module)
+        return true;
+
+    if (acquired != nullptr)
+        FreeLibrary(acquired);
+    acquired = nullptr;
+    return false;
 }
 
-// The module's own file version, for the report. A signature that does not match is expected on a
-// version nobody has looked at, and the version is the one thing that makes such a report actionable.
+void ReleaseModuleReference(HMODULE& module)
+{
+    if (module == nullptr)
+        return;
+
+    if (!FreeLibrary(module))
+        LOG_WARN("MFG unlock: failed to release the temporary DLSSG module reference");
+    module = nullptr;
+}
+
+PatternMatches FindMatches(HMODULE module, std::string_view pattern)
+{
+    PatternMatches matches;
+    uintptr_t start = 0;
+
+    while (const auto address = scanner::GetAddress(module, pattern, 0, start))
+    {
+        if (matches.count == 0)
+            matches.address = address;
+        ++matches.count;
+        if (matches.count > 1)
+            break;
+        start = address + 1;
+    }
+
+    return matches;
+}
+
 std::string ModuleVersion(HMODULE module)
 {
     wchar_t path[MAX_PATH] {};
@@ -105,210 +131,227 @@ std::string ModuleVersion(HMODULE module)
     return std::format("{}.{}.{}", file.major, file.minor, file.patch);
 }
 
-bool WriteBytes(uintptr_t address, const uint8_t* bytes, size_t count)
+bool AddPatch(std::vector<Patch>& plan, uint8_t* address, const uint8_t* replacement, size_t size)
 {
-    DWORD oldProtect = 0;
-
-    if (!VirtualProtect((LPVOID) address, count, PAGE_EXECUTE_READWRITE, &oldProtect))
-    {
-        LOG_WARN("VirtualProtect failed at {:X}", address);
+    if (address == nullptr || replacement == nullptr || size == 0)
         return false;
+
+    const auto begin = reinterpret_cast<uintptr_t>(address);
+    const auto end = begin + size;
+    if (end < begin)
+        return false;
+
+    for (const auto& patch : plan)
+    {
+        const auto otherBegin = reinterpret_cast<uintptr_t>(patch.address);
+        const auto otherEnd = otherBegin + patch.original.size();
+        if (begin < otherEnd && otherBegin < end)
+            return false;
     }
 
-    std::memcpy((void*) address, bytes, count);
-
-    DWORD ignored = 0;
-    VirtualProtect((LPVOID) address, count, oldProtect, &ignored);
-    FlushInstructionCache(GetCurrentProcess(), (LPCVOID) address, count);
-
+    Patch patch;
+    patch.address = address;
+    patch.original.assign(address, address + size);
+    patch.replacement.assign(replacement, replacement + size);
+    plan.push_back(std::move(patch));
     return true;
 }
 
-std::string Hex(const uint8_t* bytes, size_t count)
+template <size_t N> bool AddPatch(std::vector<Patch>& plan, uintptr_t address, const uint8_t (&replacement)[N])
 {
-    std::string out;
-
-    for (size_t i = 0; i < count; ++i)
-        out += std::format("{}{:02X}", i == 0 ? "" : " ", bytes[i]);
-
-    return out;
+    return AddPatch(plan, reinterpret_cast<uint8_t*>(address), replacement, N);
 }
 
-// Rewrites count and neutralises the architecture clamp, so MultiFrameCountMax is published as five.
-bool PatchAdvertise(HMODULE module)
+bool Rollback(std::vector<Patch>& plan)
 {
-    if (const auto at309 = UniqueAddress(module, kAdvertisePattern309); at309 != 0)
+    bool complete = true;
+
+    for (auto it = plan.rbegin(); it != plan.rend(); ++it)
     {
-        // The jl is a rel32, six bytes.
-        const auto branchAt = at309 + 6;
-        const uint8_t nop[] = { 0x0F, 0x1F, 0x44, 0x00, 0x00, 0x90 };
+        auto& patch = *it;
+        if (!patch.changed)
+            continue;
 
-        LOG_INFO("MFG unlock: advertise (310.9) at {:X}, jl {} -> {}", at309,
-                 Hex((const uint8_t*) branchAt, sizeof(nop)), Hex(nop, sizeof(nop)));
+        DWORD currentProtection = 0;
+        if (!VirtualProtect(patch.address, patch.original.size(), PAGE_EXECUTE_READWRITE, &currentProtection))
+        {
+            LOG_WARN("MFG unlock: rollback VirtualProtect failed at {:X}",
+                     reinterpret_cast<uintptr_t>(patch.address));
+            complete = false;
+            continue;
+        }
 
-        return WriteBytes(branchAt, nop, sizeof(nop));
+        std::memcpy(patch.address, patch.original.data(), patch.original.size());
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(patch.address, patch.original.size(), patch.originalProtection, &ignored))
+        {
+            LOG_WARN("MFG unlock: rollback protection restore failed at {:X}",
+                     reinterpret_cast<uintptr_t>(patch.address));
+            complete = false;
+        }
+
+        if (!FlushInstructionCache(GetCurrentProcess(), patch.address, patch.original.size()))
+        {
+            LOG_WARN("MFG unlock: rollback cache flush failed at {:X}",
+                     reinterpret_cast<uintptr_t>(patch.address));
+            complete = false;
+        }
     }
 
-    const auto address = UniqueAddress(module, kAdvertisePattern);
-
-    if (address == 0)
-    {
-        LOG_WARN("MFG unlock: the advertise signature did not match, nvngx_dlssg.dll left alone");
-        return false;
-    }
-
-    // Offsets within the matched sequence: the r8d immediate, and the cmovl.
-    const auto countAt = address + 7;
-    const auto cmovAt = address + 17;
-
-    const uint8_t count[] = { kMaxGeneratedFrames };
-    const uint8_t nop[] = { 0x0F, 0x1F, 0x40, 0x00 };
-
-    LOG_INFO("MFG unlock: advertise at {:X}, count {} -> {}, cmovl {} -> {}", address,
-             *(const uint8_t*) countAt, kMaxGeneratedFrames, Hex((const uint8_t*) cmovAt, sizeof(nop)),
-             Hex(nop, sizeof(nop)));
-
-    return WriteBytes(countAt, count, sizeof(count)) && WriteBytes(cmovAt, nop, sizeof(nop));
+    return complete;
 }
 
-// Drops the Ada branch and raises the accepted count, so a request for five is not rejected.
-bool PatchValidate(HMODULE module)
+TransactionResult ApplyTransaction(std::vector<Patch>& plan)
 {
-    if (const auto at309 = UniqueAddress(module, kValidatePattern309); at309 != 0)
+    // Revalidate every captured byte immediately before the first write. This makes the transaction
+    // reject a concurrently changed or incorrectly planned module without touching it.
+    for (const auto& patch : plan)
     {
-        // setae al -> mov al, 1, so the flag is set whatever the architecture reports.
-        const auto setAt = at309 + 5;
-        const uint8_t always[] = { 0xB0, 0x01, 0x90 };
-
-        LOG_INFO("MFG unlock: validate (310.9) at {:X}, setae {} -> {}", at309,
-                 Hex((const uint8_t*) setAt, sizeof(always)), Hex(always, sizeof(always)));
-
-        return WriteBytes(setAt, always, sizeof(always));
+        if (std::memcmp(patch.address, patch.original.data(), patch.original.size()) != 0)
+        {
+            LOG_WARN("MFG unlock: planned bytes changed before apply at {:X}",
+                     reinterpret_cast<uintptr_t>(patch.address));
+            return TransactionResult::FailedRolledBack;
+        }
     }
 
-    const auto address = UniqueAddress(module, kValidatePattern);
-
-    if (address == 0)
+    for (auto& patch : plan)
     {
-        LOG_WARN("MFG unlock: the validate signature did not match, nvngx_dlssg.dll left alone");
-        return false;
+        if (!VirtualProtect(patch.address, patch.replacement.size(), PAGE_EXECUTE_READWRITE,
+                            &patch.originalProtection))
+        {
+            LOG_WARN("MFG unlock: VirtualProtect failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
+            return Rollback(plan) ? TransactionResult::FailedRolledBack
+                                  : TransactionResult::FailedRollbackIncomplete;
+        }
+
+        std::memcpy(patch.address, patch.replacement.data(), patch.replacement.size());
+        patch.changed = true;
+
+        DWORD ignored = 0;
+        if (!VirtualProtect(patch.address, patch.replacement.size(), patch.originalProtection, &ignored))
+        {
+            LOG_WARN("MFG unlock: protection restore failed at {:X}",
+                     reinterpret_cast<uintptr_t>(patch.address));
+            return Rollback(plan) ? TransactionResult::FailedRolledBack
+                                  : TransactionResult::FailedRollbackIncomplete;
+        }
+
+        if (!FlushInstructionCache(GetCurrentProcess(), patch.address, patch.replacement.size()))
+        {
+            LOG_WARN("MFG unlock: cache flush failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
+            return Rollback(plan) ? TransactionResult::FailedRolledBack
+                                  : TransactionResult::FailedRollbackIncomplete;
+        }
     }
 
-    // Offsets within the matched sequence: the jl, and the immediate of the count test behind it.
-    const auto branchAt = address + 5;
-    const auto countAt = address + 9;
-
-    const uint8_t nop[] = { 0x90, 0x90 };
-    const uint8_t count[] = { kMaxGeneratedFrames };
-
-    LOG_INFO("MFG unlock: validate at {:X}, jl {} -> {}, count {} -> {}", address,
-             Hex((const uint8_t*) branchAt, sizeof(nop)), Hex(nop, sizeof(nop)), *(const uint8_t*) countAt,
-             kMaxGeneratedFrames);
-
-    return WriteBytes(branchAt, nop, sizeof(nop)) && WriteBytes(countAt, count, sizeof(count));
+    return TransactionResult::Succeeded;
 }
 
-
-// Gives Ada the Blackwell kernels the module already carries.
-//
-// nvngx_dlssg.dll ships two builds of the interpolation kernels. Kernel_EstimateIntermMvecsScatter
-// reads three f32 fields of its parameter block on sm_120 and one on sm_89, so on Ada every generated
-// frame is placed at the same point between the two real ones: the world does not advance between
-// them while the interface, composited once per present, does. At 2X there is one frame and nothing
-// to distinguish; above it that is the whole symptom.
-//
-// The sm_120 module uses no instruction Ada lacks. So per container: the Blackwell PTX image is
-// relabelled sm_89, its .target directive is rewritten in place (".target sm_120" and
-// ".target sm_89 " are both fourteen bytes, and the directive sits in the literal run at the head of
-// the LZ4 stream), and the images that were sm_89 -- the Ada PTX and its SASS -- are relabelled to an
-// architecture that does not exist so the driver cannot select them. The driver then JITs Blackwell's
-// kernel when it asks for Ada's.
-//
-// Nothing is copied in and no payload changes length. A container without both images is left alone.
-constexpr uint32_t kArchAda = 89;
-constexpr uint32_t kArchBlackwell = 120;
-
-// No such shader model. Parks an image where nothing will ask for it.
-constexpr uint32_t kArchParked = 122;
-
-// Offsets inside a fatbin image header: payload length, and the architecture the image answers for.
-constexpr size_t kImagePayloadSize = 8;
-constexpr size_t kImageArch = 28;
-
-unsigned int RewriteBlackwellKernels(HMODULE module)
+bool BuildGatePlan(HMODULE module, std::vector<Patch>& plan)
 {
-    auto base = reinterpret_cast<uint8_t*>(module);
-    auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-    auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    auto section = IMAGE_FIRST_SECTION(nt);
+    const auto advertise309 = FindMatches(module, kAdvertisePattern309);
+    const auto validate309 = FindMatches(module, kValidatePattern309);
+    const auto advertiseLegacy = FindMatches(module, kAdvertisePattern);
+    const auto validateLegacy = FindMatches(module, kValidatePattern);
 
+    const bool exact309 = advertise309.count == 1 && validate309.count == 1 && advertiseLegacy.count == 0 &&
+                          validateLegacy.count == 0;
+    const bool exactLegacy = advertiseLegacy.count == 1 && validateLegacy.count == 1 && advertise309.count == 0 &&
+                             validate309.count == 0;
+
+    if (exact309)
+    {
+        const uint8_t advertiseNop[] = { 0x0F, 0x1F, 0x44, 0x00, 0x00, 0x90 };
+        const uint8_t validateAlways[] = { 0xB0, 0x01, 0x90 };
+        return AddPatch(plan, advertise309.address + 6, advertiseNop) &&
+               AddPatch(plan, validate309.address + 5, validateAlways);
+    }
+
+    if (exactLegacy)
+    {
+        const uint8_t count[] = { kMaxGeneratedFrames };
+        const uint8_t advertiseNop[] = { 0x0F, 0x1F, 0x40, 0x00 };
+        const uint8_t validateNop[] = { 0x90, 0x90 };
+        return AddPatch(plan, advertiseLegacy.address + 7, count) &&
+               AddPatch(plan, advertiseLegacy.address + 17, advertiseNop) &&
+               AddPatch(plan, validateLegacy.address + 5, validateNop) &&
+               AddPatch(plan, validateLegacy.address + 9, count);
+    }
+
+    return false;
+}
+
+// Plans every compatible fatbin rewrite without changing the module. A malformed candidate makes the
+// optional kernel mode unsupported; mixing a partial rewrite with unlocked frame-count gates is unsafe.
+bool BuildKernelPlan(HMODULE module, std::vector<Patch>& plan, unsigned int& containers)
+{
+    auto* base = reinterpret_cast<uint8_t*>(module);
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    auto* sections = IMAGE_FIRST_SECTION(nt);
     const uint8_t magic[] = { 0x50, 0xED, 0x55, 0xBA };
-    unsigned int rewritten = 0;
+    containers = 0;
 
     for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i)
     {
-        const auto& s = section[i];
-
-        if (s.Characteristics & IMAGE_SCN_MEM_EXECUTE)
+        const auto& section = sections[i];
+        if (section.Characteristics & IMAGE_SCN_MEM_EXECUTE)
             continue;
 
-        uint8_t* start = base + s.VirtualAddress;
-        uint8_t* end = start + s.Misc.VirtualSize;
-
-        for (uint8_t* c = std::search(start, end, magic, magic + sizeof(magic)); c < end;
-             c = std::search(c + 1, end, magic, magic + sizeof(magic)))
+        uint8_t* start = base + section.VirtualAddress;
+        uint8_t* end = start + section.Misc.VirtualSize;
+        for (uint8_t* cursor = start; cursor < end;)
         {
-            if (end - c < 16)
+            uint8_t* container = std::search(cursor, end, magic, magic + sizeof(magic));
+            if (container == end)
                 break;
+            cursor = container + 1;
 
-            const auto headerSize = *reinterpret_cast<const uint16_t*>(c + 6);
-            const auto fatSize = *reinterpret_cast<const uint64_t*>(c + 8);
+            if (end - container < 16)
+                return false;
 
-            if (headerSize != 0x10 || fatSize == 0 || fatSize > (uint64_t) (end - c - 16))
-                continue;
+            const auto headerSize = *reinterpret_cast<const uint16_t*>(container + 6);
+            const auto fatSize = *reinterpret_cast<const uint64_t*>(container + 8);
+            if (headerSize != 0x10 || fatSize == 0 || fatSize > static_cast<uint64_t>(end - container - 16))
+                return false;
 
+            uint8_t* const containerEnd = container + 16 + fatSize;
             uint8_t* blackwell = nullptr;
             size_t blackwellHeader = 0;
             size_t blackwellPayload = 0;
-            std::vector<uint8_t*> ada;
-            bool valid = true;
+            std::vector<uint8_t*> adaImages;
 
-            for (uint8_t* image = c + 16; image < c + 16 + fatSize;)
+            for (uint8_t* image = container + 16; image < containerEnd;)
             {
-                const auto remaining = (uint64_t) (c + 16 + fatSize - image);
+                const auto remaining = static_cast<uint64_t>(containerEnd - image);
                 if (remaining < kImageArch + sizeof(uint32_t))
-                {
-                    valid = false;
-                    break;
-                }
+                    return false;
+
                 const auto kind = *reinterpret_cast<const uint16_t*>(image);
                 const auto imageHeader = *reinterpret_cast<const uint32_t*>(image + 4);
                 const auto payload = *reinterpret_cast<const uint64_t*>(image + kImagePayloadSize);
                 const auto arch = *reinterpret_cast<const uint32_t*>(image + kImageArch);
+                if (imageHeader < kImageArch + sizeof(uint32_t) || imageHeader > remaining || payload == 0 ||
+                    payload > remaining - imageHeader)
+                    return false;
 
-                if (imageHeader < kImageArch + sizeof(uint32_t) || imageHeader > remaining ||
-                    payload == 0 || payload > remaining - imageHeader)
-                {
-                    valid = false;
-                    break;
-                }
-
-                // kind 1 is PTX, 2 is a cubin. Only the PTX can be retargeted; the cubin is parked.
                 if (kind == 1 && arch == kArchBlackwell)
                 {
+                    if (blackwell != nullptr)
+                        return false;
                     blackwell = image;
                     blackwellHeader = imageHeader;
-                    blackwellPayload = payload;
+                    blackwellPayload = static_cast<size_t>(payload);
                 }
                 else if (arch == kArchAda)
-                {
-                    ada.push_back(image);
-                }
+                    adaImages.push_back(image);
 
                 image += imageHeader + payload;
             }
 
-            if (!valid || blackwell == nullptr || ada.empty())
+            if (blackwell == nullptr || adaImages.empty())
                 continue;
 
             const char from[] = ".target sm_120";
@@ -317,186 +360,178 @@ unsigned int RewriteBlackwellKernels(HMODULE module)
 
             uint8_t* body = blackwell + blackwellHeader;
             uint8_t* bodyEnd = body + blackwellPayload;
-            auto at = std::search(body, bodyEnd, from, from + sizeof(from) - 1);
+            auto target = std::search(body, bodyEnd, from, from + sizeof(from) - 1);
+            if (target == bodyEnd || std::search(target + 1, bodyEnd, from, from + sizeof(from) - 1) != bodyEnd)
+                return false;
 
-            if (at == bodyEnd)
-                continue;
+            std::vector<uint8_t> patched(container, containerEnd);
+            std::memcpy(patched.data() + (target - container), to, sizeof(to) - 1);
+            std::memcpy(patched.data() + (blackwell + kImageArch - container), &kArchAda, sizeof(kArchAda));
+            for (auto* image : adaImages)
+                std::memcpy(patched.data() + (image + kImageArch - container), &kArchParked, sizeof(kArchParked));
 
-            const uint32_t ada89 = kArchAda;
-            const uint32_t parked = kArchParked;
-            // Prepare one complete container first. A failed protection change must not leave
-            // its PTX target and architecture headers disagreeing, or count a partial rewrite.
-            std::vector<uint8_t> patched(c, c + 16 + fatSize);
-            std::memcpy(patched.data() + (at - c), to, sizeof(to) - 1);
-            std::memcpy(patched.data() + (blackwell + kImageArch - c), &ada89, sizeof(ada89));
-            for (uint8_t* image : ada)
-                std::memcpy(patched.data() + (image + kImageArch - c), &parked, sizeof(parked));
-            if (WriteBytes(reinterpret_cast<uintptr_t>(c), patched.data(), patched.size()))
-                ++rewritten;
+            if (!AddPatch(plan, container, patched.data(), patched.size()))
+                return false;
+            ++containers;
+            cursor = containerEnd;
         }
     }
 
-    LOG_INFO("MFG unlock: {} kernel containers answer Ada with the Blackwell image", rewritten);
-
-    return rewritten;
+    return containers > 0;
 }
 } // namespace
 
 bool MfgUnlock::PatchArchGates(HMODULE module)
 {
-    auto base = reinterpret_cast<uint8_t*>(module);
-    auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-    auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    auto section = IMAGE_FIRST_SECTION(nt);
-
-    std::vector<uint8_t*> sites;
-
-    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i)
-    {
-        const auto& s = section[i];
-        if ((s.Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0)
-            continue;
-
-        uint8_t* start = base + s.VirtualAddress;
-        const size_t size = s.Misc.VirtualSize;
-        if (size < 6)
-            continue;
-
-        for (size_t off = 0; off + 6 <= size; ++off)
-        {
-            // 3D imm32: cmp eax, 0x1b0
-            if (start[off] == 0x3D && start[off + 1] == 0xB0 && start[off + 2] == 0x01 &&
-                start[off + 3] == 0x00 && start[off + 4] == 0x00)
-            {
-                sites.push_back(start + off + 1);
-                continue;
-            }
-            // 81 /7 imm32: cmp r32, 0x1b0 (ModR/M 0xF8..0xFF, covering all r32 and r8d..r15d)
-            if (start[off] == 0x81 && start[off + 1] >= 0xF8 && start[off + 1] <= 0xFF &&
-                start[off + 2] == 0xB0 && start[off + 3] == 0x01 && start[off + 4] == 0x00 &&
-                start[off + 5] == 0x00)
-            {
-                sites.push_back(start + off + 2);
-                continue;
-            }
-        }
-    }
-
-    if (sites.empty() || sites.size() > 8)
+    if (module == nullptr)
         return false;
 
-    size_t rewritten = 0;
-    const uint8_t archAda = 0x90; // 0x190 AD10x
-    for (uint8_t* site : sites)
+    std::lock_guard lock(g_mutex);
+    if (g_retainedModule != nullptr)
+        return false;
+
+    HMODULE acquired = nullptr;
+    if (!AcquireModuleReference(module, acquired))
+        return false;
+
+    std::vector<Patch> plan;
+    if (!BuildGatePlan(module, plan))
     {
-        if (WriteBytes(reinterpret_cast<uintptr_t>(site), &archAda, 1))
-            ++rewritten;
+        ReleaseModuleReference(acquired);
+        return false;
     }
 
-    LOG_INFO("MFG unlock: rewrote {} arch gate(s) (0x1b0 -> 0x190) in nvngx_dlssg.dll", rewritten);
-    return rewritten > 0;
+    const auto result = ApplyTransaction(plan);
+    if (result == TransactionResult::Succeeded || result == TransactionResult::FailedRollbackIncomplete)
+        g_retainedModule = acquired;
+    else
+        ReleaseModuleReference(acquired);
+    return result == TransactionResult::Succeeded;
 }
 
 void MfgUnlock::TryApply(HMODULE requestedModule)
 {
     if (!EnabledForSession())
         return;
+
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
-    // The kernel retarget is Ada-specific. Do not patch Ampere/Turing or change Blackwell's working path.
     if (gpu.vendorId != VendorId::Nvidia || gpu.nvidiaArchInfo.architecture_id != NV_GPU_ARCHITECTURE_AD100)
         return;
 
     std::lock_guard lock(g_mutex);
-
-    // Latches once nvngx_dlssg.dll is present; before that every call rescans for it.
-    static bool snippetDone = false;
-
-    if (!snippetDone)
+    if (g_attemptOutcome != AttemptOutcome::WaitingForModule)
     {
-        if (auto module = requestedModule ? requestedModule : GetModuleHandleW(L"nvngx_dlssg.dll"); module != nullptr)
-        {
-            snippetDone = true;
-            g_status.ModuleFound = true;
-            g_status.SnippetVersion = ModuleVersion(module);
-
-            // Validate both gates before touching either. Ambiguous/unknown versions remain unmodified.
-            const bool knownGates =
-                (UniqueAddress(module, kAdvertisePattern309) && UniqueAddress(module, kValidatePattern309)) ||
-                (UniqueAddress(module, kAdvertisePattern) && UniqueAddress(module, kValidatePattern));
-
-            const bool enableKernelRewrite = Config::Instance()->FGDLSSGAdaBlackwellKernels.value_or_default();
-
-            if (knownGates)
-            {
-                if (enableKernelRewrite)
-                {
-                    g_status.KernelsRewritten = RewriteBlackwellKernels(module);
-                    if (g_status.KernelsRewritten == 0)
-                    {
-                        LOG_WARN("MFG unlock: no compatible interpolation kernels; frame-count gates left unchanged");
-                        return;
-                    }
-                }
-                else
-                {
-                    g_status.KernelsRewritten = 0;
-                }
-
-                const bool advertise = PatchAdvertise(module);
-                const bool validate = PatchValidate(module);
-                g_status.AdvertiseMatched = advertise;
-                g_status.ValidateMatched = validate;
-
-                if (advertise && validate)
-                    LOG_INFO("MFG unlock: nvngx_dlssg.dll patched for {} generated frames", kMaxGeneratedFrames);
-                else
-                    LOG_WARN("MFG unlock: nvngx_dlssg.dll incomplete, advertise {}, validate {}", advertise, validate);
-            }
-            else
-            {
-                // Fall back to robust arch gate scanning (mavismmg / RenoDX method for 310.9.1+ and newer DLLs)
-                if (PatchArchGates(module))
-                {
-                    g_status.AdvertiseMatched = true;
-                    g_status.ValidateMatched = true;
-                    g_status.ArchGatesPatched = true;
-                    if (enableKernelRewrite)
-                        g_status.KernelsRewritten = RewriteBlackwellKernels(module);
-                    else
-                        g_status.KernelsRewritten = 0;
-
-                    LOG_INFO("MFG unlock: nvngx_dlssg.dll arch gates patched for {} generated frames (kernels rewritten: {})",
-                             kMaxGeneratedFrames, g_status.KernelsRewritten);
-                }
-                else
-                {
-                    LOG_WARN("MFG unlock: unsupported or ambiguous DLSSG {} signatures; left unchanged",
-                             g_status.SnippetVersion);
-                }
-            }
-        }
+        if (requestedModule != nullptr && requestedModule != g_attemptedModule)
+            LOG_WARN("MFG unlock: ignoring a different DLSSG module after the terminal first attempt");
+        return;
     }
+
+    auto module = requestedModule ? requestedModule : GetModuleHandleW(L"nvngx_dlssg.dll");
+    if (module == nullptr)
+        return;
+
+    g_attemptedModule = module;
+    g_status.ModuleFound = true;
+    HMODULE acquired = nullptr;
+    if (!AcquireModuleReference(module, acquired))
+    {
+        g_status.PatchFailed = true;
+        g_attemptOutcome = AttemptOutcome::FailedBeforeMutation;
+        LOG_WARN("MFG unlock: could not retain the DLSSG module; patch attempt rejected");
+        return;
+    }
+
+    g_status.SnippetVersion = ModuleVersion(module);
+
+    std::vector<Patch> gatePlan;
+    if (!BuildGatePlan(module, gatePlan))
+    {
+        ReleaseModuleReference(acquired);
+        g_attemptOutcome = AttemptOutcome::Unsupported;
+        LOG_WARN("MFG unlock: unsupported or ambiguous DLSSG {} signatures; left unchanged",
+                 g_status.SnippetVersion);
+        return;
+    }
+
+    std::vector<Patch> plan;
+    unsigned int kernelContainers = 0;
+    if (Config::Instance()->FGDLSSGAdaBlackwellKernels.value_or_default() &&
+        !BuildKernelPlan(module, plan, kernelContainers))
+    {
+        ReleaseModuleReference(acquired);
+        g_attemptOutcome = AttemptOutcome::Unsupported;
+        LOG_WARN("MFG unlock: no complete, unambiguous interpolation kernel set; module left unchanged");
+        return;
+    }
+
+    // Kernel data goes first so a later gate failure proves that the complete optional rewrite is
+    // rolled back with the gates. The entire plan was validated before this point.
+    plan.insert(plan.end(), std::make_move_iterator(gatePlan.begin()), std::make_move_iterator(gatePlan.end()));
+    const auto result = ApplyTransaction(plan);
+    if (result != TransactionResult::Succeeded)
+    {
+        g_status.PatchFailed = true;
+        g_status.RollbackFailed = result == TransactionResult::FailedRollbackIncomplete;
+        g_attemptOutcome = g_status.RollbackFailed ? AttemptOutcome::FailedRollbackIncomplete
+                                                   : AttemptOutcome::FailedRolledBack;
+        if (g_status.RollbackFailed)
+            g_retainedModule = acquired;
+        else
+            ReleaseModuleReference(acquired);
+        LOG_WARN("MFG unlock: patch transaction failed; rollback {}",
+                 g_status.RollbackFailed ? "was incomplete" : "completed");
+        return;
+    }
+
+    g_status.AdvertiseMatched = true;
+    g_status.ValidateMatched = true;
+    g_status.ArchGatesPatched = true;
+    g_status.KernelsRewritten = kernelContainers;
+    g_retainedModule = acquired;
+    g_attemptOutcome = AttemptOutcome::Succeeded;
+    LOG_INFO("MFG unlock: nvngx_dlssg.dll patched for {} generated frames (kernels rewritten: {})",
+             kMaxGeneratedFrames, kernelContainers);
 }
 
 unsigned int MfgUnlock::UnlockedMax()
 {
-    const auto& status = LastStatus();
+    const auto status = LastStatus();
+    return status.AdvertiseMatched && status.ValidateMatched && !status.PatchFailed ? kMaxGeneratedFrames : 0;
+}
 
-    if (status.ArchGatesPatched && status.AdvertiseMatched && status.ValidateMatched)
-        return kMaxGeneratedFrames;
+unsigned int MfgUnlock::EffectiveMax(unsigned int nativeMaximum)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_status.PatchFailed)
+        return 1;
 
-    if (status.AdvertiseMatched && status.ValidateMatched)
-        return kMaxGeneratedFrames;
+    const unsigned int verified = g_status.AdvertiseMatched && g_status.ValidateMatched
+                                      ? kMaxGeneratedFrames
+                                      : 0;
+    return std::max(nativeMaximum, verified);
+}
 
-    return 0;
+MfgUnlock::Failure MfgUnlock::LastFailure()
+{
+    std::lock_guard lock(g_mutex);
+    if (g_status.RollbackFailed)
+        return Failure::RollbackFailed;
+    if (g_status.PatchFailed)
+        return Failure::PatchFailed;
+    return Failure::None;
 }
 
 bool MfgUnlock::Pending()
 {
-    if (!EnabledForSession() || LastStatus().ModuleFound)
+    if (!EnabledForSession())
         return false;
+
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
-    return gpu.vendorId == VendorId::Nvidia && gpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_AD100;
+    if (gpu.vendorId != VendorId::Nvidia || gpu.nvidiaArchInfo.architecture_id != NV_GPU_ARCHITECTURE_AD100)
+        return false;
+
+    std::lock_guard lock(g_mutex);
+    return g_attemptOutcome == AttemptOutcome::WaitingForModule;
 }
 
 MfgUnlock::Status MfgUnlock::LastStatus()

@@ -48,7 +48,16 @@ struct Status
     bool ValidateMatched = false;
     bool ArchGatesPatched = false;
     unsigned int KernelsRewritten = 0;
+    bool PatchFailed = false;    // an intended write/protection/cache operation failed
+    bool RollbackFailed = false; // at least one original byte/protection/cache state could not be restored
     std::string SnippetVersion; // file version of nvngx_dlssg.dll, empty if it could not be read
+};
+
+enum class Failure
+{
+    None,
+    PatchFailed,
+    RollbackFailed
 };
 
 Status LastStatus();
@@ -62,7 +71,15 @@ bool Pending();
 // The generated frame ceiling the patches opened, or 0 when they did not land.
 unsigned int UnlockedMax();
 
-// Directly patches architecture gate comparisons (0x1b0 -> 0x190) across executable sections.
+// Applies the verified ceiling to a native report. Any failed patch attempt is fail-closed because an
+// incompletely restored advertise site could otherwise make the native runtime report a false maximum.
+unsigned int EffectiveMax(unsigned int nativeMaximum);
+
+// Cheap failure severity for per-frame consumers that must clamp or disable behavior without copying
+// the full Status (including its version string).
+Failure LastFailure();
+
+// Applies only the complete, unambiguous legacy or 310.9 gate set. Unknown comparisons are rejected.
 bool PatchArchGates(HMODULE module);
 } // namespace MfgUnlock
 

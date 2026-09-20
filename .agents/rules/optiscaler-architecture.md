@@ -71,7 +71,7 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - Sync `ReflexHooks::setDlssgFrameCount(frameCount)` and `State::Instance().dlssgDetectedInterpolationCount`.
      - **Associated Unit Tests**:
        - `tests/ngx_parameter_dlssg_unit.cpp`
-       - `tests/mfg_unlock_arch_gate_unit.cpp`
+       - `tests/mfg_unlock/run.ps1` (production-backed transaction and module-lifetime tests)
        - `tests/streamline_mfg_options_unit.cpp`
        - `tests/dlssg_evaluate_feature_unit.cpp`
 
