@@ -484,6 +484,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="hooks\Kernel_Hooks.h" />
     <ClInclude Include="hooks\Ntdll_Hooks.h" />
     <ClInclude Include="hooks\Streamline_Hooks.h" />
+    <ClInclude Include="hooks\DlssgOptionsState.h" />
     <ClInclude Include="hooks\Wintrust_Hooks.h" />
     <ClInclude Include="hudfix\Hudfix_Dx12.h" />
     <ClInclude Include="include\imgui\imgui_impl_dx11.h" />

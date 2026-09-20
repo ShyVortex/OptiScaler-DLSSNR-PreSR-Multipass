@@ -11,6 +11,8 @@
 #include "include/sl.param/parameters.h"
 
 #include "Hook_Utils.h"
+#include "DlssgOptionsState.h"
+#include <atomic>
 
 struct Adapter
 {
@@ -140,6 +142,11 @@ class StreamlineHooks
 
     static void updateForceReflex();
     static void updateDlssgOptions();
+    static void initializeDlssgOptions();
+    static bool dlssgOptionsPending() { return dlssgOptionsState.Pending(); }
+    static DlssgOptionsState::Snapshot getDlssgOverrides() { return dlssgOptionsState.Read(); }
+    static void acceptDlssgOverrides(uint64_t generation) { dlssgOptionsState.Accepted(generation); }
+    static bool hasGameDlssgOptions() { return gameDlssgOptionsObserved.load(std::memory_order_acquire); }
     static void applyMenuDlssgInterlock(sl::DLSSGOptions& options, bool potentiallyActive);
 
     static void unhookInterposer();
@@ -252,8 +259,8 @@ class StreamlineHooks
     inline static PFN_slGetPluginJSONConfig_sl1 o_dlssg_slGetPluginJSONConfig_sl1 = nullptr;
     inline static decltype(&slDLSSGSetOptions) o_slDLSSGSetOptions = nullptr;
     inline static decltype(&slDLSSGGetState) o_slDLSSGGetState = nullptr;
-    static inline sl::ViewportHandle lastDlssgViewport {}; // For updating options when we change them
-    static inline sl::DLSSGOptions lastDlssgOptions {};
+    static inline DlssgOptionsState dlssgOptionsState {};
+    static inline std::atomic_bool gameDlssgOptionsObserved { false };
 
     static bool hkdlssg_slOnPluginLoad(sl::param::IParameters* params, const char* loaderJSON, const char** pluginJSON);
     static sl::Result hkslSetConstants(const sl::Constants& values, const sl::FrameToken& frame,

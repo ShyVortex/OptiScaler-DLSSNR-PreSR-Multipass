@@ -807,6 +807,7 @@ static void CheckWorkingMode()
     }
 
     Config::Instance()->CheckUpscalerFiles();
+    StreamlineHooks::initializeDlssgOptions();
 
     // Intel Extension Framework
     if (Config::Instance()->UESpoofIntelAtomics64.value_or_default())
