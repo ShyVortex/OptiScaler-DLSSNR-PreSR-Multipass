@@ -440,8 +440,6 @@ struct DlssNr_Dx12::State
 
     DXGI_COLOR_SPACE_TYPE FinishedColorSpace(IDXGISwapChain* swapchain, DXGI_FORMAT format);
 
-    void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue);
-
     void ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain);
 
     bool ApplyFinishedColor(ID3D12Resource* color, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE colorSpace,

@@ -184,8 +184,11 @@ bool SimulateCreateBufferResource(MockD3D12Device* device, MockD3D12Resource* so
 
     auto desc = source->GetDesc();
     if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
-        desc.DepthOrArraySize != 1 || desc.MipLevels != 1)
+        desc.DepthOrArraySize != 1)
         return false;
+    desc.MipLevels = 1;
+    desc.Alignment = 0;
+    desc.Layout = 0; // D3D12_TEXTURE_LAYOUT_UNKNOWN
 
     // Format normalization: typeless to typed
     desc.Format = SimulatedTypedGuideFormat(desc.Format);
@@ -340,6 +343,29 @@ int main()
         assert(!ok);
 
         std::cout << "  [PASS] Test 5: Graceful rejection of non-2D or MSAA resources\n";
+    }
+
+    // Test 6: Multi-mip source input (MipLevels > 1) successfully normalized to single-mip scratch buffer
+    {
+        MockD3D12Device device;
+        MockD3D12Resource source;
+        source.desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        source.desc.Width = 2560;
+        source.desc.Height = 1440;
+        source.desc.DepthOrArraySize = 1;
+        source.desc.MipLevels = 4; // Multi-mip input texture
+        source.desc.SampleDesc = { 1, 0 };
+        source.desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        source.desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+        void* outBuffer = nullptr;
+        bool ok = SimulateCreateBufferResource(&device, &source, &outBuffer);
+        assert(ok);
+        assert(device.lastCreatedDesc.MipLevels == 1);
+        assert(device.lastCreatedDesc.Width == 2560);
+        assert(device.lastCreatedDesc.Height == 1440);
+        assert((device.lastCreatedDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0);
+        std::cout << "  [PASS] Test 6: Multi-mip source input successfully normalized to single-mip scratch buffer\n";
     }
 
     std::cout << "\nAll DLSS-NR Buffer Resource Creation Unit Tests passed successfully!\n";

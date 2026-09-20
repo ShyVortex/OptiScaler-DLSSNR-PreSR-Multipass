@@ -145,8 +145,8 @@ auto DlssNr_Dx12::State::DeferredSrContext::Before(ID3D12GraphicsCommandList* cm
     const auto active =
         DlssNr::PreSrColorExtent(inDesc, UInt(source, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width),
                                  UInt(source, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height));
-    if (!active || !DlssNr::PreSrColorExtent(outDesc, 0, 0) || inDesc.MipLevels != 1 ||
-        outDesc.MipLevels != 1 || active->width > outDesc.Width || active->height > outDesc.Height)
+    if (!active || !DlssNr::PreSrColorExtent(outDesc, 0, 0) ||
+        active->width > outDesc.Width || active->height > outDesc.Height)
     {
         Say("inactive: unsupported active input/output dimensions");
         return;
@@ -573,7 +573,7 @@ auto DlssNr_Dx12::State::DeferredSrContext::After(ID3D12GraphicsCommandList* cmd
                              : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     owner.Barrier(cmd, pair.output, arrival, D3D12_RESOURCE_STATE_COPY_SOURCE);
     owner.Barrier(cmd, g.clean, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
-    cmd->CopyResource(g.clean, pair.output);
+    DlssNr::CopyActiveColor(cmd, g.clean, pair.output, { g.outW, g.outH });
     owner.Barrier(cmd, g.clean, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     DlssNrConstants apply {};
     apply.Mode = DlssNrMode_ApplyResidual;
@@ -586,7 +586,7 @@ auto DlssNr_Dx12::State::DeferredSrContext::After(ID3D12GraphicsCommandList* cmd
     {
         owner.Barrier(cmd, g.composed, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
         owner.Barrier(cmd, pair.output, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-        cmd->CopyResource(pair.output, g.composed);
+        DlssNr::CopyActiveColor(cmd, pair.output, g.composed, { g.outW, g.outH });
         owner.Barrier(cmd, pair.output, D3D12_RESOURCE_STATE_COPY_DEST, arrival);
         owner.Barrier(cmd, g.composed, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         Say("running: " + std::to_string(g.w) + "x" + std::to_string(g.h) +

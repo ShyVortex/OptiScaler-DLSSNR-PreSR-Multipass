@@ -683,7 +683,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_DestroyParameters(NVSDK_NGX_Param
 
 #pragma region DLSS Feature Calls
 
-static Upscaler GetUpscalerBackend()
+static Upscaler GetUpscalerBackend(bool allowOverride = true)
 {
     Upscaler upscaler = Upscaler::XeSS; // Default
 
@@ -695,7 +695,7 @@ static Upscaler GetUpscalerBackend()
     if (primaryGpu.fsr4Support != FSR4Support::None)
         upscaler = Upscaler::FFX;
 
-    if (Config::Instance()->Dx12Upscaler.has_value())
+    if (allowOverride && Config::Instance()->Dx12Upscaler.has_value())
         upscaler = Config::Instance()->Dx12Upscaler.value();
 
     return upscaler;
@@ -802,8 +802,12 @@ static NVSDK_NGX_Result TryCreateOptiFeature(ID3D12GraphicsCommandList* InCmdLis
     }
     else
     {
-        LOG_ERROR("Feature '{}' initialization failed falling back to FSR 2.1.2", UpscalerDisplayName(upscalerBackend));
-        state.newBackend = Upscaler::FSR21;
+        const auto fallback = upscalerBackend == Upscaler::DLSSD && InFeatureID == NVSDK_NGX_Feature_SuperSampling
+                                  ? GetUpscalerBackend(false)
+                                  : Upscaler::FSR21;
+        LOG_ERROR("Feature '{}' initialization failed; falling back to {}", UpscalerDisplayName(upscalerBackend),
+                  UpscalerDisplayName(fallback));
+        state.newBackend = fallback;
         state.changeBackend[handleId] = true;
     }
 

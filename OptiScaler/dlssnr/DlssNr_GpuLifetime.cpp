@@ -3,6 +3,7 @@
 #include <Util.h>
 #include <algorithm>
 #include <vector>
+#include <map>
 #include <wrl/client.h>
 #include <atomic>
 #include <mutex>
@@ -40,28 +41,21 @@ struct GpuLifetime::Impl
             }
         }
     };
-    struct Completion
-    {
-        std::shared_ptr<Timeline> timeline;
-        UINT64 value;
-        bool Complete() const
-        {
-            const auto completed = timeline->fence->GetCompletedValue();
-            return completed != UINT64_MAX && completed >= value;
-        }
-    };
     struct Recording
     {
         ID3D12CommandList* commands = nullptr; // identity only, never dereferenced
         std::atomic_bool open { true };
         bool signalFailed = false;
         // Only the latest value on each queue is needed, including when the list is replayed.
-        std::vector<Completion> completions;
-        bool Complete() const
+        std::map<std::shared_ptr<Timeline>, UINT64> completions;
+        bool Complete() const { return !open && Finished(); }
+        bool Finished() const
         {
-            // A closed list can be replayed until reset, even after its first execution completes.
-            return !open && !signalFailed &&
-                   std::all_of(completions.begin(), completions.end(), [](const auto& c) { return c.Complete(); });
+            return !signalFailed && std::all_of(completions.begin(), completions.end(), [](const auto& c) {
+                const auto& [timeline, value] = c;
+                const auto completed = timeline->fence->GetCompletedValue();
+                return completed != UINT64_MAX && completed >= value;
+            });
         }
     };
     // Command lists can be released instead of Reset. A private IUnknown notification
@@ -97,6 +91,7 @@ struct GpuLifetime::Impl
     using Uses = std::vector<std::shared_ptr<Recording>>;
     struct Retired { Uses uses; std::function<void()> destroy; };
     Uses recordings;
+    Uses currentGeneration;
     std::vector<Retired> retired;
     std::vector<std::shared_ptr<Timeline>> timelines;
     bool collecting = false;
@@ -124,8 +119,8 @@ GpuLifetime::GpuLifetime() : impl(std::make_unique<Impl>()) {}
 GpuLifetime::~GpuLifetime()
 {
     Collect();
-    // Pending/unsubmitted, failed-signal and removed-device ownership is intentionally abandoned.
-    // Neither elapsed CPU time nor a new queue signal can prove that a recorded list is finished.
+    if (!impl->recordings.empty())
+        impl.release();
 }
 void GpuLifetime::Record(ID3D12GraphicsCommandList* commands)
 {
@@ -134,7 +129,13 @@ void GpuLifetime::Record(ID3D12GraphicsCommandList* commands)
     commands = Identity(commands);
     Collect();
     for (const auto& use : impl->recordings)
-        if (use->open && use->commands == commands) return;
+        if (use->open && use->commands == commands)
+        {
+            if (std::find(impl->currentGeneration.begin(), impl->currentGeneration.end(), use) ==
+                impl->currentGeneration.end())
+                impl->currentGeneration.push_back(use);
+            return;
+        }
     auto use = std::make_shared<Impl::Recording>();
     use->commands = commands;
     if (impl->watchKeyValid)
@@ -144,7 +145,20 @@ void GpuLifetime::Record(ID3D12GraphicsCommandList* commands)
             watch->recording.reset(); // Failure must not pretend the recording was discarded.
         watch->Release();
     }
+    impl->currentGeneration.push_back(use);
     impl->recordings.push_back(std::move(use));
+}
+std::function<bool()> GpuLifetime::CompletionProbe(ID3D12GraphicsCommandList* commands)
+{
+    std::lock_guard lock(impl->mutex);
+    commands = Identity(commands);
+    for (const auto& use : impl->recordings)
+        if (use->open && use->commands == commands)
+            return [this, use] {
+                std::lock_guard lock(impl->mutex);
+                return !use->completions.empty() && use->Finished();
+            };
+    return [] { return false; };
 }
 void GpuLifetime::Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
@@ -173,13 +187,7 @@ void GpuLifetime::Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12Command
                 use->signalFailed = true;
                 continue;
             }
-            auto& completions = use->completions;
-            auto found = std::find_if(completions.begin(), completions.end(),
-                                     [&](const auto& c) { return c.timeline == timeline; });
-            if (found == completions.end())
-                completions.push_back({ timeline, timeline->value });
-            else
-                found->value = timeline->value;
+            use->completions[timeline] = timeline->value;
         }
     }
     Collect();
@@ -195,7 +203,13 @@ void GpuLifetime::ResetRecording(ID3D12CommandList* commands)
 void GpuLifetime::Retire(std::function<void()> destroy)
 {
     std::lock_guard lock(impl->mutex);
-    impl->retired.push_back({ impl->recordings, std::move(destroy) });
+    impl->retired.push_back({ impl->currentGeneration, std::move(destroy) });
+    Collect();
+}
+void GpuLifetime::BeginGeneration()
+{
+    std::lock_guard lock(impl->mutex);
+    impl->currentGeneration.clear();
     Collect();
 }
 void GpuLifetime::Collect()
@@ -218,6 +232,7 @@ void GpuLifetime::Collect()
             return true;
         });
         std::erase_if(impl->recordings, [](const auto& use) { return use->Complete(); });
+        std::erase_if(impl->currentGeneration, [](const auto& use) { return use->Complete(); });
         if (ready.empty()) break;
         // NGX destruction can re-enter queue/reset hooks and Retire. No callback may
         // run while a retired/recording vector is being compacted or iterated.
