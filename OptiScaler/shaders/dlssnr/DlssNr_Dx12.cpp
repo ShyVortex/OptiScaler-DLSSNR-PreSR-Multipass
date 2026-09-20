@@ -7,6 +7,7 @@
 #include <resource_tracking/ResTrack_Dx12.h>
 #include <dlssnr/DlssNr_FinishedPictureBridge_Dx11.h>
 #include <dlssnr/DlssNr_HoldParameters_Dx12.h>
+#include <dlssnr/DlssNr_StreamlinePicture.h>
 #include <upscalers/ShaderPipeline_Dx12.h>
 
 #include <dlssnr/DlssNr.h>
