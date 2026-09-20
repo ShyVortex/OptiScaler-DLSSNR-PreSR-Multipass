@@ -1321,6 +1321,9 @@ static void printQuirks(flag_set<GameQuirk>& quirks)
     if (quirks & GameQuirk::Kcd2DlssgHdr10)
         stringQuirks.push_back("KCD2 native HDR10 for DLSSG");
 
+    if (quirks & GameQuirk::Kcd2NrBeforeFg)
+        stringQuirks.push_back("KCD2 finished-picture NR before DLSSG presentation");
+
     state->detectedQuirks.append_range(stringQuirks);
     for (auto& stringQuirk : stringQuirks)
         spdlog::info("Quirk: {}", stringQuirk);

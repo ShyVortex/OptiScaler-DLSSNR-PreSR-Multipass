@@ -1539,6 +1539,8 @@ void* StreamlineHooks::hkdlssg_slGetPluginFunction(const char* functionName)
 
 void* StreamlineHooks::hklocal_dlssg_slGetPluginFunction(const char* functionName)
 {
+    if (auto* hook = DlssNr::StreamlinePicture::Wrap(functionName, o_local_dlssg_slGetPluginFunction, true))
+        return hook;
     // LOG_DEBUG("{}", functionName);
 
     if (strcmp(functionName, "slOnPluginLoad") == 0 && State::Instance().activeFgNvngx != FGNvngxReplacement::None)
