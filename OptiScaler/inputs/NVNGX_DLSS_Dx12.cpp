@@ -53,10 +53,7 @@ static int ResolveDlssgEvaluationMaximum(const std::optional<int>& nativeMaximum
 }
 
 #if defined(OPTISCALER_RTX40_MFG)
-static bool CanEvaluateDlssg(MfgUnlock::Failure failure)
-{
-    return failure != MfgUnlock::Failure::RollbackFailed;
-}
+static bool CanEvaluateDlssg(MfgUnlock::Failure failure) { return failure != MfgUnlock::Failure::RollbackFailed; }
 #endif
 
 static bool ShouldApplyDlssgEvaluationOverride(bool gameDlssgOptionsObserved, FGInput activeInput,
@@ -82,9 +79,8 @@ static int ResolveDlssgEvaluationFrameCount(int gameFrameCount, const std::optio
 static std::optional<uint64_t> DirectDlssgOverrideGeneration(const std::optional<int>& overrideFrameCount,
                                                              uint64_t generation)
 {
-    return !overrideFrameCount.has_value() || overrideFrameCount.value() > 0
-               ? std::optional<uint64_t> { generation }
-               : std::nullopt;
+    return !overrideFrameCount.has_value() || overrideFrameCount.value() > 0 ? std::optional<uint64_t> { generation }
+                                                                             : std::nullopt;
 }
 
 static NVSDK_NGX_Result CommitDlssgEvaluationResult(NVSDK_NGX_Result result, int submittedFrameCount,
@@ -1263,8 +1259,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
             overrideFrameCount = overrides.values.generatedFrames;
             overrideGeneration = DirectDlssgOverrideGeneration(overrideFrameCount, overrides.generation);
         }
-        const int resolvedFrameCount = ResolveDlssgEvaluationFrameCount(
-            frameCount, overrideFrameCount, verifiedMaximum, trustNativeFrameCount);
+        const int resolvedFrameCount =
+            ResolveDlssgEvaluationFrameCount(frameCount, overrideFrameCount, verifiedMaximum, trustNativeFrameCount);
         if (resolvedFrameCount != frameCount || overrideFrameCount.has_value())
             InParameters->Set("DLSSG.MultiFrameCount", resolvedFrameCount);
         submittedDlssgFrameCount = resolvedFrameCount;
@@ -1290,7 +1286,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         }
     }
 
-    const auto finishEvaluation = [&](NVSDK_NGX_Result result) {
+    const auto finishEvaluation = [&](NVSDK_NGX_Result result)
+    {
         return submittedDlssgFrameCount.has_value()
                    ? CommitDlssgEvaluationResult(result, submittedDlssgFrameCount.value(), overrideGeneration)
                    : result;
@@ -1299,8 +1296,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     // Native DLSS passthrough
     if (handleId < DLSS_MOD_ID_OFFSET)
     {
-        if (Config::Instance()->DLSSEnabled.value_or_default() &&
-            NVNGXProxy::D3D12_EvaluateFeature() != nullptr)
+        if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::D3D12_EvaluateFeature() != nullptr)
         {
             LOG_DEBUG("Passthrough to native DLSS EvaluateFeature for handle {}", handleId);
 
@@ -1318,8 +1314,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     if (state.activeFgNvngx != FGNvngxReplacement::None && handleId >= NVNGX_PROVIDER_ID_OFFSET)
     {
         LOG_DEBUG("Passthrough to DLSSG Replacement's EvaluateFeature for handle {}", handleId);
-        return finishEvaluation(
-            Nvngx_FG::D3D12_EvaluateFeature(InCmdList, InFeatureHandle, InParameters, InCallback));
+        return finishEvaluation(Nvngx_FG::D3D12_EvaluateFeature(InCmdList, InFeatureHandle, InParameters, InCallback));
     }
 
     if (lastDlssgCameraNear.has_value())

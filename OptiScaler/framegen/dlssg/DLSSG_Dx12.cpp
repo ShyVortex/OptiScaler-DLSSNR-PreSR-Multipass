@@ -30,10 +30,7 @@ static int ResolveDlssgRuntimeMaximum(unsigned int nativeMaximum)
 }
 
 #if defined(OPTISCALER_RTX40_MFG)
-static bool CanDispatchDlssg(MfgUnlock::Failure failure)
-{
-    return failure != MfgUnlock::Failure::RollbackFailed;
-}
+static bool CanDispatchDlssg(MfgUnlock::Failure failure) { return failure != MfgUnlock::Failure::RollbackFailed; }
 #endif
 
 static bool CommitDlssgDispatchOptions(sl::Result result, const sl::DLSSGOptions& options,

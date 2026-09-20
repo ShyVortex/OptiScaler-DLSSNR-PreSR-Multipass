@@ -131,6 +131,12 @@ ID3D12GraphicsCommandList* IFGFeature_Dx12::GetUICommandList(int index)
             return nullptr;
     }
 
+    if (_uiCommandAllocator[index] == nullptr || _uiCommandList[index] == nullptr)
+    {
+        LOG_ERROR("UI command objects unavailable for slot {}", index);
+        return nullptr;
+    }
+
     for (size_t j = 0; j < 2; j++)
     {
         auto i = (index + j) % BUFFER_COUNT;
@@ -191,6 +197,12 @@ ID3D12GraphicsCommandList* IFGFeature_Dx12::GetSCCommandList(int index)
             return nullptr;
     }
 
+    if (_scCommandAllocator[index] == nullptr || _scCommandList[index] == nullptr)
+    {
+        LOG_ERROR("Swapchain command objects unavailable for slot {}", index);
+        return nullptr;
+    }
+
     for (size_t j = 0; j < 2; j++)
     {
         auto i = (index + j) % BUFFER_COUNT;
@@ -218,11 +230,15 @@ ID3D12GraphicsCommandList* IFGFeature_Dx12::GetSCCommandList(int index)
             if (result == S_OK)
                 _scCommandListResetted[index] = true;
             else
+            {
                 LOG_ERROR("_scCommandList[{}]->Reset() error: {:X}", index, (UINT) result);
+                return nullptr;
+            }
         }
         else
         {
             LOG_ERROR("_scCommandAllocator[{}]->Reset() error: {:X}", index, (UINT) result);
+            return nullptr;
         }
     }
 

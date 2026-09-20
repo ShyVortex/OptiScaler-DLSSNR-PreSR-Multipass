@@ -27,7 +27,7 @@ struct DLSSGOptions
     DLSSGMode mode = DLSSGMode::eOff;
     unsigned numFramesToGenerate = 1;
 };
-}
+} // namespace sl
 
 enum class FGInput
 {
@@ -60,7 +60,7 @@ namespace ReflexHooks
 {
 static unsigned frameCount = 0;
 static void setDlssgFrameCount(unsigned value) { frameCount = value; }
-}
+} // namespace ReflexHooks
 
 namespace MfgUnlock
 {
@@ -77,7 +77,7 @@ static unsigned EffectiveMax(unsigned nativeMaximum)
 {
     return patchFailed ? 1 : std::max(nativeMaximum, verifiedMaximum);
 }
-}
+} // namespace MfgUnlock
 
 struct StreamlineHooks
 {
@@ -87,7 +87,7 @@ struct StreamlineHooks
 
 static unsigned errorLogs = 0;
 #define LOG_ERROR(...) (++errorLogs)
-#define LOG_INFO(...) ((void)0)
+#define LOG_INFO(...) ((void) 0)
 #define OPTISCALER_RTX40_MFG 1
 
 #include "production-transactions.inc"
@@ -127,25 +127,19 @@ int main()
            "native future-hardware capability must not be capped at the Ada limit");
     MfgUnlock::patchFailed = true;
     MfgUnlock::verifiedMaximum = 5;
-    Expect(ResolveDlssgEvaluationMaximum(5) == 1,
-           "failed patch transaction must distrust a stale native maximum");
-    Expect(ResolveDlssgRuntimeMaximum(5) == 1,
-           "DLSSG runtime caller must fail closed after a patch failure");
-    Expect(ResolveNvngxAdvertisedMfgMaximum(true) == 1,
-           "NGX capability table must fail closed after a patch failure");
+    Expect(ResolveDlssgEvaluationMaximum(5) == 1, "failed patch transaction must distrust a stale native maximum");
+    Expect(ResolveDlssgRuntimeMaximum(5) == 1, "DLSSG runtime caller must fail closed after a patch failure");
+    Expect(ResolveNvngxAdvertisedMfgMaximum(true) == 1, "NGX capability table must fail closed after a patch failure");
     MfgUnlock::patchFailed = false;
-    Expect(ResolveDlssgRuntimeMaximum(1) == 5,
-           "DLSSG runtime caller must accept a verified unlock maximum");
+    Expect(ResolveDlssgRuntimeMaximum(1) == 5, "DLSSG runtime caller must accept a verified unlock maximum");
     Expect(ResolveNvngxAdvertisedMfgMaximum(true) == 5,
            "NGX capability table must advertise a verified unlock maximum");
     Expect(CanEvaluateDlssg(MfgUnlock::Failure::PatchFailed),
            "completed rollback may evaluate at the fail-closed count");
-    Expect(!CanEvaluateDlssg(MfgUnlock::Failure::RollbackFailed),
-           "incomplete rollback must refuse NGX evaluation");
+    Expect(!CanEvaluateDlssg(MfgUnlock::Failure::RollbackFailed), "incomplete rollback must refuse NGX evaluation");
     Expect(CanDispatchDlssg(MfgUnlock::Failure::PatchFailed),
            "completed rollback may dispatch at the fail-closed count");
-    Expect(!CanDispatchDlssg(MfgUnlock::Failure::RollbackFailed),
-           "incomplete rollback must refuse owned dispatch");
+    Expect(!CanDispatchDlssg(MfgUnlock::Failure::RollbackFailed), "incomplete rollback must refuse owned dispatch");
     Expect(ShouldApplyDlssgEvaluationOverride(false, FGInput::NoFG, FGOutput::NoFG),
            "direct NGX baseline must apply desired override");
     Expect(ShouldApplyDlssgEvaluationOverride(false, FGInput::NvngxFG, FGOutput::NoFG),
@@ -159,8 +153,7 @@ int main()
 
     // A UI override is bounded by verified capability. Unknown capability is
     // the native x2 fallback, and zero is not submitted to the evaluation API.
-    Expect(ResolveDlssgEvaluationFrameCount(4, 5, 3, true) == 3,
-           "NGX override must clamp to the verified maximum");
+    Expect(ResolveDlssgEvaluationFrameCount(4, 5, 3, true) == 3, "NGX override must clamp to the verified maximum");
     Expect(ResolveDlssgEvaluationFrameCount(4, 0, 5, true) == 1,
            "NGX evaluation override zero must use the API minimum");
     Expect(ResolveDlssgEvaluationFrameCount(4, 5, 0, true) == 1,
@@ -189,8 +182,7 @@ int main()
     Expect(rejected == NVSDK_NGX_Result_Fail, "NGX rejection must be preserved");
     Expect(State::Instance().dlssgDetectedInterpolationCount == 2 && ReflexHooks::frameCount == 2,
            "NGX rejection must retain the last accepted pacing state");
-    Expect(!StreamlineHooks::acceptedGeneration.has_value(),
-           "NGX rejection must leave the direct override pending");
+    Expect(!StreamlineHooks::acceptedGeneration.has_value(), "NGX rejection must leave the direct override pending");
     Expect(errorLogs == 1, "NGX rejection must emit a diagnostic");
 
     auto accepted = CommitDlssgEvaluationResult(NVSDK_NGX_Result_Success, 4, 17);
@@ -205,8 +197,7 @@ int main()
     Expect(!StreamlineHooks::acceptedGeneration.has_value(),
            "managed NGX success must not acknowledge pending UI intent");
 
-    CommitDlssgEvaluationResult(NVSDK_NGX_Result_Success, 1,
-                                DirectDlssgOverrideGeneration(std::nullopt, 19));
+    CommitDlssgEvaluationResult(NVSDK_NGX_Result_Success, 1, DirectDlssgOverrideGeneration(std::nullopt, 19));
     Expect(StreamlineHooks::acceptedGeneration == 19,
            "successful direct NGX Default evaluation must acknowledge its generation");
 

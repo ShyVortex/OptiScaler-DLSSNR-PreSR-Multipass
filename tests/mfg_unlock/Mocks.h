@@ -148,8 +148,7 @@ inline BOOL WINAPI MfgTestFlushInstructionCache(HANDLE process, LPCVOID address,
 
 inline BOOL WINAPI MfgTestGetModuleHandleExW(DWORD flags, LPCWSTR address, HMODULE* module)
 {
-    if (MfgTestSeams::failModuleReference || module == nullptr ||
-        (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0)
+    if (MfgTestSeams::failModuleReference || module == nullptr || (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS) == 0)
         return FALSE;
 
     const auto candidate = reinterpret_cast<HMODULE>(const_cast<wchar_t*>(address));

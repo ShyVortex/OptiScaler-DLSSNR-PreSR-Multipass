@@ -55,8 +55,15 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_Sleep(IUnknown* pDev)
         {
             uint32_t frameCount = (uint32_t) _lastFrameId[SIMULATION_START] + 1;
 
-            sl::FrameToken* frameToken;
-            StreamlineProxy::GetNewFrameToken()(frameToken, &frameCount);
+            sl::FrameToken* frameToken = nullptr;
+            const auto tokenResult = StreamlineProxy::GetNewFrameToken()(frameToken, &frameCount);
+            if (tokenResult != sl::Result::eOk || frameToken == nullptr)
+            {
+                LOG_WARN("Streamline sleep token unavailable for frame {}, result {}", frameCount,
+                         magic_enum::enum_name(tokenResult));
+                _lastSleepDev = pDev;
+                return o_NvAPI_D3D_Sleep(pDev);
+            }
 
             LOG_TRACE("Sleep for frame {}", frameCount);
 
@@ -218,9 +225,15 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
                 State::Instance().reflexFrameId = pSetLatencyMarkerParams->frameID;
             }
 
-            sl::FrameToken* frameToken;
+            sl::FrameToken* frameToken = nullptr;
             uint32_t frameCount = (uint32_t) pSetLatencyMarkerParams->frameID;
-            StreamlineProxy::GetNewFrameToken()(frameToken, &frameCount);
+            const auto tokenResult = StreamlineProxy::GetNewFrameToken()(frameToken, &frameCount);
+            if (tokenResult != sl::Result::eOk || frameToken == nullptr)
+            {
+                LOG_WARN("Streamline marker token unavailable for frame {}, marker {}, result {}", frameCount,
+                         magic_enum::enum_name(marker), magic_enum::enum_name(tokenResult));
+                return o_NvAPI_D3D_SetLatencyMarker(pDev, pSetLatencyMarkerParams);
+            }
 
             LOG_TRACE("{} for frame {}", magic_enum::enum_name(marker), frameCount);
 

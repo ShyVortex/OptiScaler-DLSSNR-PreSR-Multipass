@@ -16,8 +16,7 @@
 namespace
 {
 // mov ebx,1 / mov r8d,3 / cmp edi,0x1b0 / cmovl r8d,ebx.
-constexpr std::string_view kAdvertisePattern =
-    "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
+constexpr std::string_view kAdvertisePattern = "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
 
 // cmp eax,0x1b0 / jl / cmp ebx,3 / jbe.
 constexpr std::string_view kValidatePattern = "3D B0 01 00 00 7C ? 83 FB 03 76";
@@ -175,8 +174,7 @@ bool Rollback(std::vector<Patch>& plan)
         DWORD currentProtection = 0;
         if (!VirtualProtect(patch.address, patch.original.size(), PAGE_EXECUTE_READWRITE, &currentProtection))
         {
-            LOG_WARN("MFG unlock: rollback VirtualProtect failed at {:X}",
-                     reinterpret_cast<uintptr_t>(patch.address));
+            LOG_WARN("MFG unlock: rollback VirtualProtect failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
             complete = false;
             continue;
         }
@@ -193,8 +191,7 @@ bool Rollback(std::vector<Patch>& plan)
 
         if (!FlushInstructionCache(GetCurrentProcess(), patch.address, patch.original.size()))
         {
-            LOG_WARN("MFG unlock: rollback cache flush failed at {:X}",
-                     reinterpret_cast<uintptr_t>(patch.address));
+            LOG_WARN("MFG unlock: rollback cache flush failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
             complete = false;
         }
     }
@@ -218,12 +215,10 @@ TransactionResult ApplyTransaction(std::vector<Patch>& plan)
 
     for (auto& patch : plan)
     {
-        if (!VirtualProtect(patch.address, patch.replacement.size(), PAGE_EXECUTE_READWRITE,
-                            &patch.originalProtection))
+        if (!VirtualProtect(patch.address, patch.replacement.size(), PAGE_EXECUTE_READWRITE, &patch.originalProtection))
         {
             LOG_WARN("MFG unlock: VirtualProtect failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
-            return Rollback(plan) ? TransactionResult::FailedRolledBack
-                                  : TransactionResult::FailedRollbackIncomplete;
+            return Rollback(plan) ? TransactionResult::FailedRolledBack : TransactionResult::FailedRollbackIncomplete;
         }
 
         std::memcpy(patch.address, patch.replacement.data(), patch.replacement.size());
@@ -232,17 +227,14 @@ TransactionResult ApplyTransaction(std::vector<Patch>& plan)
         DWORD ignored = 0;
         if (!VirtualProtect(patch.address, patch.replacement.size(), patch.originalProtection, &ignored))
         {
-            LOG_WARN("MFG unlock: protection restore failed at {:X}",
-                     reinterpret_cast<uintptr_t>(patch.address));
-            return Rollback(plan) ? TransactionResult::FailedRolledBack
-                                  : TransactionResult::FailedRollbackIncomplete;
+            LOG_WARN("MFG unlock: protection restore failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
+            return Rollback(plan) ? TransactionResult::FailedRolledBack : TransactionResult::FailedRollbackIncomplete;
         }
 
         if (!FlushInstructionCache(GetCurrentProcess(), patch.address, patch.replacement.size()))
         {
             LOG_WARN("MFG unlock: cache flush failed at {:X}", reinterpret_cast<uintptr_t>(patch.address));
-            return Rollback(plan) ? TransactionResult::FailedRolledBack
-                                  : TransactionResult::FailedRollbackIncomplete;
+            return Rollback(plan) ? TransactionResult::FailedRolledBack : TransactionResult::FailedRollbackIncomplete;
         }
     }
 
@@ -256,10 +248,10 @@ bool BuildGatePlan(HMODULE module, std::vector<Patch>& plan)
     const auto advertiseLegacy = FindMatches(module, kAdvertisePattern);
     const auto validateLegacy = FindMatches(module, kValidatePattern);
 
-    const bool exact309 = advertise309.count == 1 && validate309.count == 1 && advertiseLegacy.count == 0 &&
-                          validateLegacy.count == 0;
-    const bool exactLegacy = advertiseLegacy.count == 1 && validateLegacy.count == 1 && advertise309.count == 0 &&
-                             validate309.count == 0;
+    const bool exact309 =
+        advertise309.count == 1 && validate309.count == 1 && advertiseLegacy.count == 0 && validateLegacy.count == 0;
+    const bool exactLegacy =
+        advertiseLegacy.count == 1 && validateLegacy.count == 1 && advertise309.count == 0 && validate309.count == 0;
 
     if (exact309)
     {
@@ -448,8 +440,7 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
     {
         ReleaseModuleReference(acquired);
         g_attemptOutcome = AttemptOutcome::Unsupported;
-        LOG_WARN("MFG unlock: unsupported or ambiguous DLSSG {} signatures; left unchanged",
-                 g_status.SnippetVersion);
+        LOG_WARN("MFG unlock: unsupported or ambiguous DLSSG {} signatures; left unchanged", g_status.SnippetVersion);
         return;
     }
 
@@ -472,8 +463,8 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
     {
         g_status.PatchFailed = true;
         g_status.RollbackFailed = result == TransactionResult::FailedRollbackIncomplete;
-        g_attemptOutcome = g_status.RollbackFailed ? AttemptOutcome::FailedRollbackIncomplete
-                                                   : AttemptOutcome::FailedRolledBack;
+        g_attemptOutcome =
+            g_status.RollbackFailed ? AttemptOutcome::FailedRollbackIncomplete : AttemptOutcome::FailedRolledBack;
         if (g_status.RollbackFailed)
             g_retainedModule = acquired;
         else
@@ -489,8 +480,8 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
     g_status.KernelsRewritten = kernelContainers;
     g_retainedModule = acquired;
     g_attemptOutcome = AttemptOutcome::Succeeded;
-    LOG_INFO("MFG unlock: nvngx_dlssg.dll patched for {} generated frames (kernels rewritten: {})",
-             kMaxGeneratedFrames, kernelContainers);
+    LOG_INFO("MFG unlock: nvngx_dlssg.dll patched for {} generated frames (kernels rewritten: {})", kMaxGeneratedFrames,
+             kernelContainers);
 }
 
 unsigned int MfgUnlock::UnlockedMax()
@@ -505,9 +496,7 @@ unsigned int MfgUnlock::EffectiveMax(unsigned int nativeMaximum)
     if (g_status.PatchFailed)
         return 1;
 
-    const unsigned int verified = g_status.AdvertiseMatched && g_status.ValidateMatched
-                                      ? kMaxGeneratedFrames
-                                      : 0;
+    const unsigned int verified = g_status.AdvertiseMatched && g_status.ValidateMatched ? kMaxGeneratedFrames : 0;
     return std::max(nativeMaximum, verified);
 }
 

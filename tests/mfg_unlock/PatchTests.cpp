@@ -11,8 +11,7 @@ constexpr size_t kValidate = 0x1200;
 constexpr size_t kDuplicate = 0x1300;
 constexpr size_t kContainer = 0x3000;
 
-constexpr std::string_view kLegacyAdvertise =
-    "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
+constexpr std::string_view kLegacyAdvertise = "BB 01 00 00 00 41 B8 03 00 00 00 81 FF B0 01 00 00 44 0F 4C C3";
 constexpr std::string_view kLegacyValidate = "3D B0 01 00 00 7C 08 83 FB 03 76";
 constexpr std::string_view k309Advertise = "81 FD B0 01 00 00 0F 8C 20 00 00 00 BF 05 00 00 00";
 constexpr std::string_view k309Validate = "3D B0 01 00 00 0F 93 C0";
@@ -49,8 +48,8 @@ void PutPattern(uint8_t* to, std::string_view pattern)
 
 struct PeImage
 {
-    uint8_t* bytes = static_cast<uint8_t*>(
-        ::VirtualAlloc(nullptr, kImageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    uint8_t* bytes =
+        static_cast<uint8_t*>(::VirtualAlloc(nullptr, kImageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 
     PeImage()
     {
@@ -299,8 +298,8 @@ int main(int argc, char** argv) try
         Expect(status.PatchFailed, "write failure was not persisted in status");
         Expect(status.RollbackFailed == (mode == "rollback-failure"), "rollback outcome was not persisted precisely");
         Expect(MfgUnlock::EffectiveMax(5) == 1, "failed patch trusted a possibly partial native maximum");
-        const auto expectedFailure = mode == "rollback-failure" ? MfgUnlock::Failure::RollbackFailed
-                                                               : MfgUnlock::Failure::PatchFailed;
+        const auto expectedFailure =
+            mode == "rollback-failure" ? MfgUnlock::Failure::RollbackFailed : MfgUnlock::Failure::PatchFailed;
         Expect(MfgUnlock::LastFailure() == expectedFailure, "cheap failure state lost severity");
         Expect(MfgTestFreeLibrary(image.Module()), "owner could not release failed module");
         Expect(MfgTestSeams::IsModuleLoaded(image.Module()) == (mode == "rollback-failure"),
