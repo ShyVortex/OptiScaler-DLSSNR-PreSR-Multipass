@@ -1,4 +1,4 @@
-#include "Mocks.h"
+﻿#include "Mocks.h"
 #include "../../OptiScaler/framegen/dlssg/MfgUnlock.h"
 
 #include <stdexcept>

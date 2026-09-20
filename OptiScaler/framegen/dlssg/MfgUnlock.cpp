@@ -1,4 +1,4 @@
-// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
+﻿// Adapted from y4my4my4m/OptiScaler_DLSSNR_Multipass_MFG, tag v4 (7b7220bb), GPL-3.0.
 #include "pch.h"
 
 #if defined(OPTISCALER_RTX40_MFG)
