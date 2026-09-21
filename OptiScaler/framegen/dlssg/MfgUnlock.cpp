@@ -411,12 +411,7 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
         return;
 
     std::lock_guard lock(g_mutex);
-    if (g_attemptOutcome != AttemptOutcome::WaitingForModule)
-    {
-        if (requestedModule != nullptr && requestedModule != g_attemptedModule)
-            LOG_WARN("MFG unlock: ignoring a different DLSSG module after the terminal first attempt");
-        return;
-    }
+    // MULTI-MODULE PATCH HACK
 
     auto module = requestedModule ? requestedModule : GetModuleHandleW(L"nvngx_dlssg.dll");
     if (module == nullptr)
@@ -520,7 +515,7 @@ bool MfgUnlock::Pending()
         return false;
 
     std::lock_guard lock(g_mutex);
-    return g_attemptOutcome == AttemptOutcome::WaitingForModule;
+    return true;
 }
 
 MfgUnlock::Status MfgUnlock::LastStatus()

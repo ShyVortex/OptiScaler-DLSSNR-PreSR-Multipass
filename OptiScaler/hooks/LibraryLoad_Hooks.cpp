@@ -149,6 +149,15 @@ HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibF
             {
                 State::Instance().NGX_OTA_Dlssd = wstring_to_string(lpLibFullPath);
             }
+            if (normalizedPath.contains(L"\\dlssg\\"))
+            {
+#if defined(OPTISCALER_RTX40_MFG)
+                if (MfgUnlock::Pending())
+                {
+                    MfgUnlock::TryApply(loadedBin);
+                }
+#endif
+            }
         }
         return loadedBin;
     }
