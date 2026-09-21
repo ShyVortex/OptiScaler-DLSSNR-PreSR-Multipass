@@ -796,6 +796,7 @@ class Config
     CustomOptional<int>  FGDLSSGAmpereMfgLogLevel { 1 };        // dlssg_sm86 logging level: 0=Off, 1=Default/Info, 2=Debug, 3=Trace/Verbose
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFsrFallback; // Linux fallback mode: auto / true / false
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFallbackType; // Target pipeline: fsrfg / xefg
+    CustomOptional<bool> FGDLSSGAmpereMfgSmoothMotion { false };        // NVIDIA Smooth Motion pacing/interpolation via DRS (strictly opt-in, default false)
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };
     CustomOptional<bool> FGDrawUIOverFG { false };
