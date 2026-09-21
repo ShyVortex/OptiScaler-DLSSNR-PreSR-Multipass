@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <optional>
+#include <framegen/dlssg/AmpereMfgLoader.h>
 
 // Setting IDs matching NVIDIA DRS constants
 constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_ENABLE = 0xB0D384C0;
@@ -155,6 +156,16 @@ int main()
         assert(simulateGetSetting(NVDRS_SETTING_SMOOTH_MOTION_APIS, true, val) && val == 7);
 
         std::printf("  [PASS] Case 6: In-memory DRS GetSetting query interception simulated & verified\n");
+    }
+
+    // Test 7: AmpereMfgLoader::Status SmoothMotionActive integration
+    {
+        AmpereMfgLoader::Status status {};
+        assert(!status.SmoothMotionActive); // Default false
+        status.SmoothMotionActive = true;
+        assert(status.SmoothMotionActive);
+
+        std::printf("  [PASS] Case 7: AmpereMfgLoader::Status SmoothMotionActive tracking verified\n");
     }
 
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");

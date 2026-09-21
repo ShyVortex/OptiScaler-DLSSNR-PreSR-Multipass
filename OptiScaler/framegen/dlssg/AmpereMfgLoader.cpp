@@ -7,6 +7,7 @@
 #include <Util.h>
 #include <misc/IdentifyGpu.h>
 #include <proxies/Ntdll_Proxy.h>
+#include <nvapi/NvApiHooks.h>
 
 #include <fstream>
 #include <sstream>
@@ -115,6 +116,17 @@ void TrySetup()
     s_setupAttempted = true;
 
     auto* cfg = Config::Instance();
+
+    // Apply NVIDIA Smooth Motion DRS setting if opted-in
+    if (cfg->FGDLSSGAmpereMfgSmoothMotion.value_or(false))
+    {
+        s_status.SmoothMotionActive = NvApiHooks::ApplySmoothMotionDrs(true);
+        if (s_status.SmoothMotionActive)
+        {
+            LOG_INFO("AmpereMfgLoader: NVIDIA Smooth Motion active (applied via NVAPI DRS)");
+        }
+    }
+
     if (!cfg->FGDLSSGAmpereMfgUnlock.value_or_default())
         return;
 

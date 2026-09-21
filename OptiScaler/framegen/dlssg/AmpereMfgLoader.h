@@ -17,6 +17,7 @@ struct Status
     bool FsrFallbackActive = false; // 2X FG on Linux: internal FSR FG active
     bool HasSm75Support = false;    // Loaded runtime binary contains dedicated SM75 kernel family (310.1 or unified 310.9 0.3.1+)
     bool Is3101Runtime = false;     // True if 310.1 runtime (max ceiling 3 / 4X), false if 310.9 runtime (max ceiling 5 / 6X)
+    bool SmoothMotionActive = false; // True if NVIDIA Smooth Motion DRS setting was applied/active
     std::wstring LoadedDllPath;     // Absolute path of loaded DLL
     std::string ErrorMessage; // Human-readable error if anything failed
 };

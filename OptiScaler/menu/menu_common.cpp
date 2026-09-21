@@ -5,6 +5,7 @@
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <nvapi/NvApiHooks.h>
 #include <dlssnr/DlssNr_ExposureScan.h>
 
 #include <algorithm>
@@ -3470,6 +3471,26 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                "XeFG: Intel XeSS FG. Requires libxess_fg.dll in game folder.\n"
                                "Save Settings and restart to apply.");
             }
+        }
+
+        // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
+        ImGui::Separator();
+        bool smoothMotion = config->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+        if (ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##sm86", &smoothMotion))
+        {
+            config->FGDLSSGAmpereMfgSmoothMotion = smoothMotion;
+            NvApiHooks::ApplySmoothMotionDrs(smoothMotion);
+        }
+        ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                       "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                       "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                       "Can be toggled dynamically on the fly.");
+
+        const auto& ampereStatus = AmpereMfgLoader::LastStatus();
+        if (ampereStatus.SmoothMotionActive || (smoothMotion && !onLinux))
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active]");
         }
 
         ImGui::Unindent();
