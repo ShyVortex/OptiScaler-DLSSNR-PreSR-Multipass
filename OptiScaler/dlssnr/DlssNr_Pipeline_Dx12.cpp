@@ -298,5 +298,6 @@ ID3D12Resource* PrepareDlssNrInput(DlssNr_Dx12& shader, ID3D12Device* device, ID
         return shader.Buffer();
 
     LOG_WARN("DLSS-NR pre-SR input dispatch failed in pipeline");
+    shader.ReportPipelineSkip("pre-SR input dispatch failed in pipeline");
     return nullptr;
 }

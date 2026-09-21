@@ -480,8 +480,15 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmd, ID3D12Resource* colou
     if (colour != output)
     {
         const auto source = colour->GetDesc(), target = output->GetDesc();
-        if (source.Width != target.Width || source.Height != target.Height || source.Format != target.Format)
+        if (source.Width != target.Width || source.Height != target.Height ||
+            _state->TypedGuideFormat(source.Format) != _state->TypedGuideFormat(target.Format))
+        {
+            LOG_WARN("DlssNr_Dx12::Dispatch dimension or format mismatch between colour ({}x{}, format {}) and output ({}x{}, format {})",
+                     source.Width, source.Height, static_cast<uint32_t>(source.Format),
+                     target.Width, target.Height, static_cast<uint32_t>(target.Format));
+            ReportPipelineSkip("dimension or format mismatch between pre-SR colour and intermediate buffer");
             return false;
+        }
         _state->Barrier(cmd, colour, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
         _state->Barrier(cmd, output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
         DlssNr::CopyActiveColor(cmd, output, colour, { (unsigned)target.Width, target.Height });
