@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "wrapped_swapchain.h"
 #include <dlssnr/DlssNr.h>
 #include <hooks/DxgiSwapchainSizing.h>
@@ -495,7 +495,8 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         if (auto currentFeature = State::Instance().currentFeature; currentFeature != nullptr)
             currentFeature->TickFrozenCheck();
 
-        const bool isDlssgModDlssNr = State::Instance().externalFrameGeneration || State::Instance().activeFgNvngx != FGNvngxReplacement::None || State::Instance().activeFgOutput == FGOutput::DLSSG || State::Instance().activeFgInput == FGInput::DLSSG || Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() || Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() || State::Instance().dlssgDetectedInterpolationCount > 0; if (!isDlssgModDlssNr)
+        const bool externalFgActive = State::Instance().externalFrameGeneration || State::Instance().activeFgNvngx != FGNvngxReplacement::None || State::Instance().activeFgOutput == FGOutput::DLSSG || State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().dlssgDetectedInterpolationCount > 1;
+        if (!externalFgActive)
         {
             if (cq && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
                 DlssNr::ApplyToFinishedPicture(pSwapChain, cq);
@@ -844,7 +845,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::SetFullscreenState(BOOL Fullsc
                                 Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
                                 Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
                                 State::Instance().dlssgDetectedInterpolationCount > 0;
-        if (!(presentOwnsLock && isDlssgMod))
+        if (!presentOwnsLock)
         {
             OwnedLockGuard lock(_localMutex, 3);
         }
@@ -911,7 +912,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
                             Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
                             Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
                             State::Instance().dlssgDetectedInterpolationCount > 0;
-    if (!(presentOwnsLock && isDlssgMod))
+    if (!presentOwnsLock)
     {
         OwnedLockGuard lock(_localMutex, 1);
     }
@@ -1357,7 +1358,7 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
                             Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
                             Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
                             State::Instance().dlssgDetectedInterpolationCount > 0;
-    if (!(presentOwnsLock && isDlssgMod))
+    if (!presentOwnsLock)
     {
         OwnedLockGuard lock(_localMutex, 2);
     }

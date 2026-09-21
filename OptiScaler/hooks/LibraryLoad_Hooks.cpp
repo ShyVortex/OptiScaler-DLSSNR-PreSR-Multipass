@@ -152,10 +152,7 @@ HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibF
             if (normalizedPath.contains(L"\\dlssg\\"))
             {
 #if defined(OPTISCALER_RTX40_MFG)
-                if (MfgUnlock::Pending())
-                {
-                    MfgUnlock::TryApply(loadedBin);
-                }
+                MfgUnlock::TryApply(loadedBin);
 #endif
             }
         }

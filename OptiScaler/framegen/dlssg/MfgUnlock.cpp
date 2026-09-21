@@ -417,6 +417,18 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
     if (module == nullptr)
         return;
 
+    if (g_attemptOutcome != AttemptOutcome::WaitingForModule)
+    {
+        if (module == g_attemptedModule || module == g_retainedModule)
+            return;
+        
+        LOG_INFO("MFG unlock: new DLSSG module detected, resetting state to attempt patch on {}", reinterpret_cast<void*>(module));
+        ReleaseModuleReference(g_retainedModule);
+        g_status = Status();
+        g_attemptOutcome = AttemptOutcome::WaitingForModule;
+        g_attemptedModule = nullptr;
+    }
+
     g_attemptedModule = module;
     g_status.ModuleFound = true;
     HMODULE acquired = nullptr;
@@ -515,7 +527,7 @@ bool MfgUnlock::Pending()
         return false;
 
     std::lock_guard lock(g_mutex);
-    return true;
+    return g_attemptOutcome == AttemptOutcome::WaitingForModule;
 }
 
 MfgUnlock::Status MfgUnlock::LastStatus()
