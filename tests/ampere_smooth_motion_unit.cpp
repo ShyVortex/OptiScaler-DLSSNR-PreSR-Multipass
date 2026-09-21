@@ -5,6 +5,12 @@
 #include <optional>
 #include <framegen/dlssg/AmpereMfgLoader.h>
 
+// Mock architecture constants
+constexpr uint32_t NV_GPU_ARCHITECTURE_TU100 = 0x00000160;
+constexpr uint32_t NV_GPU_ARCHITECTURE_GA100 = 0x00000170;
+constexpr uint32_t NV_GPU_ARCHITECTURE_AD100 = 0x00000190;
+constexpr uint32_t NV_GPU_ARCHITECTURE_GB100 = 0x000001A0;
+
 // Setting IDs matching NVIDIA DRS constants
 constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_ENABLE = 0xB0D384C0;
 constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_APIS   = 0xB0CC0875;
@@ -27,15 +33,16 @@ struct SmoothMotionPolicy
         return driverVersion >= MIN_SMOOTH_MOTION_DRIVER_VERSION;
     }
 
-    static bool ShouldEngage(std::optional<bool> userConfig, bool isNvidia, bool isWindows, uint32_t driverVersion)
+    static bool ShouldEngage(std::optional<bool> userConfig, bool isNvidia, uint32_t archId, bool isWindows, uint32_t driverVersion)
     {
         // Strictly opt-in: default is false
         const bool optIn = userConfig.value_or(false);
         if (!optIn)
             return false;
 
-        // Platform & hardware guards
-        if (!isNvidia || !isWindows)
+        // Platform & hardware guards: requires NVIDIA, Windows, and Ada (RTX 40) or Blackwell (RTX 50)
+        const bool isAdaOrBlackwell = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
+        if (!isAdaOrBlackwell || !isWindows)
             return false;
 
         // Driver version guard
@@ -73,12 +80,12 @@ int main()
         assert(!defaultUnset.has_value());
         assert(defaultUnset.value_or(false) == false);
 
-        // Even on modern supported driver, unset config MUST NOT engage
-        bool engaged = SmoothMotionPolicy::ShouldEngage(defaultUnset, true, true, 57216);
+        // Even on modern supported driver and Ada GPU, unset config MUST NOT engage
+        bool engaged = SmoothMotionPolicy::ShouldEngage(defaultUnset, true, NV_GPU_ARCHITECTURE_AD100, true, 57216);
         assert(!engaged);
 
         // Explicitly setting false MUST NOT engage
-        engaged = SmoothMotionPolicy::ShouldEngage(false, true, true, 57216);
+        engaged = SmoothMotionPolicy::ShouldEngage(false, true, NV_GPU_ARCHITECTURE_AD100, true, 57216);
         assert(!engaged);
 
         std::printf("  [PASS] Case 2: Strict opt-in default behavior verified (defaults to false)\n");
@@ -99,23 +106,31 @@ int main()
         assert(SmoothMotionPolicy::IsDriverSupported(61047));  // Future branch
 
         // With explicit user opt-in, old driver is safely blocked
-        assert(!SmoothMotionPolicy::ShouldEngage(true, true, true, 56070));
-        // With explicit user opt-in and valid driver, feature engages
-        assert(SmoothMotionPolicy::ShouldEngage(true, true, true, 57186));
-        assert(SmoothMotionPolicy::ShouldEngage(true, true, true, 58108));
+        assert(!SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_AD100, true, 56070));
+        // With explicit user opt-in and valid driver on Ada, feature engages
+        assert(SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_AD100, true, 57186));
+        assert(SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_AD100, true, 58108));
 
         std::printf("  [PASS] Case 3: Driver version threshold verified (minimum 571.86 / 57186)\n");
     }
 
-    // Test 4: Platform and Hardware Safety Guards
+    // Test 4: Platform and Hardware Safety Guards (requires Ada/Blackwell + Windows)
     {
         // Non-Nvidia GPUs are rejected even with opt-in and valid driver
-        assert(!SmoothMotionPolicy::ShouldEngage(true, false, true, 57216));
+        assert(!SmoothMotionPolicy::ShouldEngage(true, false, NV_GPU_ARCHITECTURE_AD100, true, 57216));
 
         // Linux / Proton is rejected (Smooth Motion requires Windows DXGI/WDDM driver stack)
-        assert(!SmoothMotionPolicy::ShouldEngage(true, true, false, 57216));
+        assert(!SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_AD100, false, 57216));
 
-        std::printf("  [PASS] Case 4: Non-Nvidia and Linux platform guards verified\n");
+        // Turing (SM75) and Ampere (SM86) GPUs are rejected natively by NVIDIA driver
+        assert(!SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_TU100, true, 57216));
+        assert(!SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_GA100, true, 57216));
+
+        // Ada (RTX 40 / sm_89) and Blackwell (RTX 50 / sm_120) engage successfully
+        assert(SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_AD100, true, 57216));
+        assert(SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_GB100, true, 57216));
+
+        std::printf("  [PASS] Case 4: Ada/Blackwell architecture and Windows platform guards verified\n");
     }
 
     // Test 5: API Mask Composition
@@ -176,8 +191,9 @@ int main()
             std::string helpMarker;
         };
 
-        auto evaluateUiState = [](bool onLinux, bool isNvidia) -> SmoothMotionUiState {
-            const bool disableSmoothMotion = onLinux || !isNvidia;
+        auto evaluateUiState = [](bool onLinux, bool isNvidia, uint32_t archId) -> SmoothMotionUiState {
+            const bool isAdaOrBlackwell = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
+            const bool disableSmoothMotion = onLinux || !isAdaOrBlackwell;
             if (disableSmoothMotion)
             {
                 if (onLinux)
@@ -186,58 +202,86 @@ int main()
                              "Disabled because the active OS is not Windows (10/11).\n"
                              "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver 571.86+ on Windows)." };
                 }
-                else
+                else if (!isNvidia)
                 {
                     return { true,
                              "Disabled because the active GPU is not NVIDIA.\n"
                              "NVIDIA Smooth Motion requires an NVIDIA GPU and driver 571.86+ on Windows." };
+                }
+                else
+                {
+                    return { true,
+                             "Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50).\n"
+                             "NVIDIA driver-level Smooth Motion requires an RTX 40 or 50 series GPU (driver 571.86+).\n"
+                             "On RTX 30 series, an external driver patcher is required." };
                 }
             }
             return { false,
                      "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
                      "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
                      "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                     "Supported on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
                      "Can be toggled dynamically on the fly." };
         };
 
-        // Case 8a: Windows + NVIDIA GPU -> Enabled, standard help marker
+        // Case 8a: Windows + Ada GPU (AD100 / RTX 40) -> Enabled, standard help marker
         {
-            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true);
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_AD100);
+            assert(!ui.disabled);
+            assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
+            assert(ui.helpMarker.find("Supported on GeForce RTX 40 (Ada) and RTX 50 (Blackwell)") != std::string::npos);
+            assert(ui.helpMarker.find("Disabled because") == std::string::npos);
+            std::printf("  [PASS] Case 8a: Windows + Ada GPU evaluates to interactive checkbox\n");
+        }
+
+        // Case 8b: Windows + Blackwell GPU (GB100 / RTX 50) -> Enabled, standard help marker
+        {
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_GB100);
             assert(!ui.disabled);
             assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
             assert(ui.helpMarker.find("Disabled because") == std::string::npos);
-            std::printf("  [PASS] Case 8a: Windows + NVIDIA GPU evaluates to interactive checkbox\n");
+            std::printf("  [PASS] Case 8b: Windows + Blackwell GPU evaluates to interactive checkbox\n");
         }
 
-        // Case 8b: Linux (Wine/Proton) + NVIDIA GPU -> Disabled with OS explanation
+        // Case 8c: Windows + Ampere GPU (GA100 / RTX 30) -> Disabled with Ada/Blackwell explanation and external patcher note
         {
-            auto ui = evaluateUiState(/*onLinux=*/true, /*isNvidia=*/true);
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_GA100);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50)") != std::string::npos);
+            assert(ui.helpMarker.find("On RTX 30 series, an external driver patcher is required") != std::string::npos);
+            std::printf("  [PASS] Case 8c: Windows + Ampere GPU evaluates to disabled with Ada/Blackwell requirement\n");
+        }
+
+        // Case 8d: Windows + Turing GPU (TU100 / RTX 20) -> Disabled with Ada/Blackwell explanation
+        {
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_TU100);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50)") != std::string::npos);
+            std::printf("  [PASS] Case 8d: Windows + Turing GPU evaluates to disabled with Ada/Blackwell requirement\n");
+        }
+
+        // Case 8e: Linux + Ada GPU -> Disabled with OS explanation
+        {
+            auto ui = evaluateUiState(/*onLinux=*/true, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_AD100);
             assert(ui.disabled);
             assert(ui.helpMarker.find("Disabled because the active OS is not Windows (10/11)") != std::string::npos);
             assert(ui.helpMarker.find("Windows-only driver display pipeline feature") != std::string::npos);
-            std::printf("  [PASS] Case 8b: Linux + NVIDIA GPU evaluates to disabled with OS explanation\n");
+            std::printf("  [PASS] Case 8e: Linux + Ada GPU evaluates to disabled with OS explanation\n");
         }
 
-        // Case 8c: Windows + non-NVIDIA GPU (AMD/Intel) -> Disabled with GPU explanation
+        // Case 8f: Windows + non-NVIDIA GPU -> Disabled with GPU explanation
         {
-            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/false);
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/false, 0);
             assert(ui.disabled);
             assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA") != std::string::npos);
-            std::printf("  [PASS] Case 8c: Windows + non-NVIDIA GPU evaluates to disabled with GPU explanation\n");
+            std::printf("  [PASS] Case 8f: Windows + non-NVIDIA GPU evaluates to disabled with GPU explanation\n");
         }
 
-        // Case 8d: Linux + non-NVIDIA GPU -> Disabled with OS explanation
-        {
-            auto ui = evaluateUiState(/*onLinux=*/true, /*isNvidia=*/false);
-            assert(ui.disabled);
-            assert(ui.helpMarker.find("Disabled because the active OS is not Windows (10/11)") != std::string::npos);
-            std::printf("  [PASS] Case 8d: Linux + non-NVIDIA GPU evaluates to disabled with OS explanation\n");
-        }
-
-        std::printf("  [PASS] Case 8: Menu UI disable logic and contextual help markers verified\n");
+        std::printf("  [PASS] Case 8: Menu UI disable logic and contextual help markers verified across all architectures\n");
     }
 
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");
     return 0;
 }
+
 

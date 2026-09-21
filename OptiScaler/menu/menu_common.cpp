@@ -3486,49 +3486,57 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
         }
 
-        // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
-        ImGui::Separator();
-        bool smoothMotion = config->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
-        const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
-        const bool disableSmoothMotion = onLinux || !isNvidia;
+        ImGui::Unindent();
+    }
 
-        if (disableSmoothMotion)
+    // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
+    ImGui::Separator();
+    bool smoothMotion = config->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+    const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
+    const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
+    const bool disableSmoothMotion = onLinux || !isAdaOrBlackwell;
+
+    if (disableSmoothMotion)
+    {
+        ImGui::BeginDisabled();
+        ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##driver_sm", &smoothMotion);
+        ImGui::EndDisabled();
+        if (onLinux)
         {
-            ImGui::BeginDisabled();
-            ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##sm86", &smoothMotion);
-            ImGui::EndDisabled();
-            if (onLinux)
-            {
-                ShowHelpMarker("Disabled because the active OS is not Windows (10/11).\n"
-                               "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver 571.86+ on Windows).");
-            }
-            else
-            {
-                ShowHelpMarker("Disabled because the active GPU is not NVIDIA.\n"
-                               "NVIDIA Smooth Motion requires an NVIDIA GPU and driver 571.86+ on Windows.");
-            }
+            ShowHelpMarker("Disabled because the active OS is not Windows (10/11).\n"
+                           "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver 571.86+ on Windows).");
+        }
+        else if (!isNvidia)
+        {
+            ShowHelpMarker("Disabled because the active GPU is not NVIDIA.\n"
+                           "NVIDIA Smooth Motion requires an NVIDIA GPU and driver 571.86+ on Windows.");
         }
         else
         {
-            if (ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##sm86", &smoothMotion))
-            {
-                config->FGDLSSGAmpereMfgSmoothMotion = smoothMotion;
-                NvApiHooks::ApplySmoothMotionDrs(smoothMotion);
-            }
-            ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
-                           "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
-                           "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                           "Can be toggled dynamically on the fly.");
-
-            const auto& ampereStatus = AmpereMfgLoader::LastStatus();
-            if (ampereStatus.SmoothMotionActive || smoothMotion)
-            {
-                ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active]");
-            }
+            ShowHelpMarker("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50).\n"
+                           "NVIDIA driver-level Smooth Motion requires an RTX 40 or 50 series GPU (driver 571.86+).\n"
+                           "On RTX 30 series, an external driver patcher is required.");
         }
+    }
+    else
+    {
+        if (ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##driver_sm", &smoothMotion))
+        {
+            config->FGDLSSGAmpereMfgSmoothMotion = smoothMotion;
+            NvApiHooks::ApplySmoothMotionDrs(smoothMotion);
+        }
+        ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                       "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                       "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                       "Supported on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
+                       "Can be toggled dynamically on the fly.");
 
-        ImGui::Unindent();
+        const auto& ampereStatus = AmpereMfgLoader::LastStatus();
+        if (ampereStatus.SmoothMotionActive || smoothMotion)
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active]");
+        }
     }
 
     if (state.externalFrameGeneration || ampereFallbackToFsrFg)

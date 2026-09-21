@@ -174,6 +174,10 @@ bool Config::Reload(std::filesystem::path iniPath)
                 FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOpt.value());
             else if (auto smOptFg = readBool("FrameGen", "AmpereMfgSmoothMotion"); smOptFg.has_value())
                 FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOptFg.value());
+            else if (auto smOptD = readBool("DLSSG", "SmoothMotion"); smOptD.has_value())
+                FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOptD.value());
+            else if (auto smOptF = readBool("FrameGen", "SmoothMotion"); smOptF.has_value())
+                FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOptF.value());
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
