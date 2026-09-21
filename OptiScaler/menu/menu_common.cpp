@@ -3491,7 +3491,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
     // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
     ImGui::Separator();
-    bool smoothMotion = config->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+    bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
     const bool disableSmoothMotion = onLinux || !isAdaOrBlackwell;
@@ -3522,7 +3522,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     {
         if (ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##driver_sm", &smoothMotion))
         {
-            config->FGDLSSGAmpereMfgSmoothMotion = smoothMotion;
+            config->FGDLSSGSmoothMotion = smoothMotion;
             NvApiHooks::ApplySmoothMotionDrs(smoothMotion);
         }
         ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"

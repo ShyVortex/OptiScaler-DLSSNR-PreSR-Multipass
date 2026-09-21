@@ -118,7 +118,7 @@ void TrySetup()
     auto* cfg = Config::Instance();
 
     // Apply NVIDIA Smooth Motion DRS setting if opted-in
-    if (cfg->FGDLSSGAmpereMfgSmoothMotion.value_or(false))
+    if (cfg->FGDLSSGSmoothMotion.value_or(false))
     {
         s_status.SmoothMotionActive = NvApiHooks::ApplySmoothMotionDrs(true);
         if (s_status.SmoothMotionActive)

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <optional>
+#include <fstream>
 #include <framegen/dlssg/AmpereMfgLoader.h>
 
 // Mock architecture constants
@@ -278,6 +279,48 @@ int main()
         }
 
         std::printf("  [PASS] Case 8: Menu UI disable logic and contextual help markers verified across all architectures\n");
+    }
+
+    // Test 9: INI Configuration Key Priority & Migration (SmoothMotion vs AmpereMfgSmoothMotion)
+    {
+        auto resolveConfig = [](std::optional<bool> dlssgSmoothMotion,
+                                std::optional<bool> frameGenSmoothMotion,
+                                std::optional<bool> dlssgAmpereMfgSmoothMotion,
+                                std::optional<bool> frameGenAmpereMfgSmoothMotion) -> bool {
+            if (dlssgSmoothMotion.has_value()) return dlssgSmoothMotion.value();
+            if (frameGenSmoothMotion.has_value()) return frameGenSmoothMotion.value();
+            if (dlssgAmpereMfgSmoothMotion.has_value()) return dlssgAmpereMfgSmoothMotion.value();
+            if (frameGenAmpereMfgSmoothMotion.has_value()) return frameGenAmpereMfgSmoothMotion.value();
+            return false;
+        };
+
+        // 1. New key has highest priority
+        assert(resolveConfig(true, false, false, false) == true);
+        assert(resolveConfig(false, true, true, true) == false);
+
+        // 2. FrameGen section modern key
+        assert(resolveConfig(std::nullopt, true, false, false) == true);
+
+        // 3. Legacy [DLSSG] AmpereMfgSmoothMotion fallback works
+        assert(resolveConfig(std::nullopt, std::nullopt, true, false) == true);
+
+        // 4. Legacy [FrameGen] AmpereMfgSmoothMotion fallback works
+        assert(resolveConfig(std::nullopt, std::nullopt, std::nullopt, true) == true);
+
+        // 5. Default when unset
+        assert(resolveConfig(std::nullopt, std::nullopt, std::nullopt, std::nullopt) == false);
+
+        // 6. Verify OptiScaler.ini in repo has SmoothMotion=false and NOT AmpereMfgSmoothMotion=false
+        std::ifstream iniFile("OptiScaler.ini");
+        if (iniFile.is_open())
+        {
+            std::string content((std::istreambuf_iterator<char>(iniFile)), std::istreambuf_iterator<char>());
+            assert(content.find("SmoothMotion=false") != std::string::npos);
+            assert(content.find("AmpereMfgSmoothMotion=false") == std::string::npos);
+            std::printf("  [PASS] Case 9b: Verified OptiScaler.ini uses modernized SmoothMotion key\n");
+        }
+
+        std::printf("  [PASS] Case 9: INI configuration priority and legacy migration verified\n");
     }
 
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");

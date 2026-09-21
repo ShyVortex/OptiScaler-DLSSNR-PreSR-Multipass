@@ -170,14 +170,14 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGDLSSGAmpereMfgLinuxFallbackType.set_from_config("fsrfg");
             }
 
-            if (auto smOpt = readBool("DLSSG", "AmpereMfgSmoothMotion"); smOpt.has_value())
-                FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOpt.value());
-            else if (auto smOptFg = readBool("FrameGen", "AmpereMfgSmoothMotion"); smOptFg.has_value())
-                FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOptFg.value());
-            else if (auto smOptD = readBool("DLSSG", "SmoothMotion"); smOptD.has_value())
-                FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOptD.value());
+            if (auto smOptD = readBool("DLSSG", "SmoothMotion"); smOptD.has_value())
+                FGDLSSGSmoothMotion.set_from_config(smOptD.value());
             else if (auto smOptF = readBool("FrameGen", "SmoothMotion"); smOptF.has_value())
-                FGDLSSGAmpereMfgSmoothMotion.set_from_config(smOptF.value());
+                FGDLSSGSmoothMotion.set_from_config(smOptF.value());
+            else if (auto smOpt = readBool("DLSSG", "AmpereMfgSmoothMotion"); smOpt.has_value())
+                FGDLSSGSmoothMotion.set_from_config(smOpt.value());
+            else if (auto smOptFg = readBool("FrameGen", "AmpereMfgSmoothMotion"); smOptFg.has_value())
+                FGDLSSGSmoothMotion.set_from_config(smOptFg.value());
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
@@ -1106,7 +1106,8 @@ bool Config::SaveIni()
         ini.SetValue("DLSSG", "AmpereMfgLogLevel", GetIntValue(Instance()->FGDLSSGAmpereMfgLogLevel.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgLinuxFsrFallback", Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
         ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType", Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
-        ini.SetValue("DLSSG", "AmpereMfgSmoothMotion", GetBoolValue(Instance()->FGDLSSGAmpereMfgSmoothMotion.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "SmoothMotion", GetBoolValue(Instance()->FGDLSSGSmoothMotion.value_for_config()).c_str());
+        ini.Delete("DLSSG", "AmpereMfgSmoothMotion");
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())

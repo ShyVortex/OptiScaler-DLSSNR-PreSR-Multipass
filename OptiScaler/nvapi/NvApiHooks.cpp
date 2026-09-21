@@ -282,7 +282,7 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
         }
         if (settingId == NVDRS_SETTING_SMOOTH_MOTION_ENABLE)
         {
-            const bool smoothMotion = Config::Instance()->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+            const bool smoothMotion = Config::Instance()->FGDLSSGSmoothMotion.value_or(false);
             pSetting->settingType = NVDRS_DWORD_TYPE;
             pSetting->u32CurrentValue = smoothMotion ? 1 : 0;
             LOG_DEBUG("NvAPI_DRS_GetSetting: Intercepted Smooth Motion Enable -> {}", pSetting->u32CurrentValue);
@@ -290,7 +290,7 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
 
         if (settingId == NVDRS_SETTING_SMOOTH_MOTION_APIS)
         {
-            const bool smoothMotion = Config::Instance()->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+            const bool smoothMotion = Config::Instance()->FGDLSSGSmoothMotion.value_or(false);
             if (smoothMotion)
             {
                 pSetting->settingType = NVDRS_DWORD_TYPE;
