@@ -3224,13 +3224,26 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
     if (isAda && (adaUnlock || adaEnabledForSession) && !disableAda)
     {
+        bool adaBlackwell = config->FGDLSSGAdaBlackwellKernels.value_or_default();
+        if (ImGui::Checkbox("Retarget Blackwell kernels (faster 3X+ MFG, restart)", &adaBlackwell))
+            config->FGDLSSGAdaBlackwellKernels = adaBlackwell;
+        ShowHelpMarker("Retargets optimized Blackwell PTX interpolation kernels in nvngx_dlssg.dll to Ada (sm_89).\n"
+                       "Recommended for smooth 3X-6X frame pacing on high-refresh VRR/FreeSync/G-Sync monitors.\n"
+                       "Save Settings and restart after changing.");
+
         const auto status = MfgUnlock::LastStatus();
         if (adaUnlock != adaEnabledForSession)
             ImGui::TextWrapped("Save Settings and restart to apply this change.");
         else if (!status.ModuleFound)
             ImGui::TextWrapped("Waiting for DLSSG to load.");
         else if (status.AdvertiseMatched && status.ValidateMatched)
-            ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied.", status.SnippetVersion.c_str());
+        {
+            if (status.KernelsRewritten > 0)
+                ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied with Blackwell kernels (%u containers).",
+                                   status.SnippetVersion.c_str(), status.KernelsRewritten);
+            else
+                ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).", status.SnippetVersion.c_str());
+        }
         else
             ImGui::TextWrapped("DLSSG %s: unlock unavailable for this runtime.", status.SnippetVersion.c_str());
     }

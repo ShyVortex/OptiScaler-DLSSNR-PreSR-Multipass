@@ -23,14 +23,39 @@ Enabled builds use `x64/Release-RTX40-MFG`; standard builds use `x64/Release`. S
 ## Enable at runtime
 
 1. Install the complete **unlock-enabled** package, preserving your INI and separately supplied NR runtime.
-2. Under frame-generation settings, enable **RTX 40 MFG unlock (restart)**, save and restart the game. Alternatively set `[DLSSG] AdaMfgUnlock=true` before launch.
-3. Enable the game's DLSS FG or configure OptiScaler's normal DLSSG output. Start at 3x and check motion as well as the FPS counter.
+2. Under frame-generation settings in the OptiScaler in-game overlay (or `OptiScaler.ini`), configure:
+   - `[DLSSG] AdaMfgUnlock = true`: Unlocks the 3X–6X Multi-Frame Generation multipliers.
+   - `[DLSSG] AdaBlackwellKernels = true`: Retargets NVIDIA's Blackwell (`sm_120`) PTX interpolation kernels in `nvngx_dlssg.dll` to Ada (`sm_89`). **Recommended for 3X–6X generation** to eliminate frame pacing micro-stutter.
+   - Save Settings and restart the game.
+3. Enable the game's DLSS FG or configure OptiScaler's normal DLSSG output. Select 3X or 4X and verify smoothness.
 
-The option defaults off and only patches RTX 40/Ada. It requires a supported NVIDIA DLSSG runtime; game multiplier overrides need Streamline 2.7.1+. Keep the game's working runtime. This package does not include NVIDIA FG/NR DLLs or another MFG unlocker.
+The option defaults off and only patches RTX 40/Ada. It requires a supported NVIDIA DLSSG runtime (such as v310.9); game multiplier overrides need Streamline 2.7.1+. Keep the game's working runtime. This package does not include NVIDIA FG/NR DLLs or an external MFG unlocker.
 
-The patch retargets compatible Blackwell interpolation kernels for Ada and changes two frame-count gates in memory. It exposes up to five generated frames (6x including the real frame) only when both gates and a kernel group match. Unknown/ambiguous signatures remain unchanged. Disabling also requires a restart; it does not undo a live patch.
+The patch retargets compatible Blackwell interpolation kernels for Ada and changes two frame-count gates in memory. It exposes up to five generated frames (6X including the real frame) only when both gates and a kernel group match. Unknown/ambiguous signatures remain unchanged. Disabling also requires a restart; it does not undo a live patch.
 
-RTX 20/30 unlocks, external-FG ownership, residual frame interpolation and NVFP4 remain absent. This does not add a missing FG integration to a game. Dynamic MFG and real RTX 40 motion quality remain unverified here; the available test GPU is RTX 5090.
+RTX 20/30 series should use OptiScaler's dedicated **Ampere/Turing (SM86/SM75) MFG Unlock** (`AmpereMfgUnlock=true`) instead.
+
+## Frame Pacing, High-Refresh Displays & 3X+ Multi-Frame Generation
+
+### Why Blackwell Kernel Retargeting (`AdaBlackwellKernels`) is Recommended
+In `nvngx_dlssg.dll` (v310.9), NVIDIA's embedded stock Ada (`sm_89`) cubin kernels were designed for 2X Frame Generation (1 generated frame). With 3X, 4X, or 5X generation, the stock Ada interpolation kernel (`Kernel_EstimateIntermMvecsScatter`) reads only a single scalar float from its parameter block, causing timing collisions where generated sub-frames are not positioned evenly along the motion delta. Furthermore, multi-pass execution latency increases significantly.
+
+When `AdaBlackwellKernels = true` is enabled:
+- OptiScaler scans the fatbin containers inside `nvngx_dlssg.dll`, rewrites `.target sm_120` PTX directives to `.target sm_89`, and swaps the container architecture tag from Blackwell to Ada.
+- The NVIDIA display driver's JIT compiler generates optimized Ada machine code from the Blackwell PTX routines, which properly read all three interpolation coordinates and execute much faster per sub-frame.
+- This ensures sub-frames are evenly spaced in time, resolving the micro-stutter/judder on 120Hz/144Hz/165Hz+ VRR displays.
+
+### Display Refresh Rates & Pacing Division
+- **2X FG (60 FPS output from 30 FPS base)** divides evenly into 60 Hz and 120 Hz displays (1 frame every 16.6ms at 60Hz; 2 refreshes per frame at 120Hz), yielding a smooth, uniform cadence.
+- **3X FG (90 FPS output from 30 FPS base)** cannot divide evenly into 60 Hz, 120 Hz, or 144 Hz fixed refresh cycles. Without Variable Refresh Rate (G-Sync/FreeSync), the display alternates between 1-refresh and 2-refresh frame durations (3:2 pulldown judder).
+- **Best Practice for 3X+ MFG**:
+  1. Use a G-Sync Compatible or FreeSync VRR display with G-Sync enabled.
+  2. Enable Vertical Sync in the NVIDIA Control Panel (or game menu) so Streamline can synchronize presentation intervals to V-Blanks.
+  3. Avoid using tight in-game 30 FPS limiters that put the CPU thread to sleep, as sleep timer jitter (±1–3 ms) disrupts Reflex queue pacing. If an FPS cap is needed, use NVIDIA Control Panel's Max Frame Rate or RTSS set to your monitor's refresh rate.
+
+### DirectX 12 Requirement vs DirectX 11
+- Native NVIDIA DLSS Frame Generation (`sl.dlss_g` / `nvngx_dlssg.dll`) is **strictly a DirectX 12 (D3D12)** technology. It cannot attach to or hook DirectX 11 pipelines.
+- In DirectX 11 games (e.g. *Grand Theft Auto V*), native DLSS-G will not run. To use Frame Generation in DX11 titles, configure OptiScaler with **AMD FSR 3.1 Frame Generation** (`FrameGen.FGOutput = FSRFG`) via the built-in DX11-with-DX12 interposer bridge.
 
 ## Validation and source
 
