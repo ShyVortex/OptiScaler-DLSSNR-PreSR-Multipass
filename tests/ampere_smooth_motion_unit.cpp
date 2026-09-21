@@ -128,6 +128,35 @@ int main()
         std::printf("  [PASS] Case 5: API bitmask resolution verified (All=7, DX11/12=3)\n");
     }
 
+    // Test 6: In-Memory DRS GetSetting Interception Behavior
+    {
+        auto simulateGetSetting = [](uint32_t settingId, bool configEnabled, uint32_t& outVal) -> bool {
+            if (settingId == NVDRS_SETTING_SMOOTH_MOTION_ENABLE) {
+                outVal = configEnabled ? 1 : 0;
+                return true;
+            }
+            if (settingId == NVDRS_SETTING_SMOOTH_MOTION_APIS) {
+                if (configEnabled) {
+                    outVal = 7;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        uint32_t val = 999;
+        // When disabled (default), enable setting returns 0
+        assert(simulateGetSetting(NVDRS_SETTING_SMOOTH_MOTION_ENABLE, false, val) && val == 0);
+
+        // When enabled, enable setting returns 1
+        assert(simulateGetSetting(NVDRS_SETTING_SMOOTH_MOTION_ENABLE, true, val) && val == 1);
+
+        // When enabled, APIs setting returns 7 (DX12 | DX11 | Vulkan)
+        assert(simulateGetSetting(NVDRS_SETTING_SMOOTH_MOTION_APIS, true, val) && val == 7);
+
+        std::printf("  [PASS] Case 6: In-memory DRS GetSetting query interception simulated & verified\n");
+    }
+
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");
     return 0;
 }

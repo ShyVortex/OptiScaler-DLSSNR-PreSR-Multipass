@@ -20,6 +20,14 @@ class NvApiHooks
                                                          NvU32 settingId, NVDRS_SETTING* pSetting);
     static NvAPI_Status __stdcall hkNvAPI_D3D12_SetFlipConfig(void* pCommandQueue, NvU32 dwFlags, void* pParams);
     static void* __stdcall hkNvAPI_QueryInterface(unsigned int InterfaceId);
+
+    // NVIDIA Smooth Motion DRS setting constants
+    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_ENABLE = 0xB0D384C0;
+    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_APIS   = 0xB0CC0875;
+    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_DEBUG  = 0xB01B8B02;
+    static constexpr NvU32 MIN_SMOOTH_MOTION_DRIVER_VERSION   = 57186;
+
+    static bool ApplySmoothMotionDrs(bool enable);
     static void Hook(HMODULE nvapiModule);
     static void Unhook();
 };

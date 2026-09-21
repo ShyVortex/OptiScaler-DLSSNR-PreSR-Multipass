@@ -280,9 +280,193 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
                 pSetting->u32CurrentValue = ratioPercentage;
             }
         }
+        if (settingId == NVDRS_SETTING_SMOOTH_MOTION_ENABLE)
+        {
+            const bool smoothMotion = Config::Instance()->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+            pSetting->settingType = NVDRS_DWORD_TYPE;
+            pSetting->u32CurrentValue = smoothMotion ? 1 : 0;
+            LOG_DEBUG("NvAPI_DRS_GetSetting: Intercepted Smooth Motion Enable -> {}", pSetting->u32CurrentValue);
+        }
+
+        if (settingId == NVDRS_SETTING_SMOOTH_MOTION_APIS)
+        {
+            const bool smoothMotion = Config::Instance()->FGDLSSGAmpereMfgSmoothMotion.value_or(false);
+            if (smoothMotion)
+            {
+                pSetting->settingType = NVDRS_DWORD_TYPE;
+                pSetting->u32CurrentValue = 7; // DX12 (1) | DX11 (2) | Vulkan (4)
+                LOG_DEBUG("NvAPI_DRS_GetSetting: Intercepted Smooth Motion Enabled APIs -> 7");
+            }
+        }
     }
 
     return result;
+}
+
+bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
+{
+    const auto& gpu = IdentifyGpu::getPrimaryGpu();
+    if (State::Instance().isRunningOnLinux || gpu.usesVkd3dProton || gpu.vendorId != VendorId::Nvidia)
+    {
+        LOG_INFO("NvApiHooks::ApplySmoothMotionDrs: skipped on non-Windows or non-Nvidia GPU");
+        return false;
+    }
+
+    HMODULE nvapiDll = GetModuleHandleW(L"nvapi64.dll");
+    bool loadedLocally = false;
+    if (!nvapiDll)
+    {
+        nvapiDll = LoadLibraryExW(L"nvapi64.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (nvapiDll)
+            loadedLocally = true;
+    }
+
+    if (!nvapiDll)
+    {
+        LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: nvapi64.dll not found");
+        return false;
+    }
+
+    auto qi = reinterpret_cast<PFN_NvApi_QueryInterface>(KernelBaseProxy::GetProcAddress_()(nvapiDll, "nvapi_QueryInterface"));
+    if (!qi)
+    {
+        LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: nvapi_QueryInterface not found in nvapi64.dll");
+        if (loadedLocally)
+            FreeLibrary(nvapiDll);
+        return false;
+    }
+
+    // Check driver version: 0x2926aaad = NvAPI_SYS_GetDriverAndBranchVersion
+    using PFN_GetDriverVersion = NvAPI_Status(__cdecl*)(NvU32*, NvAPI_ShortString);
+    auto pfnGetDriverVersion = reinterpret_cast<PFN_GetDriverVersion>(qi(0x2926aaad));
+    if (pfnGetDriverVersion)
+    {
+        NvU32 driverVersion = 0;
+        NvAPI_ShortString branchString {};
+        if (pfnGetDriverVersion(&driverVersion, branchString) == NVAPI_OK)
+        {
+            LOG_INFO("NvApiHooks::ApplySmoothMotionDrs: detected NVIDIA driver version {}", driverVersion);
+            if (driverVersion < MIN_SMOOTH_MOTION_DRIVER_VERSION)
+            {
+                LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Smooth Motion requires NVIDIA driver 571.86 or newer (detected: {})", driverVersion);
+                if (loadedLocally)
+                    FreeLibrary(nvapiDll);
+                return false;
+            }
+        }
+    }
+
+    // Initialize NVAPI if needed
+    using PFN_Initialize = NvAPI_Status(__cdecl*)();
+    auto pfnInit = reinterpret_cast<PFN_Initialize>(qi(0x0150e828));
+    if (pfnInit)
+        pfnInit();
+
+    // DRS entry points
+    using PFN_CreateSession = NvAPI_Status(__cdecl*)(NvDRSSessionHandle*);
+    using PFN_DestroySession = NvAPI_Status(__cdecl*)(NvDRSSessionHandle);
+    using PFN_LoadSettings = NvAPI_Status(__cdecl*)(NvDRSSessionHandle);
+    using PFN_SaveSettings = NvAPI_Status(__cdecl*)(NvDRSSessionHandle);
+    using PFN_FindApplicationByName = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvAPI_UnicodeString, NvDRSProfileHandle*, NVDRS_APPLICATION*);
+    using PFN_CreateProfile = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NVDRS_PROFILE*, NvDRSProfileHandle*);
+    using PFN_CreateApplication = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvDRSProfileHandle, NVDRS_APPLICATION*);
+    using PFN_SetSetting = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvDRSProfileHandle, NVDRS_SETTING*);
+
+    auto pfnCreateSession = reinterpret_cast<PFN_CreateSession>(qi(0x0694d52e));
+    auto pfnDestroySession = reinterpret_cast<PFN_DestroySession>(qi(0xdad9cff8));
+    auto pfnLoadSettings = reinterpret_cast<PFN_LoadSettings>(qi(0x375dbd6b));
+    auto pfnSaveSettings = reinterpret_cast<PFN_SaveSettings>(qi(0xfcbc7e14));
+    auto pfnFindApp = reinterpret_cast<PFN_FindApplicationByName>(qi(0xeee566b2));
+    auto pfnCreateProfile = reinterpret_cast<PFN_CreateProfile>(qi(0xcc176068));
+    auto pfnCreateApp = reinterpret_cast<PFN_CreateApplication>(qi(0x4347a9de));
+    auto pfnSetSetting = reinterpret_cast<PFN_SetSetting>(qi(0x577dd202));
+
+    if (!pfnCreateSession || !pfnDestroySession || !pfnLoadSettings || !pfnSaveSettings || !pfnFindApp || !pfnSetSetting)
+    {
+        LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Required DRS APIs are missing from driver");
+        if (loadedLocally)
+            FreeLibrary(nvapiDll);
+        return false;
+    }
+
+    NvDRSSessionHandle session = nullptr;
+    if (pfnCreateSession(&session) != NVAPI_OK || !session)
+    {
+        LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Failed to create DRS session");
+        if (loadedLocally)
+            FreeLibrary(nvapiDll);
+        return false;
+    }
+
+    bool success = false;
+    if (pfnLoadSettings(session) == NVAPI_OK)
+    {
+        wchar_t exePath[MAX_PATH] {};
+        GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+
+        NvAPI_UnicodeString appName {};
+        std::wcsncpy(reinterpret_cast<wchar_t*>(appName), exePath, NVAPI_UNICODE_STRING_MAX - 1);
+
+        NVDRS_APPLICATION appInfo {};
+        appInfo.version = NVDRS_APPLICATION_VER;
+        NvDRSProfileHandle profile = nullptr;
+
+        auto findStatus = pfnFindApp(session, appName, &profile, &appInfo);
+        if (findStatus != NVAPI_OK || !profile)
+        {
+            if (pfnCreateProfile && pfnCreateApp)
+            {
+                NVDRS_PROFILE newProfile {};
+                newProfile.version = NVDRS_PROFILE_VER;
+                const std::wstring profName = L"OptiScaler " + std::filesystem::path(exePath).filename().wstring();
+                std::wcsncpy(reinterpret_cast<wchar_t*>(newProfile.profileName), profName.c_str(), NVAPI_UNICODE_STRING_MAX - 1);
+
+                if (pfnCreateProfile(session, &newProfile, &profile) == NVAPI_OK && profile)
+                {
+                    NVDRS_APPLICATION newApp {};
+                    newApp.version = NVDRS_APPLICATION_VER;
+                    std::wcsncpy(reinterpret_cast<wchar_t*>(newApp.appName), exePath, NVAPI_UNICODE_STRING_MAX - 1);
+                    pfnCreateApp(session, profile, &newApp);
+                }
+            }
+        }
+
+        if (profile)
+        {
+            NVDRS_SETTING enableSetting {};
+            enableSetting.version = NVDRS_SETTING_VER;
+            enableSetting.settingId = NVDRS_SETTING_SMOOTH_MOTION_ENABLE;
+            enableSetting.settingType = NVDRS_DWORD_TYPE;
+            enableSetting.u32CurrentValue = enable ? 1 : 0;
+            pfnSetSetting(session, profile, &enableSetting);
+
+            if (enable)
+            {
+                NVDRS_SETTING apisSetting {};
+                apisSetting.version = NVDRS_SETTING_VER;
+                apisSetting.settingId = NVDRS_SETTING_SMOOTH_MOTION_APIS;
+                apisSetting.settingType = NVDRS_DWORD_TYPE;
+                apisSetting.u32CurrentValue = 7; // All APIs
+                pfnSetSetting(session, profile, &apisSetting);
+            }
+
+            if (pfnSaveSettings(session) == NVAPI_OK)
+            {
+                LOG_INFO("NvApiHooks::ApplySmoothMotionDrs: Successfully applied Smooth Motion (enable={}) to driver profile", enable);
+                success = true;
+            }
+            else
+            {
+                LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Failed to save DRS settings");
+            }
+        }
+    }
+
+    pfnDestroySession(session);
+    if (loadedLocally)
+        FreeLibrary(nvapiDll);
+
+    return success;
 }
 
 NvAPI_Status __stdcall NvApiHooks::hkNvAPI_D3D12_SetFlipConfig(void* pCommandQueue, NvU32 dwFlags, void* pParams)
