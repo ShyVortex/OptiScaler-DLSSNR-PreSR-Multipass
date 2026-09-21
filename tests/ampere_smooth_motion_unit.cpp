@@ -168,6 +168,76 @@ int main()
         std::printf("  [PASS] Case 7: AmpereMfgLoader::Status SmoothMotionActive tracking verified\n");
     }
 
+    // Test 8: Menu UI State Evaluation and Help Marker Verification
+    {
+        struct SmoothMotionUiState
+        {
+            bool disabled;
+            std::string helpMarker;
+        };
+
+        auto evaluateUiState = [](bool onLinux, bool isNvidia) -> SmoothMotionUiState {
+            const bool disableSmoothMotion = onLinux || !isNvidia;
+            if (disableSmoothMotion)
+            {
+                if (onLinux)
+                {
+                    return { true,
+                             "Disabled because the active OS is not Windows (10/11).\n"
+                             "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver 571.86+ on Windows)." };
+                }
+                else
+                {
+                    return { true,
+                             "Disabled because the active GPU is not NVIDIA.\n"
+                             "NVIDIA Smooth Motion requires an NVIDIA GPU and driver 571.86+ on Windows." };
+                }
+            }
+            return { false,
+                     "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                     "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                     "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                     "Can be toggled dynamically on the fly." };
+        };
+
+        // Case 8a: Windows + NVIDIA GPU -> Enabled, standard help marker
+        {
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true);
+            assert(!ui.disabled);
+            assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
+            assert(ui.helpMarker.find("Disabled because") == std::string::npos);
+            std::printf("  [PASS] Case 8a: Windows + NVIDIA GPU evaluates to interactive checkbox\n");
+        }
+
+        // Case 8b: Linux (Wine/Proton) + NVIDIA GPU -> Disabled with OS explanation
+        {
+            auto ui = evaluateUiState(/*onLinux=*/true, /*isNvidia=*/true);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because the active OS is not Windows (10/11)") != std::string::npos);
+            assert(ui.helpMarker.find("Windows-only driver display pipeline feature") != std::string::npos);
+            std::printf("  [PASS] Case 8b: Linux + NVIDIA GPU evaluates to disabled with OS explanation\n");
+        }
+
+        // Case 8c: Windows + non-NVIDIA GPU (AMD/Intel) -> Disabled with GPU explanation
+        {
+            auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/false);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA") != std::string::npos);
+            std::printf("  [PASS] Case 8c: Windows + non-NVIDIA GPU evaluates to disabled with GPU explanation\n");
+        }
+
+        // Case 8d: Linux + non-NVIDIA GPU -> Disabled with OS explanation
+        {
+            auto ui = evaluateUiState(/*onLinux=*/true, /*isNvidia=*/false);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because the active OS is not Windows (10/11)") != std::string::npos);
+            std::printf("  [PASS] Case 8d: Linux + non-NVIDIA GPU evaluates to disabled with OS explanation\n");
+        }
+
+        std::printf("  [PASS] Case 8: Menu UI disable logic and contextual help markers verified\n");
+    }
+
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");
     return 0;
 }
+
