@@ -3161,6 +3161,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
+    const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
     const std::string fallbackSetting = config->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
     const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive, fallbackSetting);
@@ -3492,7 +3493,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
     ImGui::Separator();
     bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
-    const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
     const bool disableSmoothMotion = onLinux || !isAdaOrBlackwell;
 
@@ -3634,7 +3634,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
     // DLSSG output requirements
     auto constexpr dlssgOutputIndex = (uint32_t) FGOutput::DLSSG;
-    const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const uint32_t archId = static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id);
     const bool isAdaOrNewer = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
     const bool isTuringOrAmpere = isNvidia && (
