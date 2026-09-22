@@ -1,4 +1,4 @@
-﻿#include <cassert>
+#include <cassert>
 #include <cstdio>
 #include <string>
 
@@ -26,10 +26,16 @@ struct MenuDmfgResult {
     bool checkboxEnabled = false;
     std::string helpMessage;
     bool sliderVisible = false;
+    bool maxFramesSliderDisabled = false;
+    std::string maxFramesCurrentLabel;
 };
 
 MenuDmfgResult EvaluateSm86MenuDmfg(const MenuDmfgState& state) {
     MenuDmfgResult res;
+    const bool dmfgActive = state.hasDynamicMfgSupport && state.dynamicMfgChecked;
+    res.maxFramesSliderDisabled = dmfgActive;
+    res.maxFramesCurrentLabel = dmfgActive ? "Dynamic (Up to 6X)" : "Factory default (4X)";
+
     if (!state.hasDynamicMfgSupport) {
         res.checkboxEnabled = false;
         res.helpMessage = "Disabled: requires SilyNoMeta's fork of dlssg_sm86 (or a build supporting DynamicMFG).\n"
@@ -71,6 +77,7 @@ int main() {
         assert(!res.checkboxEnabled && "Checkbox must be disabled on sdli1995");
         assert(res.helpMessage.find("requires SilyNoMeta's fork") != std::string::npos);
         assert(!res.sliderVisible && "Slider must not be visible when disabled");
+        assert(!res.maxFramesSliderDisabled && "MaxFrames slider must be enabled when DMFG is inactive");
         std::printf("  [PASS] Case 1: External mod with sdli1995 renders disabled checkbox with SilyNoMeta requirement\n");
     }
 
@@ -84,7 +91,9 @@ int main() {
         auto res = EvaluateSm86MenuDmfg(s);
         assert(res.checkboxEnabled && "Checkbox must be enabled on SilyNoMeta");
         assert(!res.sliderVisible && "Slider must remain hidden when checkbox is unchecked");
-        std::printf("  [PASS] Case 2: SilyNoMeta fork allows enabling, slider hidden when unchecked\n");
+        assert(!res.maxFramesSliderDisabled && "MaxFrames slider must be enabled when DMFG is unchecked");
+        assert(res.maxFramesCurrentLabel == "Factory default (4X)");
+        std::printf("  [PASS] Case 2: SilyNoMeta fork allows enabling, slider hidden when unchecked, MaxFrames active\n");
     }
 
     // Case 3: External Ampere mod with SilyNoMeta fork, checked
@@ -97,7 +106,9 @@ int main() {
         auto res = EvaluateSm86MenuDmfg(s);
         assert(res.checkboxEnabled && "Checkbox must be enabled on SilyNoMeta");
         assert(res.sliderVisible && "Slider must be revealed when checkbox is checked");
-        std::printf("  [PASS] Case 3: SilyNoMeta fork reveals target FPS slider when checked\n");
+        assert(res.maxFramesSliderDisabled && "MaxFrames slider must be disabled/locked when DMFG is active");
+        assert(res.maxFramesCurrentLabel == "Dynamic (Up to 6X)");
+        std::printf("  [PASS] Case 3: SilyNoMeta fork reveals target FPS slider and locks MaxFrames to Dynamic (Up to 6X)\n");
     }
 
     // Case 4: Native Streamline with older Streamline (Cyberpunk 2077 default: 2.4.0)

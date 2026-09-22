@@ -3288,6 +3288,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         if (ampereUnlock)
         {
             const auto& status = AmpereMfgLoader::LastStatus();
+            const bool hasDynamicSupport = status.HasDynamicMfgSupport;
+            bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
+            const bool dmfgActive = hasDynamicSupport && dynamicMfg;
 
             if (ampereFallbackToFsrFg)
             {
@@ -3315,14 +3318,27 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
 
             // MaxGeneratedFrames slider
+            if (dmfgActive)
+                ImGui::BeginDisabled();
+
             int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
             const char* frameLabels[] = { "Factory default (4X)", "1 (2X)", "2 (3X)", "3 (4X)", "4 (5X)", "5 (6X)" };
-            const char* currentLabel = (maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Factory default (4X)";
+            const char* currentLabel = dmfgActive ? "Dynamic (Up to 6X)" : ((maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Factory default (4X)");
             if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 5, currentLabel))
                 config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
-            ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X, 4=5X, 5=6X). The game chooses the actual count.\n"
-                           "0 = Factory default limit (4X / 3 generated frames). Up to 6X (5 generated frames) can be selected.\n"
-                           "Save Settings and restart to apply.");
+
+            if (dmfgActive)
+            {
+                ImGui::EndDisabled();
+                ShowHelpMarker("Locked to Dynamic (Up to 6X) while Dynamic Multi-Frame Generation is enabled.\n"
+                               "The NVIDIA runtime dynamically scales generated frames to meet the FPS Target.");
+            }
+            else
+            {
+                ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X, 4=5X, 5=6X). The game chooses the actual count.\n"
+                               "0 = Factory default limit (4X / 3 generated frames). Up to 6X (5 generated frames) can be selected.\n"
+                               "Save Settings and restart to apply.");
+            }
 
             // Optimized Kernels combo (0.3.2)
             const char* optimizedTiers[] = {
@@ -3401,9 +3417,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Save Settings and restart to apply.");
 
             // Dynamic Multi-Frame Generation (DynamicMFG & DynamicTargetFPS)
-            const bool hasDynamicSupport = status.HasDynamicMfgSupport;
-            bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
-
             if (!hasDynamicSupport)
             {
                 ImGui::BeginDisabled();

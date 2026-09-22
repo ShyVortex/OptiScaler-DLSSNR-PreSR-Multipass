@@ -59,9 +59,11 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
     const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
     const int maxCeiling = is3101Runtime ? 3 : 5;
-    const int maxFrames = ResolveMaxGeneratedFrames(configuredFrames, onLinux, maxCeiling);
+    const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+    const int effectiveFrames = (dynamicMfg && hasDynamicMfgSupport) ? maxCeiling : configuredFrames;
+    const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, onLinux, maxCeiling);
 
-    if (onLinux && configuredFrames == 1)
+    if (onLinux && configuredFrames == 1 && !dynamicMfg)
     {
         LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1); SetFlipConfig is stubbed in NvApiHooks to enable clean native 2X FG");
     }
