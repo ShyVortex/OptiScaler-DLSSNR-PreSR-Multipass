@@ -320,6 +320,13 @@ static sl::Result dummy_slDLSSGGetState(const sl::ViewportHandle& viewport, sl::
         state.numFramesToGenerateMax = 1;
         state.bIsVsyncSupportAvailable = sl::Boolean::eTrue;
     }
+    if (state.structVersion >= 4)
+    {
+        const bool dynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() ||
+                                Config::Instance()->FGDLSSGForceDMFG.value_or_default();
+        if (dynamicMfg)
+            state.bIsDynamicMFGSupported = sl::Boolean::eTrue;
+    }
     state.estimatedVRAMUsageInBytes = 300 * 1024 * 1024;
 
     return sl::Result::eOk;
@@ -349,7 +356,23 @@ sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const ch
         }
     }
 
-    return o_slGetFeatureFunction(feature, functionName, function);
+    auto result = o_slGetFeatureFunction(feature, functionName, function);
+    if (feature == sl::kFeatureDLSS_G && (result != sl::Result::eOk || function == nullptr))
+    {
+        if (strcmp(functionName, "slDLSSGSetOptions") == 0)
+        {
+            function = &dummy_slDLSSGSetOptions;
+            return sl::Result::eOk;
+        }
+
+        if (strcmp(functionName, "slDLSSGGetState") == 0)
+        {
+            function = &dummy_slDLSSGGetState;
+            return sl::Result::eOk;
+        }
+    }
+
+    return result;
 }
 
 sl::Result StreamlineHooks::hkslSetTag(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags,
@@ -930,7 +953,7 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
             configJson["external"]["vk"]["device"]["1.3_features"].clear();
     }
 
-    if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::NvngxFG)
+    if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::NvngxFG || ampereMfgActive)
     {
         if (configJson.contains("/vsync/supported"_json_pointer))
             configJson["vsync"]["supported"] = true; // disable eVSyncOffRequired
@@ -2200,7 +2223,8 @@ void StreamlineHooks::unhookDlssg()
 
 void StreamlineHooks::hookDlssg(HMODULE slDlssg)
 {
-    if (State::Instance().externalFrameGeneration)
+    const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
         return;
     LOG_FUNC();
 
@@ -2253,7 +2277,8 @@ void StreamlineHooks::unhookLocalDlssg()
 
 void StreamlineHooks::hookLocalDlssg(HMODULE slDlssg)
 {
-    if (State::Instance().externalFrameGeneration)
+    const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
         return;
     LOG_FUNC();
 
@@ -2424,7 +2449,8 @@ void StreamlineHooks::unhookCommon()
 
 void StreamlineHooks::hookCommon(HMODULE slCommon)
 {
-    if (State::Instance().externalFrameGeneration)
+    const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
         return;
     LOG_FUNC();
 
