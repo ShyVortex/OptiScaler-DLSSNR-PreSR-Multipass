@@ -838,13 +838,6 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::SetFullscreenState(BOOL Fullsc
         // don't try to get a mutex when present owns it while dlssg mod is enabled
         const uint32_t currentOwner = _localMutex.getOwner();
         const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
-        const bool isDlssgMod = State::Instance().externalFrameGeneration ||
-                                State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                                State::Instance().activeFgOutput == FGOutput::DLSSG ||
-                                State::Instance().activeFgInput == FGInput::DLSSG ||
-                                Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
-                                Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
-                                State::Instance().dlssgDetectedInterpolationCount > 0;
         if (!presentOwnsLock)
         {
             OwnedLockGuard lock(_localMutex, 3);
@@ -905,13 +898,6 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
     // don't try to get a mutex when present owns it while dlssg mod is enabled
     const uint32_t currentOwner = _localMutex.getOwner();
     const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
-    const bool isDlssgMod = State::Instance().externalFrameGeneration ||
-                            State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                            State::Instance().activeFgOutput == FGOutput::DLSSG ||
-                            State::Instance().activeFgInput == FGInput::DLSSG ||
-                            Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
-                            Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
-                            State::Instance().dlssgDetectedInterpolationCount > 0;
     if (!presentOwnsLock)
     {
         OwnedLockGuard lock(_localMutex, 1);
@@ -1351,13 +1337,6 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
     // don't try to get a mutex when present owns it while dlssg mod is enabled
     const uint32_t currentOwner = _localMutex.getOwner();
     const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
-    const bool isDlssgMod = State::Instance().externalFrameGeneration ||
-                            State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                            State::Instance().activeFgOutput == FGOutput::DLSSG ||
-                            State::Instance().activeFgInput == FGInput::DLSSG ||
-                            Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default() ||
-                            Config::Instance()->FGDLSSGAdaMfgUnlock.value_or_default() ||
-                            State::Instance().dlssgDetectedInterpolationCount > 0;
     if (!presentOwnsLock)
     {
         OwnedLockGuard lock(_localMutex, 2);

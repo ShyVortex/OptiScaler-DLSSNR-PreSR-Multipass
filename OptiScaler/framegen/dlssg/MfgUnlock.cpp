@@ -411,7 +411,6 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
         return;
 
     std::lock_guard lock(g_mutex);
-    // MULTI-MODULE PATCH HACK
 
     auto module = requestedModule ? requestedModule : GetModuleHandleW(L"nvngx_dlssg.dll");
     if (module == nullptr)
@@ -419,10 +418,10 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
 
     if (g_attemptOutcome != AttemptOutcome::WaitingForModule)
     {
-        if (module == g_attemptedModule || module == g_retainedModule)
+        if (g_attemptOutcome != AttemptOutcome::Succeeded || module == g_attemptedModule || module == g_retainedModule)
             return;
         
-        LOG_INFO("MFG unlock: new DLSSG module detected, resetting state to attempt patch on {}", reinterpret_cast<void*>(module));
+        LOG_INFO("MFG unlock: new DLSSG OTA module detected, updating patch target to {}", reinterpret_cast<void*>(module));
         ReleaseModuleReference(g_retainedModule);
         g_status = Status();
         g_attemptOutcome = AttemptOutcome::WaitingForModule;
