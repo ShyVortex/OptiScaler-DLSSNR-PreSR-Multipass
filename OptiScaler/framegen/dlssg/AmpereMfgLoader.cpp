@@ -52,7 +52,7 @@ std::string ResolveRouter()
     return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
 }
 
-std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
+std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool hasDynamicMfgSupport)
 {
     auto* cfg = Config::Instance();
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
@@ -91,10 +91,23 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
     if (logLevel < 0 || logLevel > 3)
         logLevel = 1;
 
-    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {}, LogLevel: {} (hasSm75Support: {}, is3101Runtime: {}) for GPU: {}",
-             maxFrames, optimized, preset, router, spoofArch, logLevel, hasSm75Support, is3101Runtime, IdentifyGpu::getPrimaryGpu().name);
+    const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+    const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
 
-    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch);
+    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {}, LogLevel: {}, DynamicMFG: {}, TargetFPS: {} (hasSm75Support: {}, is3101Runtime: {}, hasDynamicMfgSupport: {}) for GPU: {}",
+             maxFrames, optimized, preset, router, spoofArch, logLevel, dynamicMfg, dynamicTargetFps, hasSm75Support, is3101Runtime, hasDynamicMfgSupport, IdentifyGpu::getPrimaryGpu().name);
+
+    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch, dynamicMfg, dynamicTargetFps, hasDynamicMfgSupport);
+}
+
+std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
+{
+    bool hasDynamicMfgSupport = false;
+    {
+        std::lock_guard lock(s_mutex);
+        hasDynamicMfgSupport = s_status.HasDynamicMfgSupport;
+    }
+    return GenerateIniContent(hasSm75Support, is3101Runtime, hasDynamicMfgSupport);
 }
 
 std::string GenerateIniContent(bool hasSm75Support)
@@ -105,7 +118,59 @@ std::string GenerateIniContent(bool hasSm75Support)
 std::string GenerateIniContent()
 {
     std::lock_guard lock(s_mutex);
-    return GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime);
+    return GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
+}
+
+bool WriteCompanionIni()
+{
+    std::wstring dllPathStr;
+    bool hasSm75 = false;
+    bool is3101 = false;
+    bool hasDynamic = false;
+    {
+        std::lock_guard lock(s_mutex);
+        dllPathStr = s_status.LoadedDllPath;
+        hasSm75 = s_status.HasSm75Support;
+        is3101 = s_status.Is3101Runtime;
+        hasDynamic = s_status.HasDynamicMfgSupport;
+    }
+
+    if (dllPathStr.empty())
+        return false;
+
+    auto iniPath = std::filesystem::path(dllPathStr).parent_path() / L"dlssg_sm86.ini";
+    try
+    {
+        std::filesystem::create_directories(iniPath.parent_path());
+        std::ofstream iniFile(iniPath, std::ios::out | std::ios::trunc);
+        if (!iniFile.is_open())
+        {
+            std::lock_guard lock(s_mutex);
+            s_status.IniWritten = false;
+            s_status.ErrorMessage = "Failed to open dlssg_sm86.ini for writing.";
+            LOG_ERROR("AmpereMfgLoader: Failed to open {} for writing", wstring_to_string(iniPath.wstring()));
+            return false;
+        }
+        iniFile << GenerateIniContent(hasSm75, is3101, hasDynamic);
+        iniFile.close();
+        if (!iniFile)
+            throw std::runtime_error("Could not finish writing dlssg_sm86.ini");
+
+        {
+            std::lock_guard lock(s_mutex);
+            s_status.IniWritten = true;
+        }
+        LOG_INFO("AmpereMfgLoader: Successfully written companion INI at {}", wstring_to_string(iniPath.wstring()));
+        return true;
+    }
+    catch (const std::exception& ex)
+    {
+        std::lock_guard lock(s_mutex);
+        s_status.IniWritten = false;
+        s_status.ErrorMessage = std::string("Error writing dlssg_sm86.ini: ") + ex.what();
+        LOG_ERROR("AmpereMfgLoader: Exception writing INI: {}", ex.what());
+        return false;
+    }
 }
 
 void TrySetup()
@@ -293,9 +358,10 @@ void TrySetup()
     s_status.LoadedDllPath = dllPath.wstring();
     s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
     s_status.Is3101Runtime = Is3101Runtime(dllPath);
+    s_status.HasDynamicMfgSupport = HasDynamicMfgSupport(dllPath);
 
-    LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}, Is3101Runtime: {}",
-             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support, s_status.Is3101Runtime);
+    LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}, Is3101Runtime: {}, HasDynamicMfgSupport: {}",
+             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
 
     // Generate and write companion dlssg_sm86.ini beside the DLL
     auto iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
@@ -310,7 +376,7 @@ void TrySetup()
             LOG_ERROR("AmpereMfgLoader: Failed to open {} for writing", wstring_to_string(iniPath.wstring()));
             return;
         }
-        iniFile << GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime);
+        iniFile << GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
         iniFile.close();
         if (!iniFile)
             throw std::runtime_error("Could not finish writing dlssg_sm86.ini");

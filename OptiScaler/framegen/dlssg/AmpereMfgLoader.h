@@ -18,6 +18,7 @@ struct Status
     bool HasSm75Support = false;    // Loaded runtime binary contains dedicated SM75 kernel family (310.1 or unified 310.9 0.3.1+)
     bool Is3101Runtime = false;     // True if 310.1 runtime (max ceiling 3 / 4X), false if 310.9 runtime (max ceiling 5 / 6X)
     bool SmoothMotionActive = false; // True if NVIDIA Smooth Motion DRS setting was applied/active
+    bool HasDynamicMfgSupport = false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
     std::wstring LoadedDllPath;     // Absolute path of loaded DLL
     std::string ErrorMessage; // Human-readable error if anything failed
 };
@@ -26,6 +27,9 @@ Status LastStatus();
 
 /// Called after DLL initialization, once GPU/environment information is available.
 void TrySetup();
+
+/// Regenerates and writes companion dlssg_sm86.ini (e.g. after in-game settings toggle).
+bool WriteCompanionIni();
 
 /// Resolves the companion INI MaxGeneratedFrames setting.
 /// MaxFrames is clamped to [1, maxCeiling] (preserving 1 for 2X FG, up to maxCeiling).
@@ -152,11 +156,13 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     return ss.str();
 }
 
-/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3, MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame).
+/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3, MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame, DynamicMFG/DynamicTargetFPS).
 inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const std::string& preset = "Auto",
                                        const std::string& kernelImg = "Auto", int hwBilinear = 0,
                                        const std::string& router = "Auto", int logLevel = 1,
-                                       const std::string& spoofArch = "Auto")
+                                       const std::string& spoofArch = "Auto",
+                                       bool dynamicMfg = false, float dynamicTargetFps = 0.0f,
+                                       bool hasDynamicMfgSupport = false)
 {
     // Clamping of MaxGeneratedFrames for 0.3.x: 1 to 5 (5 = 6X)
     if (maxFrames <= 0 || maxFrames > 5)
@@ -188,7 +194,19 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     ss << "Enabled=1\n\n";
     ss << "[FrameGeneration]\n";
     ss << "Optimized=" << validOptimized << "\n";
-    ss << "MaxGeneratedFrames=" << maxFrames << "\n\n";
+    ss << "MaxGeneratedFrames=" << maxFrames << "\n";
+    if (dynamicMfg)
+    {
+        ss << "DynamicMFG=1\n";
+        int targetInt = (dynamicTargetFps > 0.0f) ? static_cast<int>(dynamicTargetFps + 0.5f) : 0;
+        ss << "DynamicTargetFPS=" << targetInt << "\n";
+    }
+    else if (hasDynamicMfgSupport)
+    {
+        ss << "DynamicMFG=0\n";
+        ss << "DynamicTargetFPS=0\n";
+    }
+    ss << "\n";
     ss << "[Compatibility]\n";
     ss << "Preset=" << validPreset << "\n";
     ss << "Router=" << validRouter << "\n";
@@ -295,6 +313,43 @@ inline bool Is3101Runtime(const std::filesystem::path& dllPath)
             return false;
         if (chunk.find(needle3101) != std::string::npos)
             return true;
+        constexpr size_t maxNeedle = 32;
+        if (chunk.size() >= maxNeedle)
+            overlap = chunk.substr(chunk.size() - maxNeedle + 1);
+        else
+            overlap = chunk;
+    }
+
+    return false;
+}
+
+/// Detects if a dlssg_sm86 binary contains Dynamic Multi-Frame Generation support (e.g. SilyNoMeta fork).
+inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
+{
+    if (dllPath.empty())
+        return false;
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    constexpr size_t bufferSize = 65536;
+    std::string buffer(bufferSize, '\0');
+    const std::string needleDynamicMfg = "DynamicMFG";
+    const std::string needleDynamicTarget = "DynamicTargetFPS";
+    const std::string needleSilyNoMeta = "SilyNoMeta";
+
+    std::string overlap;
+    while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+    {
+        size_t bytesRead = file.gcount();
+        std::string chunk = overlap + std::string(buffer.data(), bytesRead);
+        if (chunk.find(needleDynamicMfg) != std::string::npos ||
+            chunk.find(needleDynamicTarget) != std::string::npos ||
+            chunk.find(needleSilyNoMeta) != std::string::npos)
+        {
+            return true;
+        }
         constexpr size_t maxNeedle = 32;
         if (chunk.size() >= maxNeedle)
             overlap = chunk.substr(chunk.size() - maxNeedle + 1);

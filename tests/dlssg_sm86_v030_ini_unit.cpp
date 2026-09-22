@@ -244,6 +244,31 @@ int main()
         }
     }
 
+    // Test 13: Dynamic Multi-Frame Generation (DynamicMFG & DynamicTargetFPS) formatting
+    {
+        // When dynamicMfg is enabled, DynamicMFG=1 and DynamicTargetFPS are emitted
+        std::string iniDynamic120 = FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", true, 120.0f);
+        assert(iniDynamic120.find("DynamicMFG=1\n") != std::string::npos);
+        assert(iniDynamic120.find("DynamicTargetFPS=120\n") != std::string::npos);
+
+        // When dynamicMfg is enabled with 0 FPS (auto refresh rate)
+        std::string iniDynamic0 = FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", true, 0.0f);
+        assert(iniDynamic0.find("DynamicMFG=1\n") != std::string::npos);
+        assert(iniDynamic0.find("DynamicTargetFPS=0\n") != std::string::npos);
+
+        // When dynamicMfg is false and hasDynamicMfgSupport is true (SilyNoMeta fork disabled)
+        std::string iniDynamicDisabled = FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, true);
+        assert(iniDynamicDisabled.find("DynamicMFG=0\n") != std::string::npos);
+        assert(iniDynamicDisabled.find("DynamicTargetFPS=0\n") != std::string::npos);
+
+        // When dynamicMfg is false and hasDynamicMfgSupport is false (standard sdli1995 clean INI)
+        std::string iniStandard = FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, false);
+        assert(iniStandard.find("DynamicMFG") == std::string::npos);
+        assert(iniStandard.find("DynamicTargetFPS") == std::string::npos);
+
+        std::printf("  [PASS] Case 13: DynamicMFG and DynamicTargetFPS formatting verified (enabled, SilyNoMeta disabled, sdli1995 clean)\n");
+    }
+
     std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
     return 0;
 }
