@@ -60,47 +60,71 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
         LOG_DEBUG("Original arch: {0:X} impl: {1:X} rev: {2:X}!", static_cast<uint32_t>(pGpuArchInfo->architecture),
                   static_cast<uint32_t>(pGpuArchInfo->implementation), static_cast<uint32_t>(pGpuArchInfo->revision));
 
-        // When external mods (e.g. dlssg_sm86) spoof architecture to Ada (0x190) or Blackwell (0x1b0)
-        // to enable Streamline DLSS-G, non-FG callers (like nvngx_dlss for Super Resolution or nvngx_dlssd for Ray Reconstruction)
+        // When external mods (e.g. dlssg_sm86) or OptiScaler Ampere MFG unlock are used
+        // to enable Streamline DLSS-G, FG callers (like sl.dlss_g, external mods, and _nvngx snippet loader)
+        // must see Ada (0x190) architecture so NGX snippet validation and Streamline accept the GPU.
+        // Conversely, non-FG callers (like nvngx_dlss for Super Resolution or nvngx_dlssd for Ray Reconstruction)
         // must NOT see the spoofed architecture. Otherwise, DLSS SR/RR loads Blackwell/Ada-only cubin shaders
         // (e.g. DLTSS NW E5M3_SKIP FP8 kernels) that execute illegal instructions on Ampere/Turing hardware,
         // causing DXGI_ERROR_DEVICE_HUNG (0x887A0006) crashes on startup (e.g. in The Last of Us Part II).
-        if (pGpuArchInfo->architecture >= NV_GPU_ARCHITECTURE_AD100)
+        const auto primaryGpu = IdentifyGpu::getPrimaryGpu();
+        const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ?
+                                  primaryGpu.nvidiaArchInfo.architecture_id :
+                                  primaryGpu.nvidiaArchInfo.architecture;
+
+        if (primaryGpu.vendorId == VendorId::Nvidia && realArch != 0 && realArch < NV_GPU_ARCHITECTURE_AD100)
         {
-            const auto primaryGpu = IdentifyGpu::getPrimaryGpu();
-            const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ?
-                                      primaryGpu.nvidiaArchInfo.architecture_id :
-                                      primaryGpu.nvidiaArchInfo.architecture;
+            const void* retAddr = _ReturnAddress();
+            std::string caller = Util::WhoIsTheCaller(const_cast<void*>(retAddr));
+            std::string callerLower = caller;
+            std::transform(callerLower.begin(), callerLower.end(), callerLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-            if (primaryGpu.vendorId == VendorId::Nvidia && realArch != 0 && realArch < NV_GPU_ARCHITECTURE_AD100)
+            const bool isExplicitNonFgCaller = (callerLower.find("nvngx_dlss.") != std::string::npos ||
+                                                callerLower.find("nvngx_dlssd") != std::string::npos ||
+                                                callerLower.ends_with(".exe"));
+
+            const bool isFgCaller = !isExplicitNonFgCaller && (
+                callerLower.find("sl.common") != std::string::npos ||
+                callerLower.find("sl.dlss_g") != std::string::npos ||
+                callerLower.find("sl.interposer") != std::string::npos ||
+                callerLower.find("dlssg") != std::string::npos ||
+                callerLower.find("version") != std::string::npos ||
+                callerLower == "_nvngx.dll" ||
+                callerLower == "nvngx.dll" ||
+                callerLower.find("_nvngx") != std::string::npos
+            );
+
+            const bool mfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+
+            if (mfgUnlock && isFgCaller)
             {
-                const void* retAddr = _ReturnAddress();
-                std::string caller = Util::WhoIsTheCaller(const_cast<void*>(retAddr));
-                std::string callerLower = caller;
-                std::transform(callerLower.begin(), callerLower.end(), callerLower.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-                const bool isFgCaller = (callerLower.find("sl.common") != std::string::npos ||
-                                         callerLower.find("sl.dlss_g") != std::string::npos ||
-                                         callerLower.find("sl.interposer") != std::string::npos ||
-                                         callerLower.find("dlssg_sm86") != std::string::npos);
-
-                if (!isFgCaller)
+                if (pGpuArchInfo->architecture < NV_GPU_ARCHITECTURE_AD100)
                 {
-                    const auto spoofedArch = pGpuArchInfo->architecture;
-                    pGpuArchInfo->architecture = static_cast<decltype(pGpuArchInfo->architecture)>(realArch);
-                    pGpuArchInfo->architecture_id = static_cast<decltype(pGpuArchInfo->architecture_id)>(realArch);
-                    pGpuArchInfo->implementation = primaryGpu.nvidiaArchInfo.implementation;
-                    pGpuArchInfo->implementation_id = primaryGpu.nvidiaArchInfo.implementation_id;
-                    pGpuArchInfo->revision = primaryGpu.nvidiaArchInfo.revision;
-                    pGpuArchInfo->revision_id = primaryGpu.nvidiaArchInfo.revision_id;
+                    pGpuArchInfo->architecture = static_cast<decltype(pGpuArchInfo->architecture)>(NV_GPU_ARCHITECTURE_AD100);
+                    pGpuArchInfo->architecture_id = static_cast<decltype(pGpuArchInfo->architecture_id)>(NV_GPU_ARCHITECTURE_AD100);
+                    pGpuArchInfo->implementation = static_cast<decltype(pGpuArchInfo->implementation)>(0x102);
+                    pGpuArchInfo->implementation_id = static_cast<decltype(pGpuArchInfo->implementation_id)>(0x102);
 
-                    LOG_INFO("Restored physical GPU arch for non-FG caller '{}': arch: {:X} impl: {:X} rev: {:X} (was spoofed: {:X})",
-                             caller, static_cast<uint32_t>(pGpuArchInfo->architecture),
-                             static_cast<uint32_t>(pGpuArchInfo->implementation),
-                             static_cast<uint32_t>(pGpuArchInfo->revision),
-                             static_cast<uint32_t>(spoofedArch));
+                    LOG_INFO("Spoofed GPU arch to Ada (0x190) for FG caller '{}' (real: {:X})",
+                             caller, static_cast<uint32_t>(realArch));
                 }
+            }
+            else if (!isFgCaller && pGpuArchInfo->architecture >= NV_GPU_ARCHITECTURE_AD100)
+            {
+                const auto spoofedArch = pGpuArchInfo->architecture;
+                pGpuArchInfo->architecture = static_cast<decltype(pGpuArchInfo->architecture)>(realArch);
+                pGpuArchInfo->architecture_id = static_cast<decltype(pGpuArchInfo->architecture_id)>(realArch);
+                pGpuArchInfo->implementation = primaryGpu.nvidiaArchInfo.implementation;
+                pGpuArchInfo->implementation_id = primaryGpu.nvidiaArchInfo.implementation_id;
+                pGpuArchInfo->revision = primaryGpu.nvidiaArchInfo.revision;
+                pGpuArchInfo->revision_id = primaryGpu.nvidiaArchInfo.revision_id;
+
+                LOG_INFO("Restored physical GPU arch for non-FG caller '{}': arch: {:X} impl: {:X} rev: {:X} (was spoofed: {:X})",
+                         caller, static_cast<uint32_t>(pGpuArchInfo->architecture),
+                         static_cast<uint32_t>(pGpuArchInfo->implementation),
+                         static_cast<uint32_t>(pGpuArchInfo->revision),
+                         static_cast<uint32_t>(spoofedArch));
             }
         }
 
