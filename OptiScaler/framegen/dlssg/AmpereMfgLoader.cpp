@@ -201,15 +201,6 @@ void TrySetup()
 
     const std::string fallbackSetting = cfg->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
     const std::string fallbackType = ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
-    if (ShouldFallbackToFsrFg(configuredFrames, onLinux, true, fallbackSetting))
-    {
-        s_status.Enabled = true;
-        s_status.FsrFallbackActive = true;
-        s_status.ErrorMessage.clear();
-        LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of sideloading dlssg_sm86",
-                 fallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"));
-        return;
-    }
 
     s_status.Enabled = true;
 
@@ -391,6 +382,17 @@ void TrySetup()
         s_status.IniWritten = false;
         s_status.ErrorMessage = std::string("Error writing dlssg_sm86.ini: ") + ex.what();
         LOG_ERROR("AmpereMfgLoader: Exception writing INI: {}", ex.what());
+        return;
+    }
+
+    const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or_default() || cfg->FGDLSSGForceDMFG.value_or_default();
+    const bool shouldFallback = ShouldFallbackToFsrFg(configuredFrames, onLinux, true, fallbackSetting, dynamicMfg);
+    s_status.FsrFallbackActive = shouldFallback;
+    if (shouldFallback)
+    {
+        s_status.ErrorMessage.clear();
+        LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of sideloading dlssg_sm86",
+                 fallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"));
         return;
     }
 

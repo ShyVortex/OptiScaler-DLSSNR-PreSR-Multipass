@@ -3164,7 +3164,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
     const std::string fallbackSetting = config->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
-    const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive, fallbackSetting);
+    const bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
+    const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive, fallbackSetting, dynamicMfg);
 
     if (ampereActive)
     {

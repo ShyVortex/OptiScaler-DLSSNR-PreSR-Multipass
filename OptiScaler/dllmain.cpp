@@ -1883,7 +1883,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         const bool ampereMfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
         const int ampereMaxFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
         const std::string ampereFallbackSetting = Config::Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
-        const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(ampereMaxFrames, onLinux, ampereMfgUnlock, ampereFallbackSetting);
+        const bool ampereDynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() || Config::Instance()->FGDLSSGForceDMFG.value_or_default();
+        const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(ampereMaxFrames, onLinux, ampereMfgUnlock, ampereFallbackSetting, ampereDynamicMfg);
 
         // Initial state of FG
         State::Instance().externalFrameGeneration = (Config::Instance()->ExternalFrameGeneration.value_or_default() || ampereMfgUnlock) && !ampereFallbackToFsrFg;

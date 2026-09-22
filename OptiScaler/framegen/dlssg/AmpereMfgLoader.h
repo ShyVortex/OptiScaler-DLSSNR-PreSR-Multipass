@@ -45,8 +45,8 @@ inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ =
 
 /// Returns true if Linux FG should fall back to OptiScaler's internal FG pipeline (DLSSG input -> FSRFG/XeFG output)
 /// instead of sideloading dlssg_sm86.
-/// Mode: "auto" (default, falls back when configuredMaxFrames <= 1), "true"/"on"/"1" (force fallback), "false"/"off"/"0" (force external dlssg_sm86).
-inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, const std::string& fallbackSetting = "auto")
+/// Mode: "auto" (default, falls back when configuredMaxFrames <= 1 and dynamicMfg is off), "true"/"on"/"1" (force fallback), "false"/"off"/"0" (force external dlssg_sm86).
+inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, const std::string& fallbackSetting = "auto", bool dynamicMfg = false)
 {
     if (!onLinux || !mfgUnlockEnabled)
         return false;
@@ -55,6 +55,10 @@ inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mf
         return true;
 
     if (fallbackSetting == "false" || fallbackSetting == "0" || fallbackSetting == "off" || fallbackSetting == "False")
+        return false;
+
+    // In auto mode, if Dynamic MFG is active, do not fall back to single-frame 2X internal FG
+    if (dynamicMfg)
         return false;
 
     // "auto": fall back to internal FG on Linux when configured for single-frame (2X FG)
