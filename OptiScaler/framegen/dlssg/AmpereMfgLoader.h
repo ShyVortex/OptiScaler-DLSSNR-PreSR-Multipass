@@ -19,6 +19,7 @@ struct Status
     bool Is3101Runtime = false;     // True if 310.1 runtime (max ceiling 3 / 4X), false if 310.9 runtime (max ceiling 5 / 6X)
     bool SmoothMotionActive = false; // True if NVIDIA Smooth Motion DRS setting was applied/active
     bool HasDynamicMfgSupport = false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
+    bool AsiInitInvoked = false;       // True if InitializeASI export was detected and invoked on the loaded module
     std::wstring LoadedDllPath;     // Absolute path of loaded DLL
     std::string ErrorMessage; // Human-readable error if anything failed
 };
@@ -415,6 +416,37 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
                 }
             }
         }
+    }
+
+    return false;
+}
+
+/// Detects if a dlssg_sm86 binary contains the InitializeASI export symbol (e.g. SilyNoMeta ASI build).
+inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
+{
+    if (dllPath.empty())
+        return false;
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (!file.is_open())
+        return false;
+
+    constexpr size_t bufferSize = 65536;
+    std::string buffer(bufferSize, '\0');
+    const std::string needle = "InitializeASI";
+
+    std::string overlap;
+    while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+    {
+        size_t bytesRead = file.gcount();
+        std::string chunk = overlap + std::string(buffer.data(), bytesRead);
+        if (chunk.find(needle) != std::string::npos)
+            return true;
+        constexpr size_t maxNeedle = 32;
+        if (chunk.size() >= maxNeedle)
+            overlap = chunk.substr(chunk.size() - maxNeedle + 1);
+        else
+            overlap = chunk;
     }
 
     return false;

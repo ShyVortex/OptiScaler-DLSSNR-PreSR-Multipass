@@ -416,6 +416,18 @@ void TrySetup()
     s_status.DllLoaded = true;
     s_status.ErrorMessage.clear();
     LOG_INFO("AmpereMfgLoader: SM86/SM75 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+
+    // SilyNoMeta ASI compatibility: when loaded under a custom filename (such as dlssg_sm86.dll),
+    // DllMain skips self-initialization to avoid conflict with standard proxy names.
+    // Explicitly invoke InitializeASI export so the mod installs hooks and starts worker threads.
+    using PFN_InitializeASI = void (*)();
+    auto pfnInitAsi = reinterpret_cast<PFN_InitializeASI>(GetProcAddress(hMod, "InitializeASI"));
+    if (pfnInitAsi != nullptr)
+    {
+        LOG_INFO("AmpereMfgLoader: Invoking InitializeASI() export on {}", wstring_to_string(dllPath.wstring()));
+        pfnInitAsi();
+        s_status.AsiInitInvoked = true;
+    }
 }
 
 } // namespace AmpereMfgLoader
