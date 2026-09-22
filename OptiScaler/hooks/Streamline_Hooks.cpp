@@ -1215,7 +1215,9 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                                         newOptions.mode == sl::DLSSGMode::eAuto ||
                                         newOptions.mode == sl::DLSSGMode::eDynamic;
 
-    bool enableDynamicMode = requested.values.forceDynamic && state.dlssgGameDMFGSupported && dlssgPotentiallyActive;
+    const bool canEnableDynamic = state.dlssgGameDMFGSupported ||
+                                  (state.streamlineVersion >= feature_version{ 2, 11, 0 });
+    bool enableDynamicMode = requested.values.forceDynamic && canEnableDynamic && dlssgPotentiallyActive;
 
     if (enableDynamicMode)
     {
