@@ -411,16 +411,22 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
         return;
 
     std::lock_guard lock(g_mutex);
-    if (g_attemptOutcome != AttemptOutcome::WaitingForModule)
-    {
-        if (requestedModule != nullptr && requestedModule != g_attemptedModule)
-            LOG_WARN("MFG unlock: ignoring a different DLSSG module after the terminal first attempt");
-        return;
-    }
 
     auto module = requestedModule ? requestedModule : GetModuleHandleW(L"nvngx_dlssg.dll");
     if (module == nullptr)
         return;
+
+    if (g_attemptOutcome != AttemptOutcome::WaitingForModule)
+    {
+        if (g_attemptOutcome != AttemptOutcome::Succeeded || module == g_attemptedModule || module == g_retainedModule)
+            return;
+        
+        LOG_INFO("MFG unlock: new DLSSG OTA module detected, updating patch target to {}", reinterpret_cast<void*>(module));
+        ReleaseModuleReference(g_retainedModule);
+        g_status = Status();
+        g_attemptOutcome = AttemptOutcome::WaitingForModule;
+        g_attemptedModule = nullptr;
+    }
 
     g_attemptedModule = module;
     g_status.ModuleFound = true;
