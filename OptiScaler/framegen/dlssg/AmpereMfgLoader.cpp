@@ -93,7 +93,6 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
     if (logLevel < 0 || logLevel > 3)
         logLevel = 1;
 
-    const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
     const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
 
     LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {}, LogLevel: {}, DynamicMFG: {}, TargetFPS: {} (hasSm75Support: {}, is3101Runtime: {}, hasDynamicMfgSupport: {}) for GPU: {}",
