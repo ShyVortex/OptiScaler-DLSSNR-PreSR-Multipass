@@ -783,7 +783,7 @@ class Config
     CustomOptional<FGInput> FGInput { FGInput::NoFG };
     CustomOptional<bool> ExternalFrameGeneration { false };
     CustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
-    CustomOptional<bool> FGDLSSGAdaBlackwellKernels { false };
+    CustomOptional<bool> FGDLSSGAdaBlackwellKernels { true };
     // Ampere/Turing (SM86/SM75) MFG unlocker — sideloads the dlssg_for_sm86 proxy
     CustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
     CustomOptional<int>  FGDLSSGAmpereMfgMaxFrames { 3 };       // 0-5: 0=runtime default (3=4X factory default on 0.3.1-0.3.5, up to 5=6X on 310.9), 1=2X, 2=3X, 3=4X, 4=5X, 5=6X

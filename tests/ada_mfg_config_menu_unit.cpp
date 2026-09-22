@@ -73,7 +73,7 @@ struct MockConfig
     TestCustomOptional<bool> FGEnabled { false };
     TestCustomOptional<bool> ExternalFrameGeneration { false };
     TestCustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
-    TestCustomOptional<bool> FGDLSSGAdaBlackwellKernels { false };
+    TestCustomOptional<bool> FGDLSSGAdaBlackwellKernels { true };
     TestCustomOptional<bool> FGDLSSGAmpereMfgUnlock { false };
 };
 
@@ -186,10 +186,10 @@ int main()
         printf("\n--- Test Suite 1: Config Parsing & Defaults ---\n");
 
         MockConfig cfg;
-        // 1.1 Unset default value is false in code
+        // 1.1 Unset default value is true in code
         assert(!cfg.FGDLSSGAdaBlackwellKernels.has_value());
-        assert(cfg.FGDLSSGAdaBlackwellKernels.value_or_default() == false);
-        printf("  [PASS] 1.1 Default unconfigured AdaBlackwellKernels evaluates to false\n");
+        assert(cfg.FGDLSSGAdaBlackwellKernels.value_or_default() == true);
+        printf("  [PASS] 1.1 Default unconfigured AdaBlackwellKernels evaluates to true\n");
 
         // 1.2 INI says AdaBlackwellKernels=true
         cfg.FGDLSSGAdaBlackwellKernels.set_from_config(std::optional<bool>(true));
