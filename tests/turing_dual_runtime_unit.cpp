@@ -1,4 +1,4 @@
-﻿#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
 #include <cassert>
 #include <cstdio>
 #include <filesystem>
@@ -12,8 +12,10 @@ int main()
 
     // Test 1: Binary detection of SM75 kernel family and runtime model (0.3.1 310.9 vs 310.1 vs legacy 0.3.0)
     {
-        std::filesystem::path p3109 = "dlssg_for_sm86/version.dll";
-        std::filesystem::path p3101 = "dlssg_for_sm86/310.1/version.dll";
+        std::filesystem::path p3109 = std::filesystem::exists("dlssg_for_sm86/sdli1995/version.dll") ?
+            "dlssg_for_sm86/sdli1995/version.dll" : "dlssg_for_sm86/version.dll";
+        std::filesystem::path p3101 = std::filesystem::exists("dlssg_for_sm86/sdli1995/310.1/version.dll") ?
+            "dlssg_for_sm86/sdli1995/310.1/version.dll" : "dlssg_for_sm86/310.1/version.dll";
 
         if (std::filesystem::exists(p3109) && std::filesystem::exists(p3101))
         {

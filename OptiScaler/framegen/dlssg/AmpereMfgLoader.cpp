@@ -259,7 +259,7 @@ void TrySetup()
     std::error_code fileError;
 
     auto probePath = [&](const std::filesystem::path& candidate) -> bool {
-        return !candidate.empty() && std::filesystem::exists(candidate, fileError);
+        return !candidate.empty() && candidate != Util::DllPath() && std::filesystem::exists(candidate, fileError);
     };
 
     auto mainOverride = cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
@@ -267,9 +267,13 @@ void TrySetup()
     // Standard candidates for root runtime (310.9)
     std::filesystem::path rootCandidates[] = {
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"version.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"version.dll",
         basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
-        basePath / L"dlssg_sm86.dll"
+        basePath / L"dlssg_sm86" / L"version.dll",
+        basePath / L"dlssg_sm86.dll",
+        basePath / L"version.dll"
     };
 
     // Candidates for fallback 310.1 runtime (specifically providing SM75 kernels on legacy 0.3.0 builds)

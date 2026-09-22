@@ -260,6 +260,18 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
     const std::string needleSm75Hw = "executed_on_sm75_hardware";
     const std::string needle3109NoSm75 = "The 310.9 backend has no SM75";
 
+    auto makeUtf16Le = [](std::string_view ascii) -> std::string {
+        std::string out;
+        out.reserve(ascii.size() * 2);
+        for (char c : ascii)
+        {
+            out.push_back(c);
+            out.push_back('\0');
+        }
+        return out;
+    };
+    const std::string needleSm75Bridge16 = makeUtf16Le("SM75/SM86");
+
     bool foundSm75 = false;
     std::string overlap;
     while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
@@ -271,7 +283,8 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
         if (!foundSm75 && (chunk.find(needleSm75Slots) != std::string::npos ||
                            chunk.find(needleSm75Family) != std::string::npos ||
                            chunk.find(needleCubinSm75) != std::string::npos ||
-                           chunk.find(needleSm75Hw) != std::string::npos))
+                           chunk.find(needleSm75Hw) != std::string::npos ||
+                           chunk.find(needleSm75Bridge16) != std::string::npos))
         {
             foundSm75 = true;
         }
@@ -329,32 +342,75 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
     if (dllPath.empty())
         return false;
 
-    std::ifstream file(dllPath, std::ios::binary);
-    if (!file.is_open())
-        return false;
-
-    constexpr size_t bufferSize = 65536;
-    std::string buffer(bufferSize, '\0');
-    const std::string needleDynamicMfg = "DynamicMFG";
-    const std::string needleDynamicTarget = "DynamicTargetFPS";
-    const std::string needleSilyNoMeta = "SilyNoMeta";
-
-    std::string overlap;
-    while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
-    {
-        size_t bytesRead = file.gcount();
-        std::string chunk = overlap + std::string(buffer.data(), bytesRead);
-        if (chunk.find(needleDynamicMfg) != std::string::npos ||
-            chunk.find(needleDynamicTarget) != std::string::npos ||
-            chunk.find(needleSilyNoMeta) != std::string::npos)
+    auto makeUtf16Le = [](std::string_view ascii) -> std::string {
+        std::string out;
+        out.reserve(ascii.size() * 2);
+        for (char c : ascii)
         {
-            return true;
+            out.push_back(c);
+            out.push_back('\0');
         }
-        constexpr size_t maxNeedle = 32;
-        if (chunk.size() >= maxNeedle)
-            overlap = chunk.substr(chunk.size() - maxNeedle + 1);
-        else
-            overlap = chunk;
+        return out;
+    };
+
+    const std::string needleDynamicMfg = "DynamicMFG";
+    const std::string needleDynamicMfg16 = makeUtf16Le(needleDynamicMfg);
+    const std::string needleDynamicTarget = "DynamicTargetFPS";
+    const std::string needleDynamicTarget16 = makeUtf16Le(needleDynamicTarget);
+    const std::string needleActivateMfg = "ActivateDynamicMFG";
+    const std::string needleActivateMfg16 = makeUtf16Le(needleActivateMfg);
+    const std::string needleSilyNoMeta = "SilyNoMeta";
+    const std::string needleSilyNoMeta16 = makeUtf16Le(needleSilyNoMeta);
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (file.is_open())
+    {
+        constexpr size_t bufferSize = 65536;
+        std::string buffer(bufferSize, '\0');
+
+        std::string overlap;
+        while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+        {
+            size_t bytesRead = file.gcount();
+            std::string chunk = overlap + std::string(buffer.data(), bytesRead);
+            if (chunk.find(needleDynamicMfg) != std::string::npos ||
+                chunk.find(needleDynamicMfg16) != std::string::npos ||
+                chunk.find(needleDynamicTarget) != std::string::npos ||
+                chunk.find(needleDynamicTarget16) != std::string::npos ||
+                chunk.find(needleActivateMfg) != std::string::npos ||
+                chunk.find(needleActivateMfg16) != std::string::npos ||
+                chunk.find(needleSilyNoMeta) != std::string::npos ||
+                chunk.find(needleSilyNoMeta16) != std::string::npos)
+            {
+                return true;
+            }
+            constexpr size_t maxNeedle = 64;
+            if (chunk.size() >= maxNeedle)
+                overlap = chunk.substr(chunk.size() - maxNeedle + 1);
+            else
+                overlap = chunk;
+        }
+    }
+
+    // Also check companion dlssg_sm86.ini if present beside the DLL
+    std::error_code ec;
+    std::filesystem::path iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
+    if (std::filesystem::exists(iniPath, ec))
+    {
+        std::ifstream iniFile(iniPath);
+        if (iniFile.is_open())
+        {
+            std::string line;
+            while (std::getline(iniFile, line))
+            {
+                if (line.find(needleDynamicMfg) != std::string::npos ||
+                    line.find(needleDynamicTarget) != std::string::npos ||
+                    line.find(needleActivateMfg) != std::string::npos)
+                {
+                    return true;
+                }
+            }
+        }
     }
 
     return false;

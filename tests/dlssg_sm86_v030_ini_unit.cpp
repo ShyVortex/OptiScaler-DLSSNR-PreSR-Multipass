@@ -1,4 +1,4 @@
-﻿#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -228,8 +228,10 @@ int main()
         std::string iniDefault = FormatIniContent030(3, 1);
         assert(iniDefault.find("[Runtime]\nMode=Bundled\nCacheDirectory=\n") != std::string::npos);
 
-        std::filesystem::path rootDll = "dlssg_for_sm86/version.dll";
-        std::filesystem::path sm863101Dll = "dlssg_for_sm86/310.1/version.dll";
+        std::filesystem::path rootDll = std::filesystem::exists("dlssg_for_sm86/sdli1995/version.dll") ?
+            "dlssg_for_sm86/sdli1995/version.dll" : "dlssg_for_sm86/version.dll";
+        std::filesystem::path sm863101Dll = std::filesystem::exists("dlssg_for_sm86/sdli1995/310.1/version.dll") ?
+            "dlssg_for_sm86/sdli1995/310.1/version.dll" : "dlssg_for_sm86/310.1/version.dll";
         if (std::filesystem::exists(rootDll) && std::filesystem::exists(sm863101Dll))
         {
             assert(HasSm75KernelFamily(rootDll) && "v0.3.5 root 310.9 runtime must have SM75 kernel support");

@@ -290,6 +290,10 @@ if ($HybridAssetsDirectory) {
 if ($IncludeAmpereMfg) {
     $sm86Src = "$root\dlssg_for_sm86"
     $sm86Dll = "$sm86Src\version.dll"
+    if (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\sdli1995\version.dll")) {
+        $sm86Src = "$sm86Src\sdli1995"
+        $sm86Dll = "$sm86Src\version.dll"
+    }
     if ($UpdateAmpereMfg -or (-not (Test-Path -LiteralPath $sm86Dll))) {
         Write-Host "Acquiring verified SM75/SM86 0.3.5 runtime from upstream..."
         if (-not (Test-Path -LiteralPath $sm86Src)) {
