@@ -3398,6 +3398,45 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
                            "Save Settings and restart to apply.");
 
+            // Dynamic Multi-Frame Generation (DynamicMFG & DynamicTargetFPS)
+            const bool hasDynamicSupport = status.HasDynamicMfgSupport;
+            bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
+
+            if (!hasDynamicSupport)
+            {
+                ImGui::BeginDisabled();
+                bool disabledVal = false;
+                ImGui::Checkbox("Dynamic Multi-Frame Generation##sm86", &disabledVal);
+                ImGui::EndDisabled();
+                ShowHelpMarker("Disabled: requires SilyNoMeta's fork of dlssg_sm86 (or a build supporting DynamicMFG).\n"
+                               "Upstream sdli1995 does not support dynamic mode yet.");
+            }
+            else
+            {
+                if (ImGui::Checkbox("Dynamic Multi-Frame Generation##sm86", &dynamicMfg))
+                {
+                    config->FGDLSSGOverrideForceDMFG = dynamicMfg;
+                    config->FGDLSSGForceDMFG = dynamicMfg;
+                    AmpereMfgLoader::WriteCompanionIni();
+                }
+                ShowHelpMarker("Requests dynamic multi-frame generation pacing in SilyNoMeta's dlssg_sm86.\n"
+                               "Dynamically adjusts generated frames to match display refresh rate or target FPS.\n"
+                               "Automatically updates dlssg_sm86.ini.");
+
+                if (dynamicMfg)
+                {
+                    static float fpsTarget = config->FGDLSSGFramerateTargetDMFG.value_or_default();
+                    if (ImGui::SliderFloat("DMFG FPS Target##sm86", &fpsTarget, 0, 200, "%.0f"))
+                    {
+                        config->FGDLSSGFramerateTargetDMFG = fpsTarget;
+                        AmpereMfgLoader::WriteCompanionIni();
+                    }
+                    ShowHelpMarker("An active limit of 0 means auto-detect the display refresh rate.\n"
+                                   "Non-zero values (e.g. 120) set a fixed dynamic framerate ceiling.\n"
+                                   "Automatically updates dlssg_sm86.ini.");
+                }
+            }
+
             // Game Architecture Spoofing combo (0.3.3)
             const char* spoofArchOptions[] = {
                 "Auto (Spoof RTX 50 on Turing/Ampere)",
@@ -3902,39 +3941,56 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         ImGui::EndDisabled();
 
-        if (state.dlssgGameDMFGSupported && !dlssgInputOrOutput)
+        if (!dlssgInputOrOutput)
         {
             ImGui::SameLine(0.0f, 16.0f);
 
-            if (bool dynamicMFG = config->FGDLSSGOverrideForceDMFG.value_or_default();
-                ImGui::Checkbox("Force Dynamic MFG", &dynamicMFG))
+            const bool canEnableNativeDMFG = state.dlssgGameDMFGSupported ||
+                                             (state.streamlineVersion >= feature_version{ 2, 11, 0 });
+            bool dynamicMFG = config->FGDLSSGOverrideForceDMFG.value_or_default();
+
+            if (!canEnableNativeDMFG)
             {
-                config->FGDLSSGOverrideForceDMFG = dynamicMFG;
-                StreamlineHooks::updateDlssgOptions();
+                ImGui::BeginDisabled();
+                bool disabledVal = false;
+                ImGui::Checkbox("Force Dynamic MFG", &disabledVal);
+                ImGui::EndDisabled();
+                ShowHelpMarker("Disabled: requires Streamline 2.11+ (sl.dlss_g.dll) and supporting driver runtime.");
             }
-
-            ImGui::BeginDisabled(state.dlssgLastSetMode != sl::DLSSGMode::eDynamic);
-            static float fpsTarget = config->FGDLSSGFramerateTargetDMFG.value_or_default();
-            ImGui::SliderFloat("DMFG FPS Target", &fpsTarget, 0, 200, "%.0f");
-
-            ShowHelpMarker("An active limit of 0 means auto-detect the display refresh rate");
-
-            if (ImGui::Button("Apply Target"))
+            else
             {
-                config->FGDLSSGFramerateTargetDMFG = fpsTarget;
-                StreamlineHooks::updateDlssgOptions();
+                if (ImGui::Checkbox("Force Dynamic MFG", &dynamicMFG))
+                {
+                    config->FGDLSSGOverrideForceDMFG = dynamicMFG;
+                    StreamlineHooks::updateDlssgOptions();
+                }
+
+                if (dynamicMFG)
+                {
+                    ImGui::BeginDisabled(state.dlssgLastSetMode != sl::DLSSGMode::eDynamic && !dynamicMFG);
+                    static float fpsTarget = config->FGDLSSGFramerateTargetDMFG.value_or_default();
+                    ImGui::SliderFloat("DMFG FPS Target", &fpsTarget, 0, 200, "%.0f");
+
+                    ShowHelpMarker("An active limit of 0 means auto-detect the display refresh rate");
+
+                    if (ImGui::Button("Apply Target"))
+                    {
+                        config->FGDLSSGFramerateTargetDMFG = fpsTarget;
+                        StreamlineHooks::updateDlssgOptions();
+                    }
+
+                    ImGui::SameLine(0.0f, 16.0f);
+
+                    if (ImGui::Button("Reset Target"))
+                    {
+                        fpsTarget = 0.0f;
+                        config->FGDLSSGFramerateTargetDMFG.reset();
+                        StreamlineHooks::updateDlssgOptions();
+                    }
+
+                    ImGui::EndDisabled();
+                }
             }
-
-            ImGui::SameLine(0.0f, 16.0f);
-
-            if (ImGui::Button("Reset Target"))
-            {
-                fpsTarget = 0.0f;
-                config->FGDLSSGFramerateTargetDMFG.reset();
-                StreamlineHooks::updateDlssgOptions();
-            }
-
-            ImGui::EndDisabled();
         }
 
         auto fgOutput = reinterpret_cast<IFGFeature_Dx12*>(state.currentFG);
@@ -4678,32 +4734,32 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
             {
                 ImGui::SameLine(0.0f, 16.0f);
 
-                if (bool dynamicMFG = config->FGDLSSGForceDMFG.value_or_default();
-                    ImGui::Checkbox("Force Dynamic MFG", &dynamicMFG))
+                bool dynamicMFG = config->FGDLSSGForceDMFG.value_or_default();
+                if (ImGui::Checkbox("Force Dynamic MFG", &dynamicMFG))
                 {
                     config->FGDLSSGForceDMFG = dynamicMFG;
                 }
 
-                ImGui::BeginDisabled(!config->FGDLSSGForceDMFG.value_or_default());
-                static float fpsTarget = config->FGDLSSGFramerateTargetDMFG.value_or_default();
-                ImGui::SliderFloat("DMFG FPS Target", &fpsTarget, 0, 200, "%.0f");
-
-                ShowHelpMarker("An active limit of 0 means auto-detect the display refresh rate");
-
-                if (ImGui::Button("Apply Target"))
+                if (dynamicMFG)
                 {
-                    config->FGDLSSGFramerateTargetDMFG = fpsTarget;
+                    static float fpsTarget = config->FGDLSSGFramerateTargetDMFG.value_or_default();
+                    ImGui::SliderFloat("DMFG FPS Target", &fpsTarget, 0, 200, "%.0f");
+
+                    ShowHelpMarker("An active limit of 0 means auto-detect the display refresh rate");
+
+                    if (ImGui::Button("Apply Target"))
+                    {
+                        config->FGDLSSGFramerateTargetDMFG = fpsTarget;
+                    }
+
+                    ImGui::SameLine(0.0f, 16.0f);
+
+                    if (ImGui::Button("Reset Target"))
+                    {
+                        fpsTarget = 0.0f;
+                        config->FGDLSSGFramerateTargetDMFG.reset();
+                    }
                 }
-
-                ImGui::SameLine(0.0f, 16.0f);
-
-                if (ImGui::Button("Reset Target"))
-                {
-                    fpsTarget = 0.0f;
-                    config->FGDLSSGFramerateTargetDMFG.reset();
-                }
-
-                ImGui::EndDisabled();
             }
         }
 
