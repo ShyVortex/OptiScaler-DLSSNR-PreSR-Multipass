@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 
+#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+
 namespace sl {
     enum Feature {
         kFeatureDLSS = 0,
@@ -268,6 +270,61 @@ int main() {
         assert(stateV4.bIsDynamicMFGSupported == sl::eTrue && "DMFG supported must be true when ForceDMFG is true");
 
         std::puts("  [PASS] Test 4: dummy_slDLSSGGetState correctly advertises Dynamic MFG on structVersion >= 4");
+    }
+
+    // Test 5: TryResolveDrsMultiFrameSetting with Dynamic MFG
+    {
+        uint32_t outValue = 0;
+        constexpr uint32_t DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID = 0x104D6667;
+        constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562D0F;
+
+        // Subtest A: Dynamic MFG enabled with configuredMaxFrames == 1
+        // Must advertise maxCeiling (5) for dynamic ceiling override, so Streamline shows DMFG in settings
+        outValue = 0;
+        bool res = AmpereMfgLoader::TryResolveDrsMultiFrameSetting(
+            DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID,
+            /*configuredMaxFrames=*/1, /*onLinux=*/true, /*mfgUnlockEnabled=*/true,
+            outValue, /*maxCeiling=*/5, /*explicitOverrideCount=*/0, /*dynamicMfg=*/true);
+        assert(res && "DMFG dynamic ceiling query must succeed even when configuredMaxFrames == 1");
+        assert(outValue == 5 && "DMFG dynamic ceiling must report maxCeiling (5)");
+
+        // Subtest B: Dynamic MFG enabled with configuredMaxFrames == 1 for static multiplier query
+        // Must NOT force static 1 when Dynamic MFG is enabled, allowing dynamic pacing to manage frames
+        outValue = 0;
+        res = AmpereMfgLoader::TryResolveDrsMultiFrameSetting(
+            DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID,
+            /*configuredMaxFrames=*/1, /*onLinux=*/true, /*mfgUnlockEnabled=*/true,
+            outValue, /*maxCeiling=*/5, /*explicitOverrideCount=*/0, /*dynamicMfg=*/true);
+        assert(!res && "DMFG must not force static multiplier == 1 when dynamicMfg is active");
+
+        // Subtest C: Static MFG mode with configuredMaxFrames == 1
+        // Dynamic ceiling override must return false (Streamline disables DMFG)
+        outValue = 0;
+        res = AmpereMfgLoader::TryResolveDrsMultiFrameSetting(
+            DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID,
+            /*configuredMaxFrames=*/1, /*onLinux=*/true, /*mfgUnlockEnabled=*/true,
+            outValue, /*maxCeiling=*/5, /*explicitOverrideCount=*/0, /*dynamicMfg=*/false);
+        assert(!res && "Static MFG with maxFrames == 1 must return false for dynamic ceiling query");
+
+        // Static multiplier query must force 1 for Linux 2X FG elevation workaround
+        outValue = 0;
+        res = AmpereMfgLoader::TryResolveDrsMultiFrameSetting(
+            DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID,
+            /*configuredMaxFrames=*/1, /*onLinux=*/true, /*mfgUnlockEnabled=*/true,
+            outValue, /*maxCeiling=*/5, /*explicitOverrideCount=*/0, /*dynamicMfg=*/false);
+        assert(res && "Static MFG with maxFrames == 1 must force static multiplier == 1");
+        assert(outValue == 1 && "Static multiplier must report 1");
+
+        // Subtest D: Explicit override takes precedence over dynamicMfg
+        outValue = 0;
+        res = AmpereMfgLoader::TryResolveDrsMultiFrameSetting(
+            DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID,
+            /*configuredMaxFrames=*/1, /*onLinux=*/true, /*mfgUnlockEnabled=*/true,
+            outValue, /*maxCeiling=*/5, /*explicitOverrideCount=*/4, /*dynamicMfg=*/true);
+        assert(res && "Explicit override must succeed");
+        assert(outValue == 4 && "Explicit override must clamp to requested value");
+
+        std::puts("  [PASS] Test 5: TryResolveDrsMultiFrameSetting correctly handles Dynamic MFG ceiling and static multiplier overrides");
     }
 
     std::puts("All Streamline External MFG Hooks and Linux HWS Compatibility tests passed successfully!");

@@ -132,8 +132,10 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
     const bool mfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
     const int configuredFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
     const int explicitOverride = Config::Instance()->FGDLSSGOverrideInterpolationCount.value_or(0);
+    const bool dynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() ||
+                            Config::Instance()->FGDLSSGForceDMFG.value_or_default();
     uint32_t targetFrames = 0;
-    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames, 5, explicitOverride))
+    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames, 5, explicitOverride, dynamicMfg))
     {
         if (pSetting)
         {
