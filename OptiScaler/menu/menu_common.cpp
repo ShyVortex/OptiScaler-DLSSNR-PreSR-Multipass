@@ -3286,6 +3286,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         if (ampereUnlock)
         {
+            const auto& status = AmpereMfgLoader::LastStatus();
+
             if (ampereFallbackToFsrFg)
             {
                 const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
@@ -3298,7 +3300,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             else
             {
                 // Status display
-                const auto& status = AmpereMfgLoader::LastStatus();
                 if (!status.ErrorMessage.empty())
                     ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s", status.ErrorMessage.c_str());
                 else
