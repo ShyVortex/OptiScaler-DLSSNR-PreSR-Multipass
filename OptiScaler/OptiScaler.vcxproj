@@ -944,6 +944,8 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="shaders\dlssnr\DlssNr_Guides.h" />
     <ClInclude Include="shaders\dlssnr\DlssNr_ResidualPair.h" />
     <ClInclude Include="shaders\dlssnr\DlssNr_SeamClock.h" />
+    <ClInclude Include="shaders\dlssnr\DlssNr_Spatial.h" />
+    <ClInclude Include="..\external\peripheral_warp\SpatialWarp.h" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Upscaler_Dx12.cpp" />
     <ClInclude Include="shaders\dlssnr\DlssNr_Upscaler_Dx12.h" />
   </ItemGroup>

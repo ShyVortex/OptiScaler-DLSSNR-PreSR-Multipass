@@ -1642,6 +1642,8 @@
     <ClInclude Include="shaders\dlssnr\DlssNr_Guides.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="shaders\dlssnr\DlssNr_ResidualPair.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="shaders\dlssnr\DlssNr_SeamClock.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="shaders\dlssnr\DlssNr_Spatial.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="..\external\peripheral_warp\SpatialWarp.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="shaders\dlssnr\DlssNr_Upscaler_Dx12.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="shaders\dlssnr\DlssNr_Upscaler_Dx12.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="shaders\dlssnr\DlssNr_Vk.cpp"><Filter>Source Files</Filter></ClCompile>
