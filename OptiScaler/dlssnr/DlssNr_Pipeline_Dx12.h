@@ -6,6 +6,22 @@ class DlssNr_Dx12;
 
 namespace DlssNr
 {
+inline bool FormatCanHoldLinearHdr(DXGI_FORMAT format)
+{
+    switch (format)
+    {
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+    case DXGI_FORMAT_R32G32B32A32_FLOAT:
+    case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+    case DXGI_FORMAT_R32G32B32_FLOAT:
+    case DXGI_FORMAT_R11G11B10_FLOAT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 struct InputStates_Dx12
 {
     D3D12_RESOURCE_STATES color;

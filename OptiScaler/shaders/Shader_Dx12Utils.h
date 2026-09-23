@@ -114,6 +114,9 @@ class FrameDescriptorHeap
     ID3D12DescriptorHeap* GetHeapCSU() { return heapCSU; }
     ID3D12DescriptorHeap* GetHeapRtv() { return heapRtv; }
 
+    // Process termination or unresolved GPU ownership: leave references for OS reclamation.
+    void Abandon() { heapCSU = heapRtv = nullptr; }
+
     void ReleaseHeaps()
     {
         // Randomly crashing on release

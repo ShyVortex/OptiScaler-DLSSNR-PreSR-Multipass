@@ -706,7 +706,6 @@ void DlssNr_Dx12::ApplyFinishedDx11(IDXGISwapChain* swapchain)
 }
 std::string DlssNr_Dx12::FinishedStatus() { return _state->FinishedPictureStatus(); }
 std::string DlssNr_Dx12::DeferredStatus() { return _state->DeferredDlssStatus(); }
-DlssNr::CalibrationReading DlssNr_Dx12::CalibrationStatus() { return {}; }
 namespace DlssNr
 {
 void FinishedPictureResetCommandList(ID3D12CommandList* cmd)
