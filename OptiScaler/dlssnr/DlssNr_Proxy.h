@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 
 // Neural Rendering uses the existing NVIDIA NGX driver dispatcher.
 
 #include <d3d12.h>
+#include "DlssNr_ModelParameters.h"
 #include <memory>
 #include <cstdint>
 
@@ -10,12 +11,17 @@ namespace DlssNr
 {
 namespace Proxy
 {
-struct Settings
+// Borrowed inputs for one model evaluation; depth and motion retain independent active regions.
+struct Frame
 {
-    unsigned int preset = 0, style = 0;
-    float intensity = 1.0f, localStructure = 1.0f, localTone = 0.0f, skinStructure = -1.0f;
-    bool autoMask = true;
-    bool operator==(const Settings&) const = default;
+    ID3D12Resource* color = nullptr;
+    ID3D12Resource* depth = nullptr;
+    ID3D12Resource* motion = nullptr;
+    ID3D12Resource* output = nullptr;
+    GuideExtent size {};
+    GuideRegions guides {};
+    bool depthInverted = false, reset = false;
+    float mvScaleX = 1.0f, mvScaleY = 1.0f;
 };
 
 class Context
@@ -34,18 +40,14 @@ class Context
 
     // Creation records GPU work. A feature becomes ready only in a later submission epoch.
     unsigned int Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
-                         unsigned int height, const Settings& settings, uint64_t submissionEpoch, bool* ready);
+                         unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready);
     bool HasFeature() const;
     bool Ready(uint64_t submissionEpoch) const;
-    void AdvanceEpoch(uint64_t submissionEpoch);
+    void Collect();
 
     // Each pass owns its feature, parameter map and temporal history. False evaluated means no output.
-    unsigned int Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, ID3D12Resource* color,
-                     ID3D12Resource* depth, ID3D12Resource* motion, ID3D12Resource* output, unsigned int width,
-                     unsigned int height, unsigned int guideWidth, unsigned int guideHeight, unsigned int motionWidth,
-                     unsigned int motionHeight, unsigned int depthBaseX, unsigned int depthBaseY,
-                     unsigned int motionBaseX, unsigned int motionBaseY, bool depthInverted, bool reset, float mvScaleX,
-                     float mvScaleY, const Settings& settings, uint64_t submissionEpoch, bool* evaluated = nullptr);
+    unsigned int Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, const Frame& frame,
+                     const ModelSettings& settings, uint64_t submissionEpoch, bool* evaluated = nullptr);
 
     // Retires the current feature and clears the failure latch without immediately freeing GPU work.
     void RetryAfterFailure();
@@ -53,6 +55,7 @@ class Context
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     void ResetRecording(ID3D12CommandList* commands);
     bool Idle();
+    void FinishSubmitted();
 
     // Retires ownership; destruction occurs only after recordings are discarded and GPU work completes.
     // Unresolved ownership is abandoned if this context is destroyed.

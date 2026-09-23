@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <d3d12.h>
 #include <functional>
@@ -29,9 +29,12 @@ class GpuLifetime
     // Start tracking a replacement resource set. Older recordings still receive submit/reset
     // notifications, but only recordings used again belong to the new generation.
     void BeginGeneration();
-    // Callback must capture raw ownership: unresolved callbacks are abandoned at destruction.
+    // Unresolved callbacks, including their captured ownership, are retained at destruction.
     void Retire(std::function<void()> destroy);
     void Collect();
     bool Idle();
+    // Retired owners only: completed submissions can no longer be replayed by this owner.
+    // Unsubmitted recordings and failed/removed-device fences remain unresolved.
+    void FinishSubmitted();
 };
-}
+} // namespace DlssNr

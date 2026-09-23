@@ -331,6 +331,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="fsr4\FSR4Upgrade.h" />
     <ClInclude Include="gpu_time\GpuTime_Dx11.h" />
     <ClInclude Include="gpu_time\GpuTime_Dx12.h" />
+    <ClInclude Include="gpu_time\Vitals.h" />
     <ClInclude Include="hooks\Amdxc64_Hooks.h" />
     <ClInclude Include="DllNames.h" />
     <ClInclude Include="exports\d3d12.h" />
@@ -449,7 +450,6 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="shaders\dlssnr\DlssNr_Vk.h" />
     <ClInclude Include="dlssnr\DlssNrFeature_Vk.h" />
     <ClInclude Include="dlssnr\DlssNrFinished_Vk.h" />
-    <ClInclude Include="dlssnr\DlssNr_ExposureScan.h" />
     <ClInclude Include="shaders\render_ui\precompile\render_ui_pm_PShader.h" />
     <ClInclude Include="shaders\render_ui\precompile\render_ui_pm_VShader.h" />
     <ClInclude Include="shaders\render_ui\precompile\render_ui_PShader.h" />
@@ -867,12 +867,8 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="shaders\dlssnr\DlssNr_Vk.cpp" />
     <ClCompile Include="dlssnr\DlssNrFeature_Vk.cpp" />
     <ClCompile Include="dlssnr\DlssNrFinished_Vk.cpp" />
-    <ClCompile Include="dlssnr\DlssNr_ExposureScan.cpp" />
     <ClCompile Include="dlssnr\DlssNr_Proxy.cpp" />
     <ClCompile Include="dlssnr\DlssNr_Menu.cpp" />
-    <ClCompile Include="dlssnr\DlssNrNative.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
     <ClCompile Include="inputs\NVNGX_DLSS_Dx12.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="inputs\NVNGX_DLSS_Vk.cpp" />
@@ -925,12 +921,9 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="dlssnr\DlssNr_GpuLifetime.cpp" />
     <ClInclude Include="dlssnr\DlssNr_GpuLifetime.h" />
     <ClInclude Include="dlssnr\DlssNr_HoldParameters_Dx12.h" />
-    <ClCompile Include="dlssnr\DlssNr_MenuBlend.cpp" />
-    <ClCompile Include="dlssnr\DlssNr_MenuInput.cpp" />
-    <ClCompile Include="dlssnr\DlssNr_MenuModel.cpp" />
+    <ClCompile Include="dlssnr\DlssNr_MenuControls.cpp" />
     <ClCompile Include="dlssnr\DlssNr_MenuOverlay.cpp" />
     <ClInclude Include="dlssnr\DlssNr_MenuOverlay.h" />
-    <ClCompile Include="dlssnr\DlssNr_MenuPlacement.cpp" />
     <ClInclude Include="dlssnr\DlssNr_MenuSections.h" />
     <ClCompile Include="dlssnr\DlssNr_Pipeline_Dx12.cpp" />
     <ClInclude Include="dlssnr\DlssNr_Pipeline_Dx12.h" />
@@ -944,17 +937,15 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="shaders\dlssnr\DlssNr_Guides.h" />
     <ClInclude Include="shaders\dlssnr\DlssNr_ResidualPair.h" />
     <ClInclude Include="shaders\dlssnr\DlssNr_SeamClock.h" />
+    <ClInclude Include="shaders\dlssnr\DlssNr_Spatial.h" />
+    <ClInclude Include="..\external\peripheral_warp\SpatialWarp.h" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Upscaler_Dx12.cpp" />
     <ClInclude Include="shaders\dlssnr\DlssNr_Upscaler_Dx12.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="dlssnr\DlssNr_ExposureAnchors.cpp" />
-    <ClCompile Include="dlssnr\DlssNr_ExposureReadback.cpp" />
-    <ClInclude Include="dlssnr\DlssNr_ExposureScan_Internal.h" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_DeferredSr.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Enlarge.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Evaluate.cpp" />
-    <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Exposure.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_FinishedCompose.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_FinishedQueue.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Hold.cpp" />

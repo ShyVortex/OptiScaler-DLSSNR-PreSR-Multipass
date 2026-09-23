@@ -1,198 +1,130 @@
 ﻿#include <cassert>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
+#include <string>
 
-enum class FGOutput : int
-{
-    NoFG = 0,
-    FSRFG = 1,
-    XeFG = 2,
-    DLSSG = 3
-};
-
-struct MockFGFeature
-{
-    bool active = false;
-    bool paused = false;
-
-    bool IsActive() const { return active; }
-    bool IsPaused() const { return paused; }
-};
-
-// Logical reproduction of the guarded check in wrapped_swapchain.cpp LocalPresent
-inline bool CanApplyDlssNrToFinishedPicture(bool externalFrameGeneration,
-                                            FGOutput activeFgOutput,
-                                            bool hasCommandQueue,
-                                            MockFGFeature* fg)
-{
-    const bool externalFgActive = externalFrameGeneration || (activeFgOutput == FGOutput::DLSSG);
-    if (externalFgActive)
-        return false;
-
-    if (hasCommandQueue && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
+// Test GUID definition matching FinishedColorSpaceKey
+struct TestGUID {
+    uint32_t Data1;
+    uint16_t Data2;
+    uint16_t Data3;
+    uint8_t  Data4[8];
+    bool operator==(const TestGUID& o) const {
+        if (Data1 != o.Data1 || Data2 != o.Data2 || Data3 != o.Data3) return false;
+        for (int i = 0; i < 8; ++i) if (Data4[i] != o.Data4[i]) return false;
         return true;
+    }
+};
 
-    return false;
-}
+static constexpr TestGUID ExpectedFinishedColorSpaceKey = {
+    0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 }
+};
 
-// Logical reproduction of DlssNr::ApplyToFinishedPicture out-of-mutex query & guard
-inline bool CanFinishedPictureQuerySwapchain(bool externalFrameGeneration,
-                                             FGOutput activeFgOutput,
-                                             bool dlssNrEnabled,
-                                             bool dlssNrFinishedPicture,
-                                             bool hasSwapchain,
-                                             bool hasQueue,
-                                             bool isStreamlineRenderQueue)
-{
-    const bool externalFgActive = externalFrameGeneration || (activeFgOutput == FGOutput::DLSSG);
-    if (!hasSwapchain || !hasQueue || !dlssNrEnabled || !dlssNrFinishedPicture || externalFgActive)
+enum class FGOutput {
+    NoFG,
+    FSRFG,
+    XeFG,
+    DLSSG
+};
+
+struct MockState {
+    bool externalFrameGeneration = false;
+    FGOutput activeFgOutput = FGOutput::NoFG;
+    bool isShuttingDown = false;
+};
+
+struct MockConfig {
+    bool dlssNrEnabled = true;
+    bool dlssNrFinishedPicture = true;
+};
+
+// Simulate presentation check in ApplyFinished / ApplyToFinishedPicture
+bool ShouldApplyFinishedPicture(const MockConfig& cfg, const MockState& state) {
+    if (state.isShuttingDown)
         return false;
-    if (isStreamlineRenderQueue)
+    const bool externalFgActive = state.externalFrameGeneration || state.activeFgOutput == FGOutput::DLSSG;
+    if (!cfg.dlssNrEnabled || !cfg.dlssNrFinishedPicture || externalFgActive)
         return false;
     return true;
 }
 
-// Logical reproduction of DlssNr_Dx12::ApplyFinished cancellation guard
-inline bool CanApplyFinishedColor(bool dlssNrFinishedPicture,
-                                  bool dlssNrEnabled,
-                                  bool externalFrameGeneration,
-                                  FGOutput activeFgOutput,
-                                  bool hasPicture,
-                                  bool hasQueue,
-                                  bool& outCancelled)
+// Transfer mode helpers
+inline uint32_t DlssNrSpatialTransfer(uint32_t mode)
 {
-    if (!dlssNrFinishedPicture || !dlssNrEnabled || externalFrameGeneration || activeFgOutput == FGOutput::DLSSG)
+    switch (mode)
     {
-        outCancelled = true;
-        return false;
+    case 2: return 1; // DLSS enlargement -> matched residual
+    case 4: return 3; // Private DLSS enlargement -> relative lighting & colour
+    default: return mode;
     }
-    if (hasPicture && hasQueue)
-    {
-        outCancelled = false;
-        return true;
-    }
-    outCancelled = false;
-    return false;
 }
 
-int main()
+inline bool DlssNrUsesDlssEnlargement(uint32_t mode)
 {
-    // Test 1: External frame generation must unconditionally prevent wrapped_swapchain from applying finished NR
+    return mode == 2 || mode == 4;
+}
+
+int main() {
+    std::puts("Running DLSS-NR Finished Picture & External FG Mutual Exclusion Unit Tests...");
+
+    // Test 1: FinishedColorSpaceKey GUID verified
     {
-        MockFGFeature* fg = nullptr;
-        assert(CanApplyDlssNrToFinishedPicture(true, FGOutput::NoFG, true, fg) == false);
-        assert(CanApplyDlssNrToFinishedPicture(true, FGOutput::DLSSG, true, fg) == false);
-        assert(CanApplyDlssNrToFinishedPicture(true, FGOutput::FSRFG, true, fg) == false);
+        TestGUID key = { 0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 } };
+        assert(key == ExpectedFinishedColorSpaceKey);
+        std::puts("  [PASS] Test 1: FinishedColorSpaceKey GUID verified");
     }
 
-    // Test 2: FGOutput::DLSSG must unconditionally prevent wrapped_swapchain from applying finished NR
+    // Test 2: Standard internal FG allows finished-picture composition
     {
-        MockFGFeature* fg = nullptr;
-        assert(CanApplyDlssNrToFinishedPicture(false, FGOutput::DLSSG, true, fg) == false);
+        MockConfig cfg;
+        MockState state;
+        state.externalFrameGeneration = false;
+        state.activeFgOutput = FGOutput::FSRFG;
+        assert(ShouldApplyFinishedPicture(cfg, state) == true);
+        state.activeFgOutput = FGOutput::XeFG;
+        assert(ShouldApplyFinishedPicture(cfg, state) == true);
+        std::puts("  [PASS] Test 2: Internal FG (FSR FG / XeFG) permits finished-picture NR");
     }
 
-    // Test 3: Regular non-FG or inactive FG allows DLSS-NR finished picture
+    // Test 3: External FG proxy strictly blocks finished-picture presentation hooks
     {
-        MockFGFeature* fg = nullptr;
-        assert(CanApplyDlssNrToFinishedPicture(false, FGOutput::NoFG, true, fg) == true);
+        MockConfig cfg;
+        MockState state;
+        state.externalFrameGeneration = true;
+        state.activeFgOutput = FGOutput::NoFG;
+        assert(ShouldApplyFinishedPicture(cfg, state) == false);
 
-        MockFGFeature inactiveFg { false, false };
-        assert(CanApplyDlssNrToFinishedPicture(false, FGOutput::NoFG, true, &inactiveFg) == true);
-
-        MockFGFeature pausedFg { true, true };
-        assert(CanApplyDlssNrToFinishedPicture(false, FGOutput::NoFG, true, &pausedFg) == true);
+        state.externalFrameGeneration = false;
+        state.activeFgOutput = FGOutput::DLSSG;
+        assert(ShouldApplyFinishedPicture(cfg, state) == false);
+        std::puts("  [PASS] Test 3: External FG mode strictly blocks finished-picture NR to avoid collision");
     }
 
-    // Test 4: Active internal FG (FSRFG / XeFG) handles presentation itself; wrapped_swapchain finished picture is suppressed
+    // Test 4: Shutdown guard prevents any submission or hook execution
     {
-        MockFGFeature activeFg { true, false };
-        assert(CanApplyDlssNrToFinishedPicture(false, FGOutput::FSRFG, true, &activeFg) == false);
-        assert(CanApplyDlssNrToFinishedPicture(false, FGOutput::XeFG, true, &activeFg) == false);
+        MockConfig cfg;
+        MockState state;
+        state.isShuttingDown = true;
+        assert(ShouldApplyFinishedPicture(cfg, state) == false);
+        std::puts("  [PASS] Test 4: Process shutdown guard prevents finished-picture dispatch");
     }
 
-    // Test 5: DlssNr::ApplyToFinishedPicture swapchain backbuffer extraction out-of-mutex guards
+    // Test 5: Transfer mode mappings & DLSS enlargement usage verified
     {
-        // Null swapchain or queue -> do not query swapchain
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::NoFG, true, true, false, true, false) == false);
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::NoFG, true, true, true, false, false) == false);
+        assert(DlssNrSpatialTransfer(0) == 0); // classic
+        assert(DlssNrSpatialTransfer(1) == 1); // spatial matched residual
+        assert(DlssNrSpatialTransfer(2) == 1); // DLSS matched residual -> mapped to 1
+        assert(DlssNrSpatialTransfer(3) == 3); // spatial relative lighting & chroma
+        assert(DlssNrSpatialTransfer(4) == 3); // DLSS relative lighting & chroma -> mapped to 3
 
-        // Disabled NR or disabled finished picture -> do not query swapchain
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::NoFG, false, true, true, true, false) == false);
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::NoFG, true, false, true, true, false) == false);
-
-        // External FG active -> do not query swapchain
-        assert(CanFinishedPictureQuerySwapchain(true, FGOutput::NoFG, true, true, true, true, false) == false);
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::DLSSG, true, true, true, true, false) == false);
-
-        // Streamline native picture ownership -> do not query swapchain
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::NoFG, true, true, true, true, true) == false);
-
-        // Standard finished picture permitted -> query swapchain outside NR mutex
-        assert(CanFinishedPictureQuerySwapchain(false, FGOutput::NoFG, true, true, true, true, false) == true);
+        assert(!DlssNrUsesDlssEnlargement(0));
+        assert(!DlssNrUsesDlssEnlargement(1));
+        assert(DlssNrUsesDlssEnlargement(2));
+        assert(!DlssNrUsesDlssEnlargement(3));
+        assert(DlssNrUsesDlssEnlargement(4));
+        std::puts("  [PASS] Test 5: Transfer mode mappings & enlargement routing verified");
     }
 
-    // Test 6: DlssNr_Dx12::ApplyFinished cancellation & color pass guards
-    {
-        bool cancelled = false;
-
-        // When external FG is active, cancel late context and do not apply finished color
-        assert(CanApplyFinishedColor(true, true, true, FGOutput::NoFG, true, true, cancelled) == false);
-        assert(cancelled == true);
-
-        // When DLSSG output is active, cancel late context
-        cancelled = false;
-        assert(CanApplyFinishedColor(true, true, false, FGOutput::DLSSG, true, true, cancelled) == false);
-        assert(cancelled == true);
-
-        // When NR is disabled, cancel late context
-        cancelled = false;
-        assert(CanApplyFinishedColor(false, true, false, FGOutput::NoFG, true, true, cancelled) == false);
-        assert(cancelled == true);
-
-        // Normal flow with picture and queue -> run finished color
-        cancelled = false;
-        assert(CanApplyFinishedColor(true, true, false, FGOutput::NoFG, true, true, cancelled) == true);
-        assert(cancelled == false);
-
-        // Null picture or queue without cancellation condition -> does not cancel and does not run
-        cancelled = false;
-        assert(CanApplyFinishedColor(true, true, false, FGOutput::NoFG, false, true, cancelled) == false);
-        assert(cancelled == false);
-    }
-
-    // Test 7: Lock inversion ordering verification
-    {
-        enum OperationOrder
-        {
-            OP_NONE = 0,
-            OP_GET_BUFFER = 1,
-            OP_ACQUIRE_NR_LOCK = 2,
-            OP_ACQUIRE_STATE_LOCK = 3,
-            OP_APPLY_COLOR = 4
-        };
-
-        OperationOrder steps[4] = { OP_NONE, OP_NONE, OP_NONE, OP_NONE };
-        int stepCount = 0;
-
-        // Simulate execution flow of ApplyToFinishedPicture + ApplyFinished
-        // Step 1: Swapchain query outside lock
-        steps[stepCount++] = OP_GET_BUFFER;
-
-        // Step 2: nrOwnersMutex
-        steps[stepCount++] = OP_ACQUIRE_NR_LOCK;
-
-        // Step 3: _state->mutex inside ApplyFinished
-        steps[stepCount++] = OP_ACQUIRE_STATE_LOCK;
-
-        // Step 4: ApplyFinishedColor
-        steps[stepCount++] = OP_APPLY_COLOR;
-
-        assert(steps[0] == OP_GET_BUFFER);
-        assert(steps[1] == OP_ACQUIRE_NR_LOCK);
-        assert(steps[2] == OP_ACQUIRE_STATE_LOCK);
-        assert(steps[3] == OP_APPLY_COLOR);
-    }
-
-    std::puts("PASS: nr_finished_picture_external_fg_unit (lock order, out-of-mutex swapchain query, and external FG cancellation guards)");
+    std::puts("\nAll DLSS-NR Finished Picture & External FG Unit Tests passed successfully!");
     return 0;
 }

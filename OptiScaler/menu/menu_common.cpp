@@ -6,7 +6,6 @@
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
 #include <nvapi/NvApiHooks.h>
-#include <dlssnr/DlssNr_ExposureScan.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -266,12 +265,29 @@ void MenuCommon::UpdateManualInput(HWND targetHwnd)
 
     const auto config = Config::Instance();
 
-    auto CheckShortcut = [&](int vk, bool& inputFlag, const char* logMessage)
+    auto CheckShortcut =
+        [&](int vk, bool& inputFlag, const char* logMessage, bool requireCtrl = false, bool requireAlt = false)
     {
         if (inputFlag)
             return;
 
         if (vk <= 0 || vk >= 256)
+            return;
+
+        // Checked before the release edge below, not folded into it: modifiers must still be held
+        // at the moment the trigger key is released, the same convention every OS shortcut chord
+        // uses (release the letter while the modifiers are down, not "were down at some point").
+        //
+        // Checks the generic code and both L/R-specific ones: raw keyboard input
+        // (NormalizeRawKeyboardVirtualKey, input_system_raw.cpp) rewrites VK_CONTROL/VK_MENU into
+        // VK_LCONTROL/VK_RCONTROL/VK_LMENU/VK_RMENU before this table is ever touched, so the
+        // plain generic code alone would never read as down on that path - checking only it would
+        // make this feature silently never fire depending on which input path is active.
+        if (requireCtrl && !OptiInput::IsKeyDown(VK_CONTROL) && !OptiInput::IsKeyDown(VK_LCONTROL) &&
+            !OptiInput::IsKeyDown(VK_RCONTROL))
+            return;
+        if (requireAlt && !OptiInput::IsKeyDown(VK_MENU) && !OptiInput::IsKeyDown(VK_LMENU) &&
+            !OptiInput::IsKeyDown(VK_RMENU))
             return;
 
         if (OptiInput::IsKeyReleased(vk))
@@ -288,7 +304,9 @@ void MenuCommon::UpdateManualInput(HWND targetHwnd)
 
     if (!capturingKey && canAcceptInputs)
     {
-        CheckShortcut(config->ShortcutKey.value_or_default(), inputMenu, "Menu key pressed, will be switching menu");
+        CheckShortcut(config->ShortcutKey.value_or_default(), inputMenu, "Menu key pressed, will be switching menu",
+                      config->ShortcutKeyRequireCtrl.value_or_default(),
+                      config->ShortcutKeyRequireAlt.value_or_default());
         CheckShortcut(config->FpsShortcutKey.value_or_default(), inputFps, "Menu key pressed, will be switching FPS");
         CheckShortcut(config->FGShortcutKey.value_or_default(), inputFG, "Menu key pressed, will be switching FG mode");
         CheckShortcut(config->FpsCycleShortcutKey.value_or_default(), inputFpsCycle,
@@ -405,7 +423,17 @@ class Keybind
         return "Unknown";
     }
 
-    void Render(CustomOptional<int>& configKey)
+    static std::string ShortcutLabel(int virtualKey, bool requireCtrl, bool requireAlt)
+    {
+        std::string label = KeyNameFromVirtualKeyCode(static_cast<USHORT>(virtualKey));
+        if (requireAlt)
+            label = "Alt+" + label;
+        if (requireCtrl)
+            label = "Ctrl+" + label;
+        return label;
+    }
+
+    void Render(CustomOptional<int>& configKey, bool requireCtrl = false, bool requireAlt = false)
     {
         ImGui::PushID(id);
         if (ImGui::Button(name.c_str()))
@@ -441,7 +469,7 @@ class Keybind
         }
 
         ImGui::SameLine();
-        ImGui::Text(KeyNameFromVirtualKeyCode(configKey.value_or_default()).c_str());
+        ImGui::Text(ShortcutLabel(configKey.value_or_default(), requireCtrl, requireAlt).c_str());
 
         ImGui::SameLine();
         ImGui::PushID(id);
@@ -1582,7 +1610,10 @@ void MenuCommon::UpdateVersionAndStartupNotifications(RenderMenuContext& ctx)
                 updateNotification.setTitle("OptiScaler Update available");
                 updateNotification.setContent(
                     "Press %s for more info",
-                    Keybind::KeyNameFromVirtualKeyCode(config->ShortcutKey.value_or_default()).c_str());
+                    Keybind::ShortcutLabel(config->ShortcutKey.value_or_default(),
+                                           config->ShortcutKeyRequireCtrl.value_or_default(),
+                                           config->ShortcutKeyRequireAlt.value_or_default())
+                        .c_str());
                 ImGui::InsertNotification(updateNotification);
                 return true;
             };
@@ -1637,14 +1668,8 @@ void MenuCommon::BeginMenuFrameIfNeeded(RenderMenuContext& ctx)
     auto& newFrame = ctx.newFrame;
 
     // New frame check
-    // The lamp is drawn while the menu is closed, which is the whole point of it. Tied to its own
-    // setting and nothing else: an overlay that appears because a scan is running, rather than
-    // because someone asked for it, is an overlay nobody asked for.
-    const bool scanIndicator = config->DlssNrScanMeter.value_or_default() &&
-                               DlssNr::ExposureScan::Where() != DlssNr::ExposureScan::Verdict::Off;
-
     if ((!config->DisableSplash.value_or_default() && now > splashStart && now < splashLimit) ||
-        config->ShowFps.value_or_default() || _isVisible || ImGui::notifications.size() > 0 || scanIndicator ||
+        config->ShowFps.value_or_default() || _isVisible || ImGui::notifications.size() > 0 ||
         (config->DlssNrCompare.value_or_default() != 0 && config->DlssNrCompareTags.value_or_default()))
     {
         if (!_isUWP)
@@ -1718,7 +1743,10 @@ void MenuCommon::RenderSplashWindow(RenderMenuContext& ctx)
                     ImGui::SetWindowFontScale(splashScale);
 
                 ImGui::Text("OptiScaler - %s for menu",
-                            Keybind::KeyNameFromVirtualKeyCode(config->ShortcutKey.value_or_default()).c_str());
+                            Keybind::ShortcutLabel(config->ShortcutKey.value_or_default(),
+                                                   config->ShortcutKeyRequireCtrl.value_or_default(),
+                                                   config->ShortcutKeyRequireAlt.value_or_default())
+                                .c_str());
                 ImGui::TextColored(toneMapColor(ImVec4(1.0f, 1.0f, 1.0f, 0.7f)), splashMessage.c_str());
 
                 splashSize = ImGui::GetWindowSize();
@@ -7585,7 +7613,8 @@ void MenuCommon::RenderKeybindSettings(RenderMenuContext& ctx)
         static auto fgEnable = Keybind("Frame Generation", 13);
         static auto dlssNrToggle = Keybind("Neural Rendering", 14);
 
-        menu.Render(config->ShortcutKey);
+        menu.Render(config->ShortcutKey, config->ShortcutKeyRequireCtrl.value_or_default(),
+                    config->ShortcutKeyRequireAlt.value_or_default());
         fpsOverlay.Render(config->FpsShortcutKey);
         fpsOverlayCycle.Render(config->FpsCycleShortcutKey);
         fgEnable.Render(config->FGShortcutKey);
@@ -8216,95 +8245,6 @@ void KeyUp(UINT vKey)
     inputFpsCycle = vKey == Config::Instance()->FpsCycleShortcutKey.value_or_default();
 }
 
-// The lamp, and only the lamp.
-//
-// Red for dark, green for full light, with its reading beside it. No status sentence: the whole
-// point of a light meter is that it is read at a glance while playing, and a paragraph in the corner
-// of somebody's game is not that. Everything wordy lives in the menu, which is where someone has
-// already decided to stop and read.
-//
-// Drawn only when its own setting is on. An overlay that appears because a scan happens to be
-// running is an overlay nobody asked for.
-void RenderExposureScanIndicator(float alpha)
-{
-    using DlssNr::ExposureScan::Verdict;
-
-    if (!Config::Instance()->DlssNrScanMeter.value_or_default())
-        return;
-
-    if (DlssNr::ExposureScan::Where() == Verdict::Off)
-        return;
-
-    int which = 0;
-    float low = 0.0f, high = 0.0f;
-    const float now = DlssNr::ExposureScan::BestValue(&which, &low, &high);
-
-    // Nothing found yet, or no range to place it in: a dim lamp, which says "watching, no reading"
-    // without saying it in words.
-    const bool reading = now > 0.0f && high > low;
-
-    float lit = 0.0f;
-
-    if (reading)
-    {
-        // An exposure falls as the scene brightens, so the value reads backwards unless the buffer
-        // holds the reciprocal -- the same question the anchor asks, answered from the same setting,
-        // because a lamp contradicting the picture would be worse than no lamp.
-        lit = (high - now) / (high - low);
-
-        if (Config::Instance()->DlssNrScanInverted.value_or_default())
-            lit = 1.0f - lit;
-
-        lit = lit < 0.0f ? 0.0f : (lit > 1.0f ? 1.0f : lit);
-    }
-
-    // Red to amber to green. A straight red-to-green fade passes through a muddy brown at the
-    // midpoint, and the midpoint is where most of a session is spent.
-    const ImVec4 dark(0.90f, 0.22f, 0.20f, 1.0f);
-    const ImVec4 mid(0.95f, 0.75f, 0.20f, 1.0f);
-    const ImVec4 bright(0.35f, 0.88f, 0.38f, 1.0f);
-    const ImVec4 idle(0.45f, 0.45f, 0.45f, 1.0f);
-
-    ImVec4 lamp = idle;
-
-    if (reading)
-    {
-        const float t = lit < 0.5f ? lit * 2.0f : (lit - 0.5f) * 2.0f;
-        const ImVec4& a = lit < 0.5f ? dark : mid;
-        const ImVec4& b = lit < 0.5f ? mid : bright;
-        lamp = ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, 1.0f);
-    }
-
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 12.0f, vp->WorkPos.y + 12.0f),
-                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-    ImGui::SetNextWindowBgAlpha(alpha);
-
-    if (ImGui::Begin("DlssNrExposureScan", nullptr,
-                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration |
-                         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
-                         ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove))
-    {
-        const float r = ImGui::GetFontSize() * 0.38f;
-        const ImVec2 at = ImGui::GetCursorScreenPos();
-        const ImVec2 centre(at.x + r, at.y + ImGui::GetTextLineHeight() * 0.5f);
-
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        draw->AddCircleFilled(centre, r, ImGui::GetColorU32(lamp), 20);
-        draw->AddCircle(centre, r, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.6f)), 20, 1.5f);
-
-        ImGui::Dummy(ImVec2(r * 2.0f + 6.0f, ImGui::GetTextLineHeight()));
-        ImGui::SameLine();
-
-        if (reading)
-            ImGui::TextColored(lamp, "%3.0f%%  %.5f", lit * 100.0f, now);
-        else
-            ImGui::TextColored(idle, "--");
-    }
-
-    ImGui::End();
-}
-
 bool MenuCommon::RenderMenu()
 {
     if (!_isInited)
@@ -8330,7 +8270,6 @@ bool MenuCommon::RenderMenu()
     RenderNotifications(ctx);
     UpdateFrameTimeAverages(ctx);
     RenderPerformanceOverlay(ctx);
-    DlssNr::RenderExposureScanIndicator(ctx.config->FpsOverlayAlpha.value_or_default());
 
     // 4) Draw the full settings menu last so popups and child windows keep their existing behavior.
     RenderMainMenuWindow(ctx);

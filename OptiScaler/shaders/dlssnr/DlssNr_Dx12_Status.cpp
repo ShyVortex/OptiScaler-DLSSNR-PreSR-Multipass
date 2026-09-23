@@ -8,14 +8,11 @@ auto DlssNr_Dx12::State::ReportSkipOnce(const char* reason) -> void
         LOG_INFO("DLSS-NR did not run: {}", reason);
 }
 
-auto DlssNr_Dx12::State::SynchronousDeferredDlssStatus() -> std::string
+auto DlssNr_Dx12::State::DeferredDlssStatus() -> std::string
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     return deferredSr.status;
 }
-
-auto DlssNr_Dx12::State::DeferredDlssStatus() -> std::string
-{ return SynchronousDeferredDlssStatus(); }
 
 auto DlssNr_Dx12::State::RetryAfterFailure() -> void
 {
@@ -24,12 +21,15 @@ auto DlssNr_Dx12::State::RetryAfterFailure() -> void
     nr.failed = false;
     nr.reason = "";
     nr.reset = true;
+    nr.spatialFallback = false;
+    nr.spatialFallbackReason = "";
+    nr.spatialActive = false;
 }
 
 auto DlssNr_Dx12::State::ConsumeControls() -> void
 {
     const auto& cfg = *Config::Instance();
-    if (!cfg.DlssNrEnabled.value_or_default() || cfg.DlssNrTransfer.value_or_default() != 2 ||
+    if (!cfg.DlssNrEnabled.value_or_default() || !DlssNrUsesDlssEnlargement(cfg.DlssNrTransfer.value_or_default()) ||
         cfg.DlssNrWorkingScale.value_or_default() >= 1.0f)
     {
         ReleaseEnlarger();
@@ -51,51 +51,44 @@ auto DlssNr_Dx12::State::ConsumeControls() -> void
 
 auto DlssNr_Dx12::State::Publish() -> void
 {
+    std::string spatialStatus = "Off";
+    if (nr.spatialLayout.requested)
+    {
+        if (!nr.spatialLayout.active)
+            spatialStatus = "Unavailable: " + nr.spatialLayout.reason;
+        else if (nr.spatialFallback)
+            spatialStatus = std::string("Fallback to ordinary NR: ") + nr.spatialFallbackReason;
+        else
+            spatialStatus = "DX12 peripheral compression: " + std::to_string(nr.spatialLayout.ordinaryW) + "x" +
+                            std::to_string(nr.spatialLayout.ordinaryH) + " -> " +
+                            std::to_string(nr.spatialLayout.modelW) + "x" + std::to_string(nr.spatialLayout.modelH);
+    }
     const bool hasReason = (nr.reason != nullptr && nr.reason[0] != '\0');
-    DlssNr::PublishStatus(
-        &shader, DlssNr::Backend::Dx12,
-        { !nr.failed && modelRunning && enlargementStatus.empty(),
-          hasReason ? std::string(nr.reason) : enlargementStatus,
-          lastGpuTime,
-          frames,
-          { nr.exposureFrames, nr.exposureOfferedNow, nr.exposureEverOffered, nr.gameExposure, nr.gamePreExposure },
-          captureFrames.isActive() });
+    DlssNr::PublishStatus(&shader, DlssNr::Backend::Dx12,
+                          { !nr.failed && modelRunning && enlargementStatus.empty(),
+                            hasReason ? nr.reason : enlargementStatus, lastGpuTime, frames, spatialStatus,
+                            nr.spatialActive });
 }
 
-void DlssNr_Dx12::State::EndGpuTiming(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* timingQueue)
+void DlssNr_Dx12::State::EndGpuTiming(ID3D12GraphicsCommandList* cmdList)
 {
-    if (gpuTime != nullptr)
+    gpuTime->End(cmdList);
+    if (auto ms = gpuTime->ReadGpuTime())
+        lastGpuTime = ms;
+    if (auto ngx = ngxTime->ReadGpuTime())
+        lastNgxTime = ngx;
+
+    if (lastGpuTime && lastNgxTime)
+        vitals.Push(*lastGpuTime, *lastNgxTime);
+    if (lastGpuTime && lastNgxTime && frames - lastSplitLog > 600)
     {
-        gpuTime->End(cmdList);
-
-        // Use the explicit bridge queue when supplied; otherwise use the upscaler's queue.
-        auto* queue =
-            timingQueue != nullptr ? timingQueue : (ID3D12CommandQueue*) ::State::Instance().currentCommandQueue;
-
-        if (queue != nullptr)
-        {
-            if (auto ms = gpuTime->ReadGpuTime(queue); ms.has_value())
-                lastGpuTime = ms;
-
-            if (ngxTime != nullptr)
-            {
-                if (auto ngx = ngxTime->ReadGpuTime(queue); ngx.has_value())
-                    lastNgxTime = ngx;
-            }
-
-            // The split, once every few hundred frames. What is worth reading is not the total but the
-            // remainder: the model's cost is NVIDIA's to set, and everything else is ours.
-
-            if (lastGpuTime.has_value() && lastNgxTime.has_value() && frames - lastSplitLog > 600)
-            {
-                lastSplitLog = frames;
-                const double total = lastGpuTime.value();
-                const double ngx = lastNgxTime.value();
-                LOG_INFO("DLSS-NR elapsed: {:.2f} ms total, {:.2f} ms model, {:.2f} ms surrounding work ({:.0f}%; "
-                         "intervals may include other GPU work)",
-                         total, ngx, total - ngx, total > 0.0 ? 100.0 * (total - ngx) / total : 0.0);
-            }
-        }
+        lastSplitLog = frames;
+        const auto window = vitals.Read();
+        LOG_INFO("DLSS-NR GPU window: {} samples, total mean {:.2f} / p99 {:.2f} ms, model mean {:.2f} / p99 {:.2f} ms",
+                 window.samples, window.totalMean, window.totalP99, window.modelMean, window.modelP99);
+        const double total = *lastGpuTime, ngx = *lastNgxTime;
+        LOG_INFO("DLSS-NR elapsed: {:.2f} ms total, {:.2f} ms model, {:.2f} ms surrounding work ({:.0f}%; "
+                 "intervals may include other GPU work)",
+                 total, ngx, total - ngx, total > 0.0 ? 100.0 * (total - ngx) / total : 0.0);
     }
-
 }

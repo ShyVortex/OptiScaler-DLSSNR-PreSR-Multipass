@@ -1,11 +1,13 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
 
-auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* colour, ID3D12Resource* depth, ID3D12Resource* motion,
-             ID3D12Resource* output, const DlssNrFrameInfo& frame, ID3D12CommandQueue* timingQueue) -> void
+auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* colour, ID3D12Resource* depth,
+                             ID3D12Resource* motion, ID3D12Resource* output, const DlssNrFrameInfo& frame,
+                             ID3D12CommandQueue* timingQueue) -> void
 {
     std::lock_guard<std::recursive_mutex> nrLock(mutex);
     const Config& cfg = *Config::Instance();
+    nr.spatialActive = false;
 
     if (nr.failed || cmdList == nullptr || colour == nullptr || depth == nullptr || motion == nullptr ||
         output == nullptr)
@@ -33,9 +35,9 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     const D3D12_RESOURCE_STATES outputArrival =
         frame.PipelineManagedStates ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
         : frame.FinishedPicture     ? (D3D12_RESOURCE_STATES) frame.OutputArrivalState
-        : frame.BeforeUpscale ? (!frame.PrivateColorCopy && Config::Instance()->ColorResourceBarrier.has_value()
-                                     ? (D3D12_RESOURCE_STATES) Config::Instance()->ColorResourceBarrier.value()
-                                     : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+        : frame.BeforeUpscale       ? (!frame.PrivateColorCopy && Config::Instance()->ColorResourceBarrier.has_value()
+                                           ? (D3D12_RESOURCE_STATES) Config::Instance()->ColorResourceBarrier.value()
+                                           : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
         : Config::Instance()->OutputResourceBarrier.has_value()
             ? (D3D12_RESOURCE_STATES) Config::Instance()->OutputResourceBarrier.value()
             : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -46,14 +48,15 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
         targetState = to;
     };
 
-    ID3D12Device* device = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Device> deviceRef;
 
-    if (FAILED(target->GetDevice(IID_PPV_ARGS(&device))) || device == nullptr)
+    if (FAILED(target->GetDevice(IID_PPV_ARGS(&deviceRef))))
     {
         ReportSkipOnce("the output texture belongs to no D3D12 device");
         return;
     }
 
+    auto* device = deviceRef.Get();
     const D3D12_RESOURCE_DESC desc = target->GetDesc();
     const auto active =
         frame.BeforeUpscale
@@ -62,7 +65,6 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     if (!active)
     {
         ReportSkipOnce("the pre-SR active colour size is invalid");
-        device->Release();
         return;
     }
     const auto width = active->width;
@@ -73,31 +75,16 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     const auto guideDesc = depth->GetDesc();
     const auto motionDesc = motion->GetDesc();
     const auto guides = DlssNr::ResolveGuideRegions(
-        { (unsigned int) guideDesc.Width, guideDesc.Height },
-        { (unsigned int) motionDesc.Width, motionDesc.Height },
+        { (unsigned int) guideDesc.Width, guideDesc.Height }, { (unsigned int) motionDesc.Width, motionDesc.Height },
         { frame.RenderSubrectWidth, frame.RenderSubrectHeight }, { frame.OutputWidth, frame.OutputHeight },
-        frame.MotionVectorsLowResolution, frame.DepthSubrectBaseX, frame.DepthSubrectBaseY,
-        frame.MotionSubrectBaseX, frame.MotionSubrectBaseY);
+        frame.MotionVectorsLowResolution, frame.DepthSubrectBaseX, frame.DepthSubrectBaseY, frame.MotionSubrectBaseX,
+        frame.MotionSubrectBaseY);
     if (!guides.depth.valid() || !guides.motion.valid())
     {
         ReportSkipOnce("depth or motion-vector subrect is empty");
-        device->Release();
         return;
     }
     const auto guideWidth = guides.depth.width, guideHeight = guides.depth.height;
-    const auto motionWidth = guides.motion.width, motionHeight = guides.motion.height;
-    const auto depthBaseX = guides.depth.x, depthBaseY = guides.depth.y;
-    const auto motionBaseX = guides.motion.x, motionBaseY = guides.motion.y;
-
-    nr.guideWidth = guideWidth;
-    nr.guideHeight = guideHeight;
-    nr.guideDepthInverted = frame.DepthInverted;
-
-    // The game's own encoding, passed through. Every resource already carries a subrect saying how
-    // big it is, so scaling by the resolution ratio on top of that counts it twice -- vectors come
-    // out too long and the model warps its history past where the surface went.
-    nr.guideMvScaleX = frame.MvScaleX;
-    nr.guideMvScaleY = frame.MvScaleY;
 
     if (frame.Reset)
     {
@@ -111,34 +98,27 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
 
     // Guide dimensions can change without rebuilding the model; report changes as they occur.
 
-    const GuideReport guidesNow {
-        true,  nr.guideDepthInverted, nr.guideMvScaleX, nr.guideMvScaleY, guideWidth, guideHeight,
-        width, (unsigned int) height
-    };
+    const GuideReport guidesNow { true,       frame.DepthInverted, frame.MvScaleX, frame.MvScaleY,
+                                  guideWidth, guideHeight,         width,          (unsigned int) height };
 
-    if (!loggedGuides.valid || loggedGuides.depthInverted != guidesNow.depthInverted ||
-        loggedGuides.mvScaleX != guidesNow.mvScaleX || loggedGuides.mvScaleY != guidesNow.mvScaleY ||
-        loggedGuides.guideW != guidesNow.guideW || loggedGuides.guideH != guidesNow.guideH ||
-        loggedGuides.frameW != guidesNow.frameW || loggedGuides.frameH != guidesNow.frameH)
+    if (loggedGuides != guidesNow)
     {
         loggedGuides = guidesNow;
         LOG_INFO("DLSS-NR guides: depth {}, motion vector scale {} x {}, guides {}x{} for a {}x{} frame",
-                 nr.guideDepthInverted ? "inverted" : "not inverted", nr.guideMvScaleX, nr.guideMvScaleY,
-                 guideWidth, guideHeight, width, height);
+                 frame.DepthInverted ? "inverted" : "not inverted", frame.MvScaleX, frame.MvScaleY, guideWidth,
+                 guideHeight, width, height);
     }
 
-    const unsigned int configuredPasses =
+    const unsigned int requestedPasses =
         std::clamp(cfg.DlssNrPasses.value_or_default(), 1u,
                    cfg.DlssNrUnlockPasses.value_or_default() ? DlssNr::MaxPassCount : DlssNr::DefaultMaxPassCount);
-    const unsigned int requestedPasses = configuredPasses;
     for (auto& model : nr.models)
-        model.AdvanceEpoch(frame.SubmissionEpoch);
+        model.Collect();
     if ((!NVNGXProxy::IsDx12Inited() && !NVNGXProxy::InitDx12(device)) || !DlssNr::Proxy::Context::Available())
     {
         nr.failed = true;
         nr.reason = "the NVIDIA NGX driver does not provide Neural Rendering";
         LOG_ERROR("DLSS-NR unavailable: {}", nr.reason);
-        device->Release();
         return;
     }
 
@@ -146,16 +126,52 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     float workScale = cfg.DlssNrWorkingScale.value_or_default();
     if (!std::isfinite(workScale))
         workScale = 1.0f;
-    workScale = workScale < 0.25f ? 0.25f : (workScale > 2.0f ? 2.0f : workScale);
+    workScale = std::clamp(workScale, 0.25f, 2.0f);
     const auto workWidth = (unsigned int) (width * workScale + 0.5f);
     const auto workHeight = (unsigned int) (height * workScale + 0.5f);
     const bool reduced = workWidth != width || workHeight != height;
-    if (!PrepareRunModels(cmdList, device, frame, desc, { width, height }, { workWidth, workHeight },
-                          workScale, requestedPasses))
+
+    const auto spatialSettings = DlssNr::Spatial::ReadSettings(cfg);
+    const auto spatialLayout = DlssNr::Spatial::Build(spatialSettings, width, height, workScale);
+    const bool spatialSignatureChanged =
+        nr.spatialSignatureValid &&
+        (nr.spatialLayout != spatialLayout || nr.spatialColorFormat != desc.Format ||
+         nr.spatialDepthFormat != guideDesc.Format || nr.spatialMotionFormat != motionDesc.Format ||
+         nr.spatialDepthW != guideDesc.Width || nr.spatialDepthH != guideDesc.Height ||
+         nr.spatialMotionW != motionDesc.Width || nr.spatialMotionH != motionDesc.Height);
+    if (spatialSignatureChanged)
     {
-        device->Release();
+        if (nr.spatialLayout.requested || spatialLayout.requested)
+            nr.reset = true;
+        nr.spatialFallback = false;
+        nr.spatialFallbackReason = "";
+    }
+    nr.spatialLayout = spatialLayout;
+    nr.spatialSignatureValid = true;
+    nr.spatialColorFormat = desc.Format;
+    nr.spatialDepthFormat = guideDesc.Format;
+    nr.spatialMotionFormat = motionDesc.Format;
+    nr.spatialDepthW = (unsigned) guideDesc.Width;
+    nr.spatialDepthH = guideDesc.Height;
+    nr.spatialMotionW = (unsigned) motionDesc.Width;
+    nr.spatialMotionH = motionDesc.Height;
+    const bool spatial = spatialLayout.active && !nr.spatialFallback;
+    if (!spatial && nr.spatialColor)
+        ReleaseSpatialResources();
+    if (spatial && (!shader.SpatialReady() || !PrepareSpatialResources(device, spatialLayout)))
+    {
+        nr.spatialFallback = true;
+        nr.spatialFallbackReason = "the spatial shader or textures could not be created";
+        nr.reset = true;
+        modelRunning = false;
+        ReportSkipOnce(nr.spatialFallbackReason);
         return;
     }
+    const unsigned modelWidth = spatial ? spatialLayout.modelW : workWidth;
+    const unsigned modelHeight = spatial ? spatialLayout.modelH : workHeight;
+    if (!PrepareRunModels(cmdList, device, frame, desc, { width, height }, { modelWidth, modelHeight }, workScale,
+                          requestedPasses, spatial))
+        return;
     // The parameter adapter already combined the HDR flag with the active color format.
     const bool isHdrBuffer = frame.ColourIsLinearHdr;
 
@@ -169,25 +185,21 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
                  isHdrBuffer ? "on" : "off");
     }
 
-    const bool haveCodec = shader.IsInit();
-
-    if (!haveCodec)
+    if (!shader.IsInit())
     {
         nr.failed = true;
         nr.reason = "the colour codec would not compile";
         LOG_ERROR("DLSS-NR unavailable: {}", nr.reason);
-        device->Release();
         return;
     }
 
     // Advance capture scheduling only once the codec and models are ready.
     ++frames;
-    TickNrRetired(frame.SubmissionEpoch);
+    lifetime.Collect();
     CheckCaptureTrigger();
 
-    if (captureWriteAtFrame != 0 && frames >= captureWriteAtFrame)
+    if (captureFrames.isActive())
     {
-        captureWriteAtFrame = 0;
         const auto captureDir = Util::DllPath().remove_filename() / "dlssnr-capture";
         const auto written = captureFrames.write(captureDir);
 
@@ -195,17 +207,14 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
             LOG_INFO("DLSS-NR wrote matched before/after frames to {}", written);
     }
 
-    // Paper white maps the frame into the model's display-referred proxy.
-
     ResTrack_Dx12::HookLateNrQueue(device);
     if (gpuTime == nullptr)
-        gpuTime = std::make_unique<DlssNrGpuTime>(device, "total");
+        gpuTime = std::make_unique<DlssNrGpuTime>(device);
 
     if (ngxTime == nullptr)
-        ngxTime = std::make_unique<DlssNrGpuTime>(device, "model");
+        ngxTime = std::make_unique<DlssNrGpuTime>(device);
 
-    if (gpuTime != nullptr)
-        gpuTime->Start(cmdList);
+    gpuTime->Start(cmdList);
 
     // Copy just the live image, not the stale right/bottom margins. Do this only after model
     // creation/pending-submission early returns, and inside the measured GPU interval. The compact
@@ -242,17 +251,24 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
         }
     };
 
-    EncodeContext encoded { cmdList, device, target, targetState, frame, workScale, targetSupportsUav };
+    EncodeContext encoded { cmdList, device, target, targetState, frame, workScale, targetSupportsUav, spatial };
     EncodeInput(encoded);
     targetState = encoded.targetState;
-    const auto whitePoint = encoded.whitePoint;
-    auto* exposureTex = encoded.exposureTex;
-    const auto useGameExposure = encoded.useGameExposure;
-    const auto exposurePreMul = encoded.exposurePreMul;
+    if (spatial && !encoded.encodeSucceeded)
+    {
+        nr.spatialFallback = true;
+        nr.spatialFallbackReason = "the spatial frame's colour encode dispatch failed";
+        nr.reset = true;
+        modelRunning = false;
+        Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        FinishColor(false);
+        EndGpuTiming(cmdList);
+        return;
+    }
     auto* modelInput = encoded.modelInput;
-
-    // Read the exposure scan's candidates on the pass's own command list, once a frame.
-    DlssNr::ExposureScan::Tick(device, cmdList, frame.SubmissionEpoch);
 
     ID3D12Resource* depthIn = ReadableGuide(device, cmdList, depth, &nr.depthClone);
     ID3D12Resource* motionIn = ReadableGuide(device, cmdList, motion, &nr.motionClone);
@@ -261,17 +277,67 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     {
         nr.reset = true;
         ReportSkipOnce("the game's depth or motion vectors could not be made readable this frame");
+        Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Barrier(cmdList, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         FinishColor(false);
-        device->Release();
+        EndGpuTiming(cmdList);
+        if (depthIn == nr.depthClone)
+            Barrier(cmdList, nr.depthClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_COPY_DEST);
+        if (motionIn == nr.motionClone)
+            Barrier(cmdList, nr.motionClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_COPY_DEST);
         return;
+    }
+    ID3D12Resource* const originalDepthIn = depthIn;
+    ID3D12Resource* const originalMotionIn = motionIn;
+
+    if (spatial)
+    {
+        const auto colorConstants =
+            DlssNr::Spatial::MakeConstants(spatialLayout, 100, guides, frame.MvScaleX, frame.MvScaleY, width, height);
+        const auto guideConstants =
+            DlssNr::Spatial::MakeConstants(spatialLayout, 101, guides, frame.MvScaleX, frame.MvScaleY, width, height);
+        const bool packedColor =
+            shader.DispatchSpatial(cmdList, colorConstants, nr.colorCopy, nullptr, nullptr, nr.spatialColor);
+        const bool packedGuides = packedColor && shader.DispatchSpatial(cmdList, guideConstants, nr.colorCopy, depthIn,
+                                                                        motionIn, nr.spatialDepth, nr.spatialMotion);
+        if (!packedGuides)
+        {
+            nr.spatialFallback = true;
+            nr.spatialFallbackReason = "a spatial packing dispatch failed";
+            nr.reset = true;
+            modelRunning = false;
+            ReportSkipOnce(nr.spatialFallbackReason);
+            Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            Barrier(cmdList, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            FinishColor(false);
+            EndGpuTiming(cmdList);
+            if (originalDepthIn == nr.depthClone)
+                Barrier(cmdList, nr.depthClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
+            if (originalMotionIn == nr.motionClone)
+                Barrier(cmdList, nr.motionClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
+            return;
+        }
+        for (auto* packed : { nr.spatialColor, nr.spatialDepth, nr.spatialMotion })
+            Barrier(cmdList, packed, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        modelInput = nr.spatialColor;
+        depthIn = nr.spatialDepth;
+        motionIn = nr.spatialMotion;
     }
 
     // The vectors were scaled to full-frame pixels; the image the model reprojects is the working size.
     const float mvToWorkX = width != 0 ? (float) workWidth / (float) width : 1.0f;
     const float mvToWorkY = height != 0 ? (float) workHeight / (float) height : 1.0f;
 
-    if (ngxTime != nullptr)
-        ngxTime->Start(cmdList);
+    ngxTime->Start(cmdList);
 
     // Count only a contiguous set of ready, separate feature histories. A failed extra creation never
     // falls back to reusing the main feature: that tells one temporal model several frames elapsed in
@@ -287,14 +353,11 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
         }
     }
 
+    if (loggedConfigured != requestedPasses || loggedEffective != effectivePasses)
     {
-
-        if (loggedConfigured != configuredPasses || loggedEffective != effectivePasses)
-        {
-            loggedConfigured = configuredPasses;
-            loggedEffective = effectivePasses;
-            LOG_INFO("DLSS-NR model passes: configured {}, effective {}", configuredPasses, effectivePasses);
-        }
+        loggedConfigured = requestedPasses;
+        loggedEffective = effectivePasses;
+        LOG_INFO("DLSS-NR model passes: configured {}, effective {}", requestedPasses, effectivePasses);
     }
 
     // Keep the encoded base immutable; ping-pong model outputs and compose the final delta once.
@@ -337,20 +400,28 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     const bool enlargementReset = nr.reset;
     bool compositionSucceeded = false;
 
+    DlssNr::Proxy::Frame modelFrame {};
+    modelFrame.depth = depthIn;
+    modelFrame.motion = motionIn;
+    modelFrame.size = { modelWidth, modelHeight };
+    modelFrame.guides =
+        spatial ? DlssNr::GuideRegions { { 0, 0, modelWidth, modelHeight }, { 0, 0, modelWidth, modelHeight } }
+                : guides;
+    modelFrame.depthInverted = frame.DepthInverted;
+    modelFrame.reset = nr.reset;
+    modelFrame.mvScaleX = spatial ? 1.0f : frame.MvScaleX * mvToWorkX;
+    modelFrame.mvScaleY = spatial ? 1.0f : frame.MvScaleY * mvToWorkY;
+
     for (unsigned int pass = 0; pass < effectivePasses && result == NVSDK_NGX_Result_Success; ++pass)
     {
         MakeModelWritable(passOutput);
         bool evaluated = false;
-        result = static_cast<int>(nr.models[pass].Run(
-            cmdList, device, passInput, depthIn, motionIn, passOutput, workWidth, workHeight, guideWidth,
-            guideHeight, motionWidth, motionHeight, depthBaseX, depthBaseY, motionBaseX, motionBaseY,
-            nr.guideDepthInverted, nr.reset, nr.guideMvScaleX * mvToWorkX, nr.guideMvScaleY * mvToWorkY,
-            ModelSettings(cfg, pass), frame.SubmissionEpoch, &evaluated));
+        modelFrame.color = passInput;
+        modelFrame.output = passOutput;
+        result = static_cast<int>(nr.models[pass].Run(cmdList, device, modelFrame, PassSettings(cfg, pass),
+                                                      frame.SubmissionEpoch, &evaluated));
         modelRunning = evaluated && result == NVSDK_NGX_Result_Success;
-        if (!evaluated)
-            break;
-
-        if (result != NVSDK_NGX_Result_Success)
+        if (!evaluated || result != NVSDK_NGX_Result_Success)
             break;
 
         finalAnswer = passOutput;
@@ -361,8 +432,8 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
             MakeModelWritable(nr.passClamp);
             DlssNrConstants clamp {};
             clamp.Mode = DlssNrMode_ClampProxy;
-            clamp.Width = workWidth;
-            clamp.Height = workHeight;
+            clamp.Width = modelWidth;
+            clamp.Height = modelHeight;
             if (!shader.DispatchPass(cmdList, clamp, finalAnswer, nullptr, nullptr, nullptr, nullptr, nr.passClamp,
                                      nullptr, &clampSlots[pass % 2]))
             {
@@ -377,21 +448,47 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
         }
     }
 
-    if (ngxTime != nullptr)
-        ngxTime->End(cmdList);
+    ngxTime->End(cmdList);
 
     nr.reset = clampFailed || finalAnswer == nullptr;
+    bool spatialUnpacked = false;
+    ID3D12Resource* ordinaryProxy = modelInput;
+    ID3D12Resource* ordinaryAnswer = finalAnswer;
+    if (spatial && result == NVSDK_NGX_Result_Success && finalAnswer)
+    {
+        const auto unpackConstants =
+            DlssNr::Spatial::MakeConstants(spatialLayout, 102, guides, frame.MvScaleX, frame.MvScaleY, width, height);
+        spatialUnpacked = shader.DispatchSpatial(cmdList, unpackConstants, modelInput, finalAnswer, nullptr,
+                                                 nr.spatialProxy, nr.spatialAnswer);
+        if (spatialUnpacked)
+        {
+            for (auto* unpacked : { nr.spatialProxy, nr.spatialAnswer })
+                Barrier(cmdList, unpacked, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            ordinaryProxy = nr.spatialProxy;
+            ordinaryAnswer = nr.spatialAnswer;
+        }
+        else
+        {
+            nr.spatialFallback = true;
+            nr.spatialFallbackReason = "a spatial unpacking dispatch failed";
+            nr.reset = true;
+            modelRunning = false;
+            ReportSkipOnce(nr.spatialFallbackReason);
+            finalAnswer = nullptr;
+        }
+    }
 
     // Supersampling probe: report the model working ABOVE native so a test log tells us whether NGX even
     // accepts a super-native evaluate and what it returns. Once per working-size change, or on any error.
-    if (workWidth > width || workHeight > height)
+    if (modelWidth > width || modelHeight > height)
     {
 
-        if (lastSuper != workWidth || result != 1)
+        if (lastSuper != modelWidth || result != 1)
         {
-            lastSuper = workWidth;
-            LOG_INFO("DLSS-NR SUPERSAMPLE: model at {}x{} = {:.2f}x native {}x{}, evaluate result {} ({})",
-                     workWidth, workHeight, (float) workWidth / (float) width, width, height, result,
+            lastSuper = modelWidth;
+            LOG_INFO("DLSS-NR SUPERSAMPLE: model at {}x{} = {:.2f}x native {}x{}, evaluate result {} ({})", modelWidth,
+                     modelHeight, (float) modelWidth / (float) width, width, height, result,
                      NgxResultName((unsigned int) result));
         }
     }
@@ -403,28 +500,87 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
         // anything the model left alone is untouched rather than round-tripped through the curve.
         auto resolveParams = MakeResolveConstants(encoded, effectivePasses);
 
-        // Downsample the model answer to native for composition; fall back to the working-size pair.
-        // The final answer is NPSR and the native output rests in UAV.
+        // For spatial supersampling, both halves of the pair use the same filter. A failed paired
+        // downsample skips composition this frame so a mismatched proxy cannot create an edit.
         bool superDownOk = false;
-        if (workScale > 1.0f && nr.superDown != nullptr && nr.outputNative != nullptr &&
-            nr.superDown->DispatchResources(cmdList, finalAnswer, nr.outputNative))
+        bool spatialDownFailed = false;
+        if (spatial && workScale > 1.0f)
+        {
+            const Scaler scaler = cfg.DlssNrScalingDownscaler.value_or_default();
+            if (nr.nrScaler != scaler)
+            {
+                ReleaseSupersamplers();
+                nr.nrScaler = scaler;
+            }
+            if (nr.superDown == nullptr)
+                nr.superDown = new OS_Dx12("DLSS-NR supersample down", device, false, scaler);
+            if (nr.spatialProxyDown == nullptr)
+                nr.spatialProxyDown = new OS_Dx12("DLSS-NR spatial proxy down", device, false, scaler);
+        }
+        if (spatial && workScale > 1.0f)
+        {
+            const bool proxyDown =
+                nr.superDown && nr.spatialProxyDown && nr.spatialProxyNative && nr.spatialAnswerNative &&
+                nr.spatialProxyDown->DispatchResources(cmdList, ordinaryProxy, nr.spatialProxyNative);
+            const bool answerDown =
+                proxyDown && nr.superDown->DispatchResources(cmdList, ordinaryAnswer, nr.spatialAnswerNative);
+            if (answerDown)
+            {
+                for (auto* nativePair : { nr.spatialProxyNative, nr.spatialAnswerNative })
+                    Barrier(cmdList, nativePair, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                superDownOk = true;
+            }
+            else
+            {
+                spatialDownFailed = true;
+                nr.spatialFallback = true;
+                nr.spatialFallbackReason = "a spatial supersample downsampling dispatch failed";
+                nr.reset = true;
+                modelRunning = false;
+                ReportSkipOnce(nr.spatialFallbackReason);
+            }
+        }
+        else if (!spatial && workScale > 1.0f && nr.superDown != nullptr && nr.outputNative != nullptr &&
+                 nr.superDown->DispatchResources(cmdList, ordinaryAnswer, nr.outputNative))
         {
             Barrier(cmdList, nr.outputNative, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             superDownOk = true;
         }
 
-        ID3D12Resource* resolveProxy = superDownOk ? nr.colorCopy : modelInput;
-        ID3D12Resource* resolveAnswer = superDownOk ? nr.outputNative : finalAnswer;
-        bool enlargementReady = true;
-        if (cfg.DlssNrTransfer.value_or_default() == 2 && reduced)
+        ID3D12Resource* resolveProxy = superDownOk ? (spatial ? nr.spatialProxyNative : nr.colorCopy) : ordinaryProxy;
+        ID3D12Resource* resolveAnswer =
+            superDownOk ? (spatial ? nr.spatialAnswerNative : nr.outputNative) : ordinaryAnswer;
+        bool enlargementReady = !spatialDownFailed;
+        const auto transfer = cfg.DlssNrTransfer.value_or_default();
+        bool resizeFieldReadable = false;
+        if (resolveParams.DebugView != 4 && !spatialDownFailed && DlssNrUsesDlssEnlargement(transfer) && reduced &&
+            (transfer == 2 || workScale < 1.0f))
         {
-            auto* enlarged = EnlargeMatchedResidual(cmdList, device, modelInput, finalAnswer, depthIn, motionIn,
-                                                    frame, resolveParams, enlargementReset, timingQueue);
+            auto* enlarged =
+                EnlargeMatchedResidual(cmdList, device, ordinaryProxy, ordinaryAnswer, originalDepthIn,
+                                       originalMotionIn, frame, resolveParams, enlargementReset, timingQueue);
             enlargementReady = enlarged != nullptr;
-            if (enlarged) { resolveAnswer = enlarged; resolveParams.Transfer = 2; }
-            if (enlarged && resolveParams.DebugView == 2)
-            { resolveAnswer = finalAnswer; resolveParams.Transfer = 1; } // Inspect the actual model answer.
+            if (enlarged)
+            {
+                resolveAnswer = enlarged;
+                resolveParams.Transfer = transfer;
+            }
+            if (enlarged && transfer == 4)
+            {
+                // Retain the spatial field for the inverse-HDR range guard.
+                resolveProxy = enlarger->input.Get();
+                Barrier(cmdList, resolveProxy, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                resizeFieldReadable = true;
+            }
+            if (enlarged && (resolveParams.DebugView == 2 || (transfer == 4 && resolveParams.DebugView == 1)))
+            {
+                resolveProxy = ordinaryProxy;
+                resolveAnswer = ordinaryAnswer;
+                resolveParams.Transfer = DlssNrSpatialTransfer(transfer); // Inspect the actual model pair.
+            }
         }
         else
         {
@@ -432,10 +588,16 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
             enlargementStatus.clear();
         }
 
+        // Reuse proxy display with the immutable input actually passed to NR, before unpacking.
+        if (resolveParams.DebugView == 4)
+        {
+            resolveProxy = modelInput;
+            resolveParams.DebugView = 1;
+        }
+
         // Resolve pre-SR inputs without UAV support through an owned scratch and copy-back.
         ID3D12Resource* resolveOriginal = targetSupportsUav ? nr.hdrCopy : target;
-        ID3D12Resource* resolveTarget =
-            targetSupportsUav ? target : nr.hdrCopy;
+        ID3D12Resource* resolveTarget = targetSupportsUav ? target : nr.hdrCopy;
 
         if (targetSupportsUav)
         {
@@ -447,9 +609,13 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
                     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
 
-        const bool resolved = enlargementReady && shader.DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer,
-                                                  resolveOriginal, motionIn, exposureTex, resolveTarget, nullptr);
+        const bool resolved =
+            enlargementReady && shader.DispatchPass(cmdList, resolveParams, resolveProxy, resolveAnswer,
+                                                    resolveOriginal, encoded.exposure, nullptr, resolveTarget, nullptr);
         compositionSucceeded = resolved;
+        if (resizeFieldReadable)
+            Barrier(cmdList, enlarger->input.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
         if (resolved && !targetSupportsUav)
         {
@@ -469,31 +635,46 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         }
 
-        MakeModelWritable(nr.output);
-        if (nr.passScratch != nullptr)
-            MakeModelWritable(nr.passScratch);
-
         if (superDownOk)
-            Barrier(cmdList, nr.outputNative, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        {
+            if (spatial)
+            {
+                for (auto* nativePair : { nr.spatialProxyNative, nr.spatialAnswerNative })
+                    Barrier(cmdList, nativePair, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            }
+            else
+                Barrier(cmdList, nr.outputNative, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        }
 
         // Schedule matched proxy/output capture for delayed readback.
         if (captureFrames.isActive())
         {
-            captureFrames.record(cmdList, device, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                                 target, targetState);
-
-            if (captureFrames.readyToWrite() && captureWriteAtFrame == 0)
-                captureWriteAtFrame = frames + 8;
+            captureFrames.record(cmdList, device, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, target,
+                                 targetState);
         }
     }
     else if (result != NVSDK_NGX_Result_Success)
     {
-        nr.failed = true;
-        nr.reason = "the model refused to run";
-
-        LOG_ERROR("DLSS-NR evaluate returned 0x{:X} ({}); use Retry to recreate the model", (uint32_t) result,
-                  NgxResultName((unsigned int) result));
+        if (spatial)
+        {
+            nr.spatialFallback = true;
+            nr.spatialFallbackReason = "NGX rejected the packed model input";
+            nr.reset = true;
+            modelRunning = false;
+            for (auto& model : nr.models)
+                model.RetryAfterFailure();
+            LOG_WARN("DLSS-NR spatial evaluate returned 0x{:X} ({}); trying ordinary NR next frame", (uint32_t) result,
+                     NgxResultName((unsigned int) result));
+        }
+        else
+        {
+            nr.failed = true;
+            nr.reason = "the model refused to run";
+            LOG_ERROR("DLSS-NR evaluate returned 0x{:X} ({}); use Retry to recreate the model", (uint32_t) result,
+                      NgxResultName((unsigned int) result));
+        }
     }
 
     // Restore all intermediate surfaces to the UAV state expected by the next frame.
@@ -501,36 +682,44 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     if (nr.passScratch != nullptr)
         MakeModelWritable(nr.passScratch);
 
-    Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     if (nr.passClamp != nullptr)
         MakeModelWritable(nr.passClamp);
+
+    if (spatial)
+    {
+        for (auto* packed : { nr.spatialColor, nr.spatialDepth, nr.spatialMotion })
+            Barrier(cmdList, packed, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if (spatialUnpacked)
+            for (auto* unpacked : { nr.spatialProxy, nr.spatialAnswer })
+                Barrier(cmdList, unpacked, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
 
     // Failed evaluations leave the game's original image intact. A successful copy-back writes
     // only the active rectangle and restores both resources before DLSS consumes the image.
     FinishColor(compositionSucceeded);
     if (compositionSucceeded)
         ++nr.successfulDispatches;
+    nr.spatialActive = spatial && compositionSucceeded;
 
-    EndGpuTiming(cmdList, timingQueue);
+    EndGpuTiming(cmdList);
 
     // Restore guide clones to COPY_DEST for the next frame's refresh.
-    if (depthIn == nr.depthClone)
-        Barrier(cmdList, nr.depthClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_COPY_DEST);
+    if (originalDepthIn == nr.depthClone)
+        Barrier(cmdList, nr.depthClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
 
-    if (motionIn == nr.motionClone)
+    if (originalMotionIn == nr.motionClone)
         Barrier(cmdList, nr.motionClone, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_COPY_DEST);
 
-    if (reduced && nr.colorSmall != nullptr)
+    if (reduced && !spatial && nr.colorSmall != nullptr)
         Barrier(cmdList, nr.colorSmall, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     // Leave the staging copy as the next frame expects to find it.
     Barrier(cmdList, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
-    device->Release();
 }

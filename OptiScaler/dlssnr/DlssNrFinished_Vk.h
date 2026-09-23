@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <shaders/dlssnr/DlssNr_Vk.h>
 #include <memory>
 

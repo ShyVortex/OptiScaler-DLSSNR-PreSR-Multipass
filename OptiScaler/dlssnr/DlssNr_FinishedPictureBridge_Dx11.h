@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <d3d11_4.h>
 #include <d3d12.h>
@@ -32,19 +32,31 @@ class Dx11FinishedPictureBridge
     Dx11FinishedPictureBridge(const Dx11FinishedPictureBridge&) = delete;
     Dx11FinishedPictureBridge& operator=(const Dx11FinishedPictureBridge&) = delete;
 
+    bool Idle() const
+    {
+        if (open || failed)
+            return false;
+        if (!completedRoundTrip)
+            return true;
+        const auto completed = fence11->GetCompletedValue();
+        return completed != UINT64_MAX && completed >= completedRoundTrip;
+    }
+
     bool Drain()
     {
         if (open || failed)
             return false;
-        if (!completedRoundTrip || fence11->GetCompletedValue() >= completedRoundTrip)
+        if (Idle())
             return true;
+        if (fence11->GetCompletedValue() == UINT64_MAX)
+            return false;
         HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!event)
             return false;
         const bool ready = SUCCEEDED(fence11->SetEventOnCompletion(completedRoundTrip, event)) &&
                            WaitForSingleObject(event, 5000) == WAIT_OBJECT_0;
         CloseHandle(event);
-        return ready;
+        return ready && Idle();
     }
 
     ~Dx11FinishedPictureBridge()

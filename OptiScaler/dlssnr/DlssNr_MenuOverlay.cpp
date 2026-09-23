@@ -1,7 +1,8 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "DlssNr_MenuOverlay.h"
-#include "DlssNr_ExposureScan.h"
+#include "DlssNr_Status.h"
+#include <shaders/dlssnr/DlssNr_Spatial.h>
 #include <Config.h>
 #include <imgui/imgui.h>
 #include <algorithm>
@@ -9,8 +10,40 @@
 
 namespace DlssNr
 {
+static void RenderSpatialOutlines()
+{
+    const auto& config = *Config::Instance();
+    if (!config.DlssNrEnabled.value_or_default() || !config.DlssNrSpatialCompression.value_or_default() ||
+        (!config.DlssNrSpatialShowCenter.value_or_default() && !config.DlssNrSpatialShowWork.value_or_default()))
+        return;
+    const auto feature = State::Instance().currentFeature;
+    const bool nativeVk = feature && feature->Api() == API::Vulkan && !feature->IsWithDx12();
+    if (!ReadStatus(nativeVk ? Backend::Vulkan : Backend::Dx12).spatialActive)
+        return;
+    const auto screen = ImGui::GetIO().DisplaySize;
+    if (screen.x < 2 || screen.y < 2)
+        return;
+    const auto layout = Spatial::Build(Spatial::ReadSettings(config), static_cast<unsigned>(screen.x),
+                                       static_cast<unsigned>(screen.y), config.DlssNrWorkingScale.value_or_default());
+    if (!layout.active)
+        return;
+    auto* draw = ImGui::GetForegroundDrawList();
+    const auto rectangle = [&](const Spatial::Rect& bounds, ImU32 color)
+    {
+        const ImVec2 lo { bounds.left * screen.x, bounds.top * screen.y };
+        const ImVec2 hi { bounds.right * screen.x, bounds.bottom * screen.y };
+        draw->AddRect(lo, hi, IM_COL32(0, 0, 0, 220), 0, 0, 4.0f);
+        draw->AddRect(lo, hi, color, 0, 0, 2.0f);
+    };
+    if (config.DlssNrSpatialShowWork.value_or_default())
+        rectangle(layout.workBounds, IM_COL32(255, 115, 0, 255));
+    if (config.DlssNrSpatialShowCenter.value_or_default())
+        rectangle(layout.centerBounds, IM_COL32(0, 210, 255, 255));
+}
+
 void RenderNrCompareTags()
 {
+    RenderSpatialOutlines();
     auto* config = Config::Instance();
 
     const uint32_t mode = config->DlssNrCompare.value_or_default();
@@ -24,8 +57,7 @@ void RenderNrCompareTags()
         return;
 
     const bool swap = config->DlssNrCompareSwap.value_or_default();
-    const float split = mode == 1 ? 0.5f
-                                  : std::clamp(config->DlssNrCompareSplit.value_or_default(), 0.0f, 1.0f);
+    const float split = mode == 1 ? 0.5f : std::clamp(config->DlssNrCompareSplit.value_or_default(), 0.0f, 1.0f);
     const float splitX = split * screen.x;
 
     const float scale = std::clamp(config->DlssNrTagScale.value_or_default(), 0.5f, 5.0f);
@@ -64,86 +96,6 @@ void RenderNrCompareTags()
     // out from the split.
     drawTag(leftText, splitX - margin - leftSize.x, ImVec2(0.0f, 0.0f), ImVec2(splitX, screen.y));
     drawTag(rightText, splitX + margin, ImVec2(splitX, 0.0f), ImVec2(screen.x, screen.y));
-}
-
-void RenderExposureScanIndicator(float alpha)
-{
-    using DlssNr::ExposureScan::Verdict;
-
-    if (!Config::Instance()->DlssNrScanMeter.value_or_default())
-        return;
-
-    if (DlssNr::ExposureScan::Where() == Verdict::Off)
-        return;
-
-    int which = 0;
-    float low = 0.0f, high = 0.0f;
-    const float now = DlssNr::ExposureScan::BestValue(&which, &low, &high);
-
-    // Nothing found yet, or no range to place it in: a dim lamp, which says "watching, no reading"
-    // without saying it in words.
-    const bool reading = now > 0.0f && high > low;
-
-    float lit = 0.0f;
-
-    if (reading)
-    {
-        // An exposure falls as the scene brightens, so the value reads backwards unless the buffer
-        // holds the reciprocal -- the same question the anchor asks, answered from the same setting,
-        // because a lamp contradicting the picture would be worse than no lamp.
-        lit = (high - now) / (high - low);
-
-        if (Config::Instance()->DlssNrScanInverted.value_or_default())
-            lit = 1.0f - lit;
-
-        lit = lit < 0.0f ? 0.0f : (lit > 1.0f ? 1.0f : lit);
-    }
-
-    // Red to amber to green. A straight red-to-green fade passes through a muddy brown at the
-    // midpoint, and the midpoint is where most of a session is spent.
-    const ImVec4 dark(0.90f, 0.22f, 0.20f, 1.0f);
-    const ImVec4 mid(0.95f, 0.75f, 0.20f, 1.0f);
-    const ImVec4 bright(0.35f, 0.88f, 0.38f, 1.0f);
-    const ImVec4 idle(0.45f, 0.45f, 0.45f, 1.0f);
-
-    ImVec4 lamp = idle;
-
-    if (reading)
-    {
-        const float t = lit < 0.5f ? lit * 2.0f : (lit - 0.5f) * 2.0f;
-        const ImVec4& a = lit < 0.5f ? dark : mid;
-        const ImVec4& b = lit < 0.5f ? mid : bright;
-        lamp = ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, 1.0f);
-    }
-
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 12.0f, vp->WorkPos.y + 12.0f),
-                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-    ImGui::SetNextWindowBgAlpha(alpha);
-
-    if (ImGui::Begin("DlssNrExposureScan", nullptr,
-                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration |
-                         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing |
-                         ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove))
-    {
-        const float r = ImGui::GetFontSize() * 0.38f;
-        const ImVec2 at = ImGui::GetCursorScreenPos();
-        const ImVec2 centre(at.x + r, at.y + ImGui::GetTextLineHeight() * 0.5f);
-
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        draw->AddCircleFilled(centre, r, ImGui::GetColorU32(lamp), 20);
-        draw->AddCircle(centre, r, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.6f)), 20, 1.5f);
-
-        ImGui::Dummy(ImVec2(r * 2.0f + 6.0f, ImGui::GetTextLineHeight()));
-        ImGui::SameLine();
-
-        if (reading)
-            ImGui::TextColored(lamp, "%3.0f%%  %.5f", lit * 100.0f, now);
-        else
-            ImGui::TextColored(idle, "--");
-    }
-
-    ImGui::End();
 }
 
 } // namespace DlssNr

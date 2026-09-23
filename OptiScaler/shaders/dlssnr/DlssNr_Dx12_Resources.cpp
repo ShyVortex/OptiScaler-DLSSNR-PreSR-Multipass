@@ -3,81 +3,85 @@
 
 auto DlssNr_Dx12::State::ParkNrResource(ID3D12Resource*& resource) -> void
 {
-    if (!resource) return;
+    if (!resource)
+        return;
     auto* retired = resource;
     resource = nullptr;
     lifetime.Retire([retired] { retired->Release(); });
 }
 
-auto DlssNr_Dx12::State::TickNrRetired([[maybe_unused]] uint64_t epoch) -> void
-{ lifetime.Collect(); }
-
-auto DlssNr_Dx12::State::ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed) -> void
+auto DlssNr_Dx12::State::ReleaseSurfacesIfFormatChanged(DXGI_FORMAT modelFormat, DXGI_FORMAT nativeFormat) -> void
 {
-    if (nr.output == nullptr || nr.output->GetDesc().Format == needed)
+    if (nr.output == nullptr ||
+        (nr.output->GetDesc().Format == modelFormat && nr.colorCopy && nr.hdrCopy &&
+         nr.colorCopy->GetDesc().Format == nativeFormat && nr.hdrCopy->GetDesc().Format == nativeFormat))
         return;
 
-    const auto currentFormat = nr.output->GetDesc().Format;
-    LOG_INFO("DLSS-NR adapting surfaces: format {} -> {}",
-             static_cast<uint32_t>(currentFormat), static_cast<uint32_t>(needed));
+    LOG_INFO("DLSS-NR rebuilding surfaces: model format {} -> {}, frame format {}", (int) nr.output->GetDesc().Format,
+             (int) modelFormat, (int) nativeFormat);
 
-    ForgetCalibration();
+    for (auto& model : nr.models)
+        model.RetryAfterFailure();
+    std::fill(std::begin(nr.passCreateFailed), std::end(nr.passCreateFailed), false);
+    modelRunning = false;
 
-    // Check if we have cached surfaces matching the requested format and current dimensions
-    if (nr.altSurfaces.format == needed &&
-        nr.altSurfaces.width == nr.width && nr.altSurfaces.height == nr.height &&
-        nr.altSurfaces.workWidth == nr.workWidth && nr.altSurfaces.workHeight == nr.workHeight)
-    {
-        std::swap(nr.output, nr.altSurfaces.output);
-        std::swap(nr.passScratch, nr.altSurfaces.passScratch);
-        std::swap(nr.passClamp, nr.altSurfaces.passClamp);
-        std::swap(nr.colorCopy, nr.altSurfaces.colorCopy);
-        std::swap(nr.hdrCopy, nr.altSurfaces.hdrCopy);
-        std::swap(nr.activeColor, nr.altSurfaces.activeColor);
-        std::swap(nr.colorSmall, nr.altSurfaces.colorSmall);
-        std::swap(nr.outputNative, nr.altSurfaces.outputNative);
-        nr.altSurfaces.format = currentFormat;
-    }
-    else
-    {
-        ParkNrResource(nr.altSurfaces.output);
-        ParkNrResource(nr.altSurfaces.passScratch);
-        ParkNrResource(nr.altSurfaces.passClamp);
-        ParkNrResource(nr.altSurfaces.colorCopy);
-        ParkNrResource(nr.altSurfaces.hdrCopy);
-        ParkNrResource(nr.altSurfaces.activeColor);
-        ParkNrResource(nr.altSurfaces.colorSmall);
-        ParkNrResource(nr.altSurfaces.outputNative);
-
-        nr.altSurfaces.format = currentFormat;
-        nr.altSurfaces.width = nr.width;
-        nr.altSurfaces.height = nr.height;
-        nr.altSurfaces.workWidth = nr.workWidth;
-        nr.altSurfaces.workHeight = nr.workHeight;
-        nr.altSurfaces.output = nr.output;
-        nr.altSurfaces.passScratch = nr.passScratch;
-        nr.altSurfaces.passClamp = nr.passClamp;
-        nr.altSurfaces.colorCopy = nr.colorCopy;
-        nr.altSurfaces.hdrCopy = nr.hdrCopy;
-        nr.altSurfaces.activeColor = nr.activeColor;
-        nr.altSurfaces.colorSmall = nr.colorSmall;
-        nr.altSurfaces.outputNative = nr.outputNative;
-
-        nr.output = nullptr;
-        nr.passScratch = nullptr;
-        nr.passClamp = nullptr;
-        nr.colorCopy = nullptr;
-        nr.hdrCopy = nullptr;
-        nr.activeColor = nullptr;
-        nr.colorSmall = nullptr;
-        nr.outputNative = nullptr;
-    }
+    for (ID3D12Resource** r : { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.colorSmall,
+                                &nr.outputNative, &nr.activeColor })
+        ParkNrResource(*r);
 
     nr.passScratchFailed = false;
+
     nr.reset = true;
 }
 
-auto DlssNr_Dx12::State::CreateScratch(ID3D12Device* device, DXGI_FORMAT format, unsigned int width, unsigned int height) -> ID3D12Resource*
+void DlssNr_Dx12::State::ReleaseSpatialResources()
+{
+    for (auto** resource : { &nr.spatialColor, &nr.spatialDepth, &nr.spatialMotion, &nr.spatialProxy, &nr.spatialAnswer,
+                             &nr.spatialProxyNative, &nr.spatialAnswerNative })
+        ParkNrResource(*resource);
+}
+
+bool DlssNr_Dx12::State::PrepareSpatialResources(ID3D12Device* device, const DlssNr::Spatial::Layout& layout)
+{
+    const auto matches = [](ID3D12Resource* resource, DXGI_FORMAT format, unsigned w, unsigned h)
+    {
+        if (!resource)
+            return false;
+        const auto desc = resource->GetDesc();
+        return desc.Format == format && desc.Width == w && desc.Height == h;
+    };
+    if (!matches(nr.spatialColor, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.modelW, layout.modelH) ||
+        !matches(nr.spatialDepth, DXGI_FORMAT_R32_FLOAT, layout.modelW, layout.modelH) ||
+        !matches(nr.spatialMotion, DXGI_FORMAT_R32G32_FLOAT, layout.modelW, layout.modelH) ||
+        !matches(nr.spatialProxy, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.ordinaryW, layout.ordinaryH) ||
+        !matches(nr.spatialAnswer, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.ordinaryW, layout.ordinaryH) ||
+        (layout.globalScale > 1.0f &&
+         (!matches(nr.spatialProxyNative, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.nativeW, layout.nativeH) ||
+          !matches(nr.spatialAnswerNative, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.nativeW, layout.nativeH))))
+    {
+        ReleaseSpatialResources();
+        nr.spatialColor = CreateScratch(device, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.modelW, layout.modelH);
+        nr.spatialDepth = CreateScratch(device, DXGI_FORMAT_R32_FLOAT, layout.modelW, layout.modelH);
+        nr.spatialMotion = CreateScratch(device, DXGI_FORMAT_R32G32_FLOAT, layout.modelW, layout.modelH);
+        nr.spatialProxy = CreateScratch(device, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.ordinaryW, layout.ordinaryH);
+        nr.spatialAnswer = CreateScratch(device, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.ordinaryW, layout.ordinaryH);
+        if (layout.globalScale > 1.0f)
+        {
+            nr.spatialProxyNative =
+                CreateScratch(device, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.nativeW, layout.nativeH);
+            nr.spatialAnswerNative =
+                CreateScratch(device, DXGI_FORMAT_R16G16B16A16_FLOAT, layout.nativeW, layout.nativeH);
+        }
+    }
+    const bool ready = nr.spatialColor && nr.spatialDepth && nr.spatialMotion && nr.spatialProxy && nr.spatialAnswer &&
+                       (layout.globalScale <= 1.0f || (nr.spatialProxyNative && nr.spatialAnswerNative));
+    if (!ready)
+        ReleaseSpatialResources();
+    return ready;
+}
+
+auto DlssNr_Dx12::State::CreateScratch(ID3D12Device* device, DXGI_FORMAT format, unsigned int width,
+                                       unsigned int height) -> ID3D12Resource*
 {
     D3D12_HEAP_PROPERTIES heap {};
     heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -95,13 +99,13 @@ auto DlssNr_Dx12::State::CreateScratch(ID3D12Device* device, DXGI_FORMAT format,
     desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     ID3D12Resource* res = nullptr;
-    device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                                    nullptr, IID_PPV_ARGS(&res));
+    device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                    IID_PPV_ARGS(&res));
     return res;
 }
 
 auto DlssNr_Dx12::State::Barrier(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* res, D3D12_RESOURCE_STATES from,
-                 D3D12_RESOURCE_STATES to) -> void
+                                 D3D12_RESOURCE_STATES to) -> void
 {
     if (from == to)
         return;
@@ -139,8 +143,7 @@ auto DlssNr_Dx12::State::TypedGuideFormat(DXGI_FORMAT f) -> DXGI_FORMAT
     }
 }
 
-auto DlssNr_Dx12::State::IsTypeless(DXGI_FORMAT f) -> bool
-{ return TypedGuideFormat(f) != f; }
+auto DlssNr_Dx12::State::IsTypeless(DXGI_FORMAT f) -> bool { return TypedGuideFormat(f) != f; }
 
 auto DlssNr_Dx12::State::CreateGuideClone(ID3D12Device* device, ID3D12Resource* source) -> ID3D12Resource*
 {
@@ -158,7 +161,7 @@ auto DlssNr_Dx12::State::CreateGuideClone(ID3D12Device* device, ID3D12Resource* 
 }
 
 auto DlssNr_Dx12::State::ReadableGuide(ID3D12Device* device, ID3D12GraphicsCommandList* cmdList, ID3D12Resource* source,
-                                  ID3D12Resource** clone) -> ID3D12Resource*
+                                       ID3D12Resource** clone) -> ID3D12Resource*
 {
     if (source == nullptr || !IsTypeless(source->GetDesc().Format))
         return source;
@@ -196,57 +199,29 @@ auto DlssNr_Dx12::State::ReadableGuide(ID3D12Device* device, ID3D12GraphicsComma
     return *clone;
 }
 
-auto DlssNr_Dx12::State::FormatCanHoldLinearHdr(DXGI_FORMAT format) -> bool
-{
-    switch (format)
-    {
-    case DXGI_FORMAT_R16G16B16A16_FLOAT:
-    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
-    case DXGI_FORMAT_R32G32B32A32_FLOAT:
-    case DXGI_FORMAT_R32G32B32A32_TYPELESS:
-    case DXGI_FORMAT_R32G32B32_FLOAT:
-    case DXGI_FORMAT_R11G11B10_FLOAT:
-        return true;
-    default:
-        return false;
-    }
-}
-
 auto DlssNr_Dx12::State::GetResource(NVSDK_NGX_Parameter* params, const char* a, const char* b) -> ID3D12Resource*
 {
-    ID3D12Resource* res = nullptr;
-
-    if (params->Get(a, &res) == NVSDK_NGX_Result_Success && res != nullptr)
-        return res;
-
-    res = nullptr;
-
-    if (params->Get(b, &res) == NVSDK_NGX_Result_Success && res != nullptr)
-        return res;
-
-    // The same key again, as a plain pointer.
-    //
-    // NVSDK_NGX_Parameter has a typed setter per resource kind and an untyped one, and on a real NGX
-    // parameter block those are separate slots: what goes in through Set(name, void*) does not come
-    // back out of Get(name, ID3D12Resource**). A game running its own D3D12 upscaler sets these
-    // typed, so the typed read above is enough and always was.
-    //
-    // Both of OptiScaler's bridges write them untyped. IFeature_Dx11wDx12 and IFeature_VkwDx12 turn
-    // the game's D3D11 textures or Vulkan images into D3D12 resources and hand them over with
-    // Set(name, (void*) resource) -- so the typed read came back null a few lines after the resource
-    // had been written, and the pass quietly did nothing. That is the whole reason this never ran in
-    // a DirectX 11 or Vulkan game.
-    void* untyped = nullptr;
-
-    if (params->Get(a, &untyped) == NVSDK_NGX_Result_Success && untyped != nullptr)
-        return static_cast<ID3D12Resource*>(untyped);
-
-    untyped = nullptr;
-
-    if (params->Get(b, &untyped) == NVSDK_NGX_Result_Success && untyped != nullptr)
-        return static_cast<ID3D12Resource*>(untyped);
-
+    // Preserve typed-key precedence; DX11/Vulkan bridges can supply untyped resources.
+    for (const char* name : { a, b })
+    {
+        ID3D12Resource* resource = nullptr;
+        if (params->Get(name, &resource) == NVSDK_NGX_Result_Success && resource)
+            return resource;
+    }
+    for (const char* name : { a, b })
+    {
+        void* resource = nullptr;
+        if (params->Get(name, &resource) == NVSDK_NGX_Result_Success && resource)
+            return static_cast<ID3D12Resource*>(resource);
+    }
     return nullptr;
+}
+
+void DlssNr_Dx12::State::ReleaseSupersamplers()
+{
+    for (auto** scaler : { &nr.superUp, &nr.superDown, &nr.spatialProxyDown })
+        if (auto* retired = std::exchange(*scaler, nullptr))
+            lifetime.Retire([retired] { delete retired; });
 }
 
 auto DlssNr_Dx12::State::ReleaseResources() -> void
@@ -263,124 +238,34 @@ auto DlssNr_Dx12::State::ReleaseResources() -> void
     std::fill(std::begin(nr.passCreateFailed), std::end(nr.passCreateFailed), false);
     modelRunning = false;
 
-    if (nr.output != nullptr)
-    {
-        ParkNrResource(nr.output);
-    }
-
-    ParkNrResource(nr.passScratch);
-    ParkNrResource(nr.passClamp);
+    for (auto** resource :
+         { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.activeColor, &nr.colorSmall })
+        ParkNrResource(*resource);
+    ReleaseSpatialResources();
+    nr.spatialSignatureValid = false;
+    nr.spatialFallback = false;
+    nr.spatialActive = false;
     nr.passScratchFailed = false;
 
-    if (nr.colorCopy != nullptr)
-    {
-        ParkNrResource(nr.colorCopy);
-    }
+    ReleaseSupersamplers();
 
-    if (nr.hdrCopy != nullptr)
-    {
-        ParkNrResource(nr.hdrCopy);
-    }
+    ParkNrResource(nr.outputNative);
 
-    if (nr.activeColor != nullptr)
-    {
-        ParkNrResource(nr.activeColor);
-    }
-
-    if (nr.colorSmall != nullptr)
-    {
-        ParkNrResource(nr.colorSmall);
-    }
-
-    if (nr.superUp != nullptr)
-    {
-        lifetime.Retire([up = nr.superUp] { delete up; });
-        nr.superUp = nullptr;
-    }
-
-    if (nr.superDown != nullptr)
-    {
-        lifetime.Retire([down = nr.superDown] { delete down; });
-        nr.superDown = nullptr;
-    }
-
-    if (nr.outputNative != nullptr)
-    {
-        ParkNrResource(nr.outputNative);
-    }
-
-    if (nr.heldColor != nullptr)
-    {
-        ParkNrResource(nr.heldColor);
-    }
+    ParkNrResource(nr.exposureMeter);
+    ParkNrResource(nr.exposure);
+    nr.exposureReadable = false;
+    ParkNrResource(nr.heldColor);
     nr.heldActive = false;
 
-    ParkNrResource(nr.altSurfaces.output);
-    ParkNrResource(nr.altSurfaces.passScratch);
-    ParkNrResource(nr.altSurfaces.passClamp);
-    ParkNrResource(nr.altSurfaces.colorCopy);
-    ParkNrResource(nr.altSurfaces.hdrCopy);
-    ParkNrResource(nr.altSurfaces.activeColor);
-    ParkNrResource(nr.altSurfaces.colorSmall);
-    ParkNrResource(nr.altSurfaces.outputNative);
-    nr.altSurfaces = {};
+    ParkNrResource(nr.depthClone);
 
-    if (nr.meter != nullptr)
-    {
-        ParkNrResource(nr.meter);
-    }
-
-    if (nr.calib != nullptr)
-    {
-        ParkNrResource(nr.calib);
-    }
-
-    for (auto& r : nr.calibReadback)
-    {
-        if (r != nullptr)
-        {
-            ParkNrResource(r);
-        }
-    }
-
-    nr.calibFrames = 0;
-    nr.calibCount = 0;
-    nr.calibSuggestion = 0.0f;
-    nr.calibSteadiness = 0.0f;
-    nr.calibUsable = false;
-    nr.calibWhy = "measuring...";
-
-    for (auto& rb : nr.meterReadback)
-    {
-        if (rb != nullptr)
-        {
-            ParkNrResource(rb);
-        }
-    }
-
-    // The slots these flags describe have just been released, so nothing may vouch for what the next
-    // buffers happen to contain. gameExposure is deliberately NOT cleared here: a recreate is a
-    // transition within the same scene, and dropping to the slider for a few frames would be the
-    // flicker the held value exists to prevent. The user switching the option off is the case where
-    // the held value has to go, and that is handled at the edge in Dispatch.
-    for (bool& valid : nr.meterExposureValid)
-        valid = false;
-
-    nr.meterFrames = 0;
-
-    if (nr.depthClone != nullptr)
-    {
-        ParkNrResource(nr.depthClone);
-    }
-
-    if (nr.motionClone != nullptr)
-    {
-        ParkNrResource(nr.motionClone);
-    }
+    ParkNrResource(nr.motionClone);
 
     captureFrames.release();
-    if (auto* timer = gpuTime.release()) lifetime.Retire([timer] { delete timer; });
-    if (auto* timer = ngxTime.release()) lifetime.Retire([timer] { delete timer; });
+    if (auto* timer = gpuTime.release())
+        lifetime.Retire([timer] { delete timer; });
+    if (auto* timer = ngxTime.release())
+        lifetime.Retire([timer] { delete timer; });
     lastNgxTime.reset();
     lastGpuTime.reset();
 }

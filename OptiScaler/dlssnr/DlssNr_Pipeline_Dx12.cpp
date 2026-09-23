@@ -141,9 +141,10 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
     if (!std::isfinite(frame.MvScaleY) || frame.MvScaleY == 0.0f)
         frame.MvScaleY = 1.0f;
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, &frame.PreExposure);
+    frame.ExposureTexture = GetUpscalerResource_Dx12(parameters, NVSDK_NGX_Parameter_ExposureTexture);
+    frame.ExposureState = states.exposure;
     if (frame.PreExposure <= 1e-6f)
         frame.PreExposure = 1.0f;
-    frame.ExposureTexture = exposure;
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &frame.RenderSubrectWidth);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &frame.RenderSubrectHeight);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);

@@ -6,7 +6,6 @@
 #include "NgxFeatureRegistry.h"
 #include "NVNGX_Parameter.h"
 #include "proxies/NVNGX_Proxy.h"
-#include "dlssnr/DlssNr_ExposureScan.h"
 #include <upscalers/dlss/DLSSFeature_Dx12.h>
 #include <shaders/output_scaling/OS_Dx12.h>
 
@@ -451,82 +450,80 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Init_with_ProjectID(
 
 #pragma region DLSS Shutdown Calls
 
-NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Shutdown(void)
+static NVSDK_NGX_Result ShutdownDx12(ID3D12Device* requestedDevice)
 {
-    DlssNr::ExposureScan::ReleaseTrackedResources();
+    if (State::Instance().isShuttingDown || shutdown)
+        return NVSDK_NGX_Result_Success;
+    if (!State::Instance().nvngxDx12Inited && !NVNGXProxy::IsDx12Inited() && Dx12Contexts.empty())
+        return NVSDK_NGX_Result_Success;
     shutdown = true;
-    State::Instance().nvngxDx12Inited = false;
+    struct ResetShutdown
+    {
+        ~ResetShutdown() { shutdown = false; }
+    } resetShutdown;
+
+    LOG_INFO("NGX D3D12 shutdown: retiring NR GPU owners");
 
     State::Instance().currentFeature = nullptr;
-    // Retire owned NR models before shutting down the NGX device they were created on.
-    Dx12Contexts.clear();
-    HandleToFeature.Clear();
-
-    // Unhooking and cleaning stuff causing issues during shutdown.
-    // Disabled for now to check if it cause any issues
-    // UnhookAll();
-    DLSSFeatureDx12::Shutdown(D3D12Device);
-    D3D12Device = nullptr;
-
-    // Added `&& !State::Instance().isShuttingDown` hack for crash on exit
-    if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::IsDx12Inited() &&
-        NVNGXProxy::D3D12_Shutdown() != nullptr && !State::Instance().isShuttingDown)
-    {
-        auto result = NVNGXProxy::D3D12_Shutdown()();
-        NVNGXProxy::SetDx12Inited(false);
-    }
-
-    // Unhooking and cleaning stuff causing issues during shutdown.
-    // Disabled for now to check if it cause any issues
-    // HooksDx::UnHook();
-
-    // Disabled to prevent crash
     if (State::Instance().currentFG != nullptr && State::Instance().activeFgInput == FGInput::Upscaler)
     {
-        if (State::Instance().isShuttingDown)
-            State::Instance().currentFG->Shutdown();
-        else
-            State::Instance().currentFG->DestroyFGContext();
+        State::Instance().currentFG->Deactivate();
+    }
 
+    // Keep the parent upscalers alive until their NR submissions are known complete.
+    for (auto& [id, entry] : Dx12Contexts)
+        if (entry.feature)
+            entry.feature->RetireNeuralRendering();
+    if (!DlssNr::Shutdown())
+        return NVSDK_NGX_Result_Fail;
+
+    if (State::Instance().currentFG != nullptr && State::Instance().activeFgInput == FGInput::Upscaler)
+    {
+        State::Instance().currentFG->DestroyFGContext();
         State::Instance().clearCapturedHudlesses = true;
     }
 
-    shutdown = false;
-
-    if (State::Instance().activeFgNvngx != FGNvngxReplacement::None)
-    {
-        Nvngx_FG::D3D12_Shutdown();
-    }
-
-    State::Instance().nvngxDx12Inited = false;
-
-    return NVSDK_NGX_Result_Success;
-}
-
-NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Shutdown1(ID3D12Device* InDevice)
-{
-    DlssNr::ExposureScan::ReleaseTrackedResources();
-    shutdown = true;
-    State::Instance().nvngxDx12Inited = false;
-    State::Instance().currentFeature = nullptr;
     Dx12Contexts.clear();
     HandleToFeature.Clear();
 
     if (State::Instance().activeFgNvngx != FGNvngxReplacement::None)
     {
-        Nvngx_FG::D3D12_Shutdown1(InDevice);
+        if (requestedDevice)
+            Nvngx_FG::D3D12_Shutdown1(requestedDevice);
+        else
+            Nvngx_FG::D3D12_Shutdown();
     }
 
-    // Added `&& !State::Instance().isShuttingDown` hack for crash on exit
-    if (Config::Instance()->DLSSEnabled.value_or_default() && NVNGXProxy::IsDx12Inited() &&
-        NVNGXProxy::D3D12_Shutdown1() != nullptr && !State::Instance().isShuttingDown)
+    auto result = NVSDK_NGX_Result_Success;
+    if (NVNGXProxy::IsDx12Inited())
     {
-        auto result = NVNGXProxy::D3D12_Shutdown1()(InDevice);
+        LOG_INFO("NGX D3D12 shutdown: NR drained; stopping the NVIDIA runtime");
+        const auto stop = NVNGXProxy::D3D12_Shutdown();
+        const auto stopDevice = NVNGXProxy::D3D12_Shutdown1();
+        // Choose exactly one entry point, including runtimes exposing only one variant.
+        if (requestedDevice && stopDevice)
+            result = stopDevice(requestedDevice);
+        else if (stop)
+            result = stop();
+        else if (stopDevice)
+            result = stopDevice(requestedDevice);
+        else
+            result = NVSDK_NGX_Result_Fail;
+        if (NVSDK_NGX_FAILED(result))
+            return result;
         NVNGXProxy::SetDx12Inited(false);
     }
 
-    return NVSDK_NGX_D3D12_Shutdown();
+    DLSSFeatureDx12::Shutdown(requestedDevice ? requestedDevice : D3D12Device);
+    D3D12Device = nullptr;
+    State::Instance().nvngxDx12Inited = false;
+    LOG_INFO("NGX D3D12 shutdown complete; NR GPU owners released");
+    return result;
 }
+
+NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Shutdown(void) { return ShutdownDx12(nullptr); }
+
+NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Shutdown1(ID3D12Device* InDevice) { return ShutdownDx12(InDevice); }
 
 #pragma endregion
 
@@ -905,17 +902,12 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_CreateFeature(ID3D12GraphicsComma
 
 NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_ReleaseFeature(NVSDK_NGX_Handle* InHandle)
 {
+    if (State::Instance().isShuttingDown)
+        return NVSDK_NGX_Result_Success;
     LOG_FUNC();
 
     if (!InHandle)
         return NVSDK_NGX_Result_Success;
-
-    // Before any feature's resources are freed, drop the exposure scan's references to whatever it
-    // captured. The scan AddRef's candidates and never released them; a Streamline/DLSS-D resource it
-    // pinned would otherwise be used after its heap is freed here -- the Cyberpunk device-removal.
-    // Capture is gated on NR being enabled (not the scan source), so this drops whatever was captured
-    // whenever NR is on; a no-op only when NR is off.
-    DlssNr::ExposureScan::ReleaseTrackedResources();
 
     auto handleId = InHandle->Id;
 

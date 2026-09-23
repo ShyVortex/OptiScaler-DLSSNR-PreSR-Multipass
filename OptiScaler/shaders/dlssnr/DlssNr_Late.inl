@@ -369,7 +369,6 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
         frame.SubmissionEpoch = epoch;
         Barrier(cmd, slot.depth.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         Barrier(cmd, slot.motion.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        DlssNrNative::SetPrecision(Config::Instance()->DlssNrPrecision.value_or_default());
         ID3D12Resource* nrColor = color.Get();
         bool colorReady = true;
         DlssNrConstants conversion {};

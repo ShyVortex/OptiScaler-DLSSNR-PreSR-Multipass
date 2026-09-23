@@ -45,4 +45,5 @@ class IFeature_Dx12 : public virtual IFeature
     IFeature_Dx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters);
 
     ~IFeature_Dx12();
+    void RetireNeuralRendering();
 };

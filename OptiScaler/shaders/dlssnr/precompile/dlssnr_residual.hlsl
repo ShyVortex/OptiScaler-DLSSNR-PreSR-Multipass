@@ -1,21 +1,7 @@
-// ResidualAcrossRR v2 -- the MV-reprojected temporal accumulator for the pre-SR NR residual.
-//
-// Deliberately a SEPARATE shader from dlssnr.hlsl. Regenerating dlssnr.hlsl's blob with a current
-// dxc produces materially different DXIL from the committed one (older compiler), and that shader
-// carries every NR path -- post-SR, pre-SR, RR, DeferredDLSS. These two experimental
-// modes get their own tiny blob and a second compute PSO instead, so the battle-tested one is
-// never touched. The cbuffer and bindings mirror dlssnr.hlsl exactly so DlssNr_Dx12's existing
-// root signature and descriptor table are reused as-is; only gResidualBlend is appended, and it
-// fits inside DlssNrConstants' existing 256-byte alignment with no size change.
-//
-//   gMode == 0  Accumulate: (edited - original) blended into the MV-reprojected history layer.
-//               history_t = lerp( reproject(history_{t-1}), edited - original, blend )
-//               The per-frame ray-trace noise term of (edited - original) is temporally
-//               uncorrelated and averages to zero; the enhancement term follows geometry and
-//               persists. Invalid reprojection (off-screen / bad MV) -> the
-//               history is treated as zero at that pixel and rebuilds over the next frames.
-//   gMode == 1  Apply: base + delta * gTransferStrength, clamped non-negative. Run after RR+SR
-//               with the upscaled history layer as the delta.
+// MV-reprojected temporal accumulation of the pre-SR NR residual.
+// Mode 0 blends (edited - original) into history; invalid reprojection fades in from zero.
+// Mode 1 applies the signed residual after upscaling.
+// Bindings match the main NR shader; appended history fields fit its existing constant-buffer allocation.
 
 #ifdef VK_MODE
 [[vk::binding(0, 0)]]
@@ -45,8 +31,8 @@ cbuffer Params : register(b0)
     float gDebugScale;
     uint  gReversibleMode;
     uint  gApplyModel;
-    uint  gUseGameExposure;
-    float gExposurePreMul;
+    uint  gReserved;
+    float gResidualScale;
     uint  gSkinProtection;
     uint  gShowSkinMask;
     float gSkinDetail;
@@ -57,6 +43,7 @@ cbuffer Params : register(b0)
     uint gResidualHistoryValid;
     uint gResidualMotionBaseX;
     uint gResidualMotionBaseY;
+    float gReplaceDetailUnused, gModelWorkScaleUnused, gResidualConfidenceSensitivity;
 };
 
 // Same registers and the same SPIR-V binding numbers as dlssnr.hlsl, including the slots these
@@ -128,6 +115,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         // Invalid reprojection: history is 0, so the pixel fades in from no edit at the normal blend
         // rate over the next frames. A cold start/cut also fades in, without sampling uninitialized history.
         float a = clamp(gResidualBlend, 0.0, 1.0);
+        if (gResidualConfidenceSensitivity > 0.0)
+            a = lerp(a, 1.0, saturate(length(delta - history) / gResidualConfidenceSensitivity));
 
         gTarget[id.xy] = float4(lerp(history, delta, a), 1.0);
         return;

@@ -5,7 +5,6 @@
 
 #include "IFeature_Dx12.h"
 #include "State.h"
-#include <dlssnr/DlssNr_ExposureScan.h>
 #include <dlssnr/DlssNr_Pipeline_Dx12.h>
 
 void IFeature_Dx12::ResourceBarrier(ID3D12GraphicsCommandList* InCommandList, ID3D12Resource* InResource,
@@ -397,13 +396,23 @@ IFeature_Dx12::IFeature_Dx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InPar
 
 IFeature_Dx12::~IFeature_Dx12()
 {
-    DlssNr::ExposureScan::ReleaseTrackedResources();
     if (State::Instance().isShuttingDown)
+    {
+        // Returning alone still runs unique_ptr destructors under the loader lock.
+        NeuralRendering.release();
+        OutputScaler.release();
+        RCAS.release();
+        Bias.release();
+        Magnifier.release();
+        UpscalerTime.release();
         return;
+    }
 
     Imgui.reset();
     OutputScaler.reset();
     RCAS.reset();
     Bias.reset();
-    DlssNr_Dx12::Retire(std::move(NeuralRendering));
+    RetireNeuralRendering();
 }
+
+void IFeature_Dx12::RetireNeuralRendering() { DlssNr_Dx12::Retire(std::move(NeuralRendering)); }

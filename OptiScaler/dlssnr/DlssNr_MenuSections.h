@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <imgui/imgui.h>
 
@@ -22,11 +22,8 @@ inline void HelpMarker(const char* tip)
     }
 }
 
-
-void RenderPlacement(Config* config, float menuResScale);
-void RenderStatus(Config* config, float menuResScale);
-void RenderInput(Config* config, float menuResScale);
-void RenderModel(Config* config, float menuResScale);
-void RenderBlend(Config* config, float menuResScale);
-void RenderInspect(Config* config, float menuResScale);
+void RenderInput(Config* config);
+void RenderModel(Config* config);
+void RenderBlend(Config* config);
+void RenderInspect(Config* config);
 } // namespace DlssNr::MenuSections

@@ -25,18 +25,21 @@
 #include "SysUtils.h"
 #include <shaders/Shader_Vk.h>
 #include "DlssNr_Common.h"
+#include "DlssNr_Spatial.h"
+#include <dlssnr/DlssNr_Image_Vk.h>
 #include <memory>
 
 namespace DlssNr
 {
 class ModelVk;
 class FinishedVk;
-}
+} // namespace DlssNr
 
 // NGX's Vulkan guide wrappers also state whether the image supports storage access.
 // Keep that metadata alongside the shared frame properties when rebuilding explicit resources.
 struct DlssNrFrameInfo_Vk : DlssNrFrameInfo
 {
+    VkImageInfo Exposure {};
     bool DepthReadWrite = false;
     bool MotionReadWrite = false;
     unsigned int ColorSubrectBaseX = 0;
@@ -45,32 +48,34 @@ struct DlssNrFrameInfo_Vk : DlssNrFrameInfo
 
 class DlssNr_Vk : public Shader_Vk
 {
-    // Enough slots for several dispatches per frame across the frames that can be in flight. Encode
-    // and resolve are two; the debug views and the exposure fetch are the others.
-    static constexpr uint32_t kSlotsPerFrame = 12;
+    // Worst finished-picture frame: one clean copy before the seam, two captured guides,
+    // two colour conversions, then a copy and nine model/composition dispatches (including
+    // exposure and spatial packing). Clamp layers reuse their two immutable slots: 15 total.
+    static constexpr uint32_t kSlotsPerFrame = 16;
     static constexpr uint32_t kFramesInFlight = 4;
     static constexpr uint32_t kSlots = kSlotsPerFrame * kFramesInFlight;
 
     std::unique_ptr<DlssNr::ModelVk> _model;
     std::unique_ptr<DlssNr::FinishedVk> _finished;
     VkPipeline _finishedPipeline = VK_NULL_HANDLE;
+    VkPipeline _spatialPipeline = VK_NULL_HANDLE;
+    VkPipeline _spatialGuidesPipeline = VK_NULL_HANDLE;
     VkImageLayout _intermediateLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    VkDeviceSize _slotStride = 0;   // sizeof(DlssNrConstants), rounded up to the device's alignment
-    uint32_t _slot = 0;             // next slot to hand out, wrapping
+    VkDeviceSize _slotStride = 0; // sizeof(DlssNrConstants), rounded up to the device's alignment
+    uint32_t _slot = 0;           // next slot to hand out, wrapping
 
     // Stands in for a resource a given mode does not read. One pixel, never sampled for its content,
     // present only because Vulkan will not accept an unwritten binding.
-    VkImage _dummyImage = VK_NULL_HANDLE;
-    VkDeviceMemory _dummyMemory = VK_NULL_HANDLE;
-    VkImageView _dummyView = VK_NULL_HANDLE;
-    bool _dummyReady = false;
+    DlssNr::ImageVk _dummy;
 
     bool CreateDummy(VkCommandBuffer cmdList);
 
     void WriteDescriptors(VkDescriptorSet set, VkDeviceSize constantOffset, VkImageView source, VkImageView model,
                           VkImageView original, VkImageView motion, VkImageView target, VkImageView keep,
-                          VkImageLayout sourceLayout, VkImageLayout motionLayout);
+                          VkImageLayout sourceLayout, VkImageLayout motionLayout,
+                          VkImageLayout modelLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VkImageLayout originalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
   public:
     DlssNr_Vk(std::string InName, VkDevice InDevice, VkPhysicalDevice InPhysicalDevice);
@@ -87,6 +92,12 @@ class DlssNr_Vk : public Shader_Vk
                   VkImageLayout inputLayout = VK_IMAGE_LAYOUT_GENERAL, bool* modelRan = nullptr);
     void CaptureFinished(VkCommandBuffer cmd, const VkImageInfo& depth, const VkImageInfo& motion,
                          const DlssNrFrameInfo_Vk& frame, VkInstance instance);
+    bool SpatialReady() const { return _spatialPipeline && _spatialGuidesPipeline; }
+    bool DispatchSpatial(VkCommandBuffer cmd, const DlssNr::Spatial::Constants& constants, VkImageView source,
+                         VkImageView second, VkImageView third, VkImageView target, VkImageView keep,
+                         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                         VkImageLayout secondLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                         VkImageLayout thirdLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     // One dispatch of the composition shader.
     //

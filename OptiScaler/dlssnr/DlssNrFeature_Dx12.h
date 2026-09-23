@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "DlssNr_Status.h"
 #include <d3d12.h>
@@ -11,6 +11,9 @@ namespace DlssNr
 {
 inline constexpr unsigned int MaxPassCount = 30;
 inline constexpr unsigned int DefaultMaxPassCount = 3;
+inline constexpr GUID FinishedColorSpaceKey = {
+    0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 }
+};
 
 // Public callbacks route through registered upscaler owners. They do not own GPU state.
 std::string FinishedPictureStatus();
@@ -22,16 +25,7 @@ void ApplyToStreamlinePicture(IDXGISwapChain* swapchain, ID3D12Resource* picture
 void ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain);
 void FinishedPictureColorSpace(IDXGISwapChain* swapchain, DXGI_COLOR_SPACE_TYPE colorSpace);
 
-// Suggested exposure calibration and steadiness; the user chooses whether to apply it.
-struct CalibrationReading
-{
-    float suggestion = 0.0f;
-    float steadiness = 0.0f;
-    unsigned long long samples = 0;
-    bool usable = false;
-    const char* why = "";
-};
-CalibrationReading Calibration();
 std::string DeferredDlssStatus();
-void Shutdown();
+// Outside DllMain only. Returns false rather than releasing a runtime with unresolved owners/work.
+bool Shutdown();
 } // namespace DlssNr
