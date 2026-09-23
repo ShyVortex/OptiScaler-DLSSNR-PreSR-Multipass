@@ -6,7 +6,6 @@
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
 #include <nvapi/NvApiHooks.h>
-#include <dlssnr/DlssNr_ExposureScan.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -1669,14 +1668,8 @@ void MenuCommon::BeginMenuFrameIfNeeded(RenderMenuContext& ctx)
     auto& newFrame = ctx.newFrame;
 
     // New frame check
-    // The lamp is drawn while the menu is closed, which is the whole point of it. Tied to its own
-    // setting and nothing else: an overlay that appears because a scan is running, rather than
-    // because someone asked for it, is an overlay nobody asked for.
-    const bool scanIndicator = config->DlssNrScanMeter.value_or_default() &&
-                               DlssNr::ExposureScan::Where() != DlssNr::ExposureScan::Verdict::Off;
-
     if ((!config->DisableSplash.value_or_default() && now > splashStart && now < splashLimit) ||
-        config->ShowFps.value_or_default() || _isVisible || ImGui::notifications.size() > 0 || scanIndicator ||
+        config->ShowFps.value_or_default() || _isVisible || ImGui::notifications.size() > 0 ||
         (config->DlssNrCompare.value_or_default() != 0 && config->DlssNrCompareTags.value_or_default()))
     {
         if (!_isUWP)

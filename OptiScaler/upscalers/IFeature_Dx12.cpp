@@ -5,7 +5,6 @@
 
 #include "IFeature_Dx12.h"
 #include "State.h"
-#include <dlssnr/DlssNr_ExposureScan.h>
 #include <dlssnr/DlssNr_Pipeline_Dx12.h>
 
 void IFeature_Dx12::ResourceBarrier(ID3D12GraphicsCommandList* InCommandList, ID3D12Resource* InResource,
