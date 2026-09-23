@@ -962,6 +962,9 @@
     <ClInclude Include="gpu_time\GpuTime_Dx11.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gpu_time\Vitals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shaders\magnifier\Magnifier_Vk.h">
       <Filter>Header Files</Filter>
     </ClInclude>

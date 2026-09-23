@@ -1,34 +1,25 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
 
-DlssNr::Proxy::Settings DlssNr_Dx12::State::ModelSettings(const Config& cfg, unsigned int pass)
-{
-    const auto tuning = PassTuning(cfg, pass);
-    return { PassPreset(cfg, pass), PassStyle(cfg, pass), tuning.intensity, tuning.structure,
-             tuning.tone, tuning.skin, tuning.autoMask };
-}
-
 bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device,
-                                        const DlssNrFrameInfo& frame, const D3D12_RESOURCE_DESC& desc,
-                                        DlssNr::ColorExtent native, DlssNr::ColorExtent work,
-                                        float workScale, unsigned int requestedPasses)
+                                          const DlssNrFrameInfo& frame, const D3D12_RESOURCE_DESC& desc,
+                                          DlssNr::ColorExtent native, DlssNr::ColorExtent work, float workScale,
+                                          unsigned int requestedPasses, bool spatial)
 {
     const auto& cfg = *Config::Instance();
     const auto width = native.width, height = native.height;
     const auto workWidth = work.width, workHeight = work.height;
     const bool cropColor = frame.BeforeUpscale && (width != desc.Width || height != desc.Height);
     const bool reduced = workWidth != width || workHeight != height;
-    ReleaseSurfacesIfFormatChanged(desc.Format);
+    const auto modelFormat = spatial ? DXGI_FORMAT_R16G16B16A16_FLOAT : desc.Format;
+    ReleaseSurfacesIfFormatChanged(modelFormat, desc.Format);
 
     const bool resolutionChanged =
         nr.width != width || nr.height != height || nr.workWidth != workWidth || nr.workHeight != workHeight;
-    const bool placementChanged = nr.width != 0 && (nr.beforeUpscale != frame.BeforeUpscale ||
-                                                    nr.rayReconstruction != frame.RayReconstruction);
+    const bool placementChanged =
+        nr.width != 0 && (nr.beforeUpscale != frame.BeforeUpscale || nr.rayReconstruction != frame.RayReconstruction);
 
-    // The model reads its tuning once, while the feature is built, so a changed setting only takes
-    // effect when the feature is rebuilt. TuningMatchesFeature was written to notice that and then
-    // never called, which is why every one of these controls appeared to do nothing until something
-    // else -- a resolution change -- happened to force a rebuild by accident.
+    // Tuning changes require rebuilding the feature, but not its scratch textures.
     const bool tuningChanged = !TuningMatchesFeature(cfg, requestedPasses);
 
     if (resolutionChanged || placementChanged || (nr.models[0].HasFeature() && tuningChanged))
@@ -45,9 +36,6 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
         // resources away for it would mean a reallocation every time a slider moves.
         if (resolutionChanged || placementChanged)
         {
-            if (placementChanged)
-                ForgetCalibration();
-
             ParkNrResource(nr.output);
             ParkNrResource(nr.passScratch);
             ParkNrResource(nr.passClamp);
@@ -57,22 +45,12 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
             ParkNrResource(nr.outputNative);
             ParkNrResource(nr.activeColor);
             nr.passScratchFailed = false;
-
-            ParkNrResource(nr.altSurfaces.output);
-            ParkNrResource(nr.altSurfaces.passScratch);
-            ParkNrResource(nr.altSurfaces.passClamp);
-            ParkNrResource(nr.altSurfaces.colorCopy);
-            ParkNrResource(nr.altSurfaces.hdrCopy);
-            ParkNrResource(nr.altSurfaces.activeColor);
-            ParkNrResource(nr.altSurfaces.colorSmall);
-            ParkNrResource(nr.altSurfaces.outputNative);
-            nr.altSurfaces = {};
         }
     }
 
     if (nr.output == nullptr)
     {
-        nr.output = CreateScratch(device, desc.Format, workWidth, workHeight);
+        nr.output = CreateScratch(device, modelFormat, workWidth, workHeight);
         nr.colorCopy = CreateScratch(device, desc.Format, width, height);
         nr.hdrCopy = CreateScratch(device, desc.Format, width, height);
         nr.workWidth = workWidth;
@@ -88,9 +66,18 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
         nr.activeColor = CreateScratch(device, desc.Format, width, height);
     if (cropColor && nr.activeColor == nullptr)
     {
-        nr.failed = true;
-        nr.reason = "the pre-SR active colour staging texture could not be allocated";
-        LOG_ERROR("DLSS-NR unavailable: {}", nr.reason);
+        if (spatial)
+        {
+            nr.spatialFallback = true;
+            nr.spatialFallbackReason = "pre-SR active colour staging texture could not be allocated";
+            modelRunning = false;
+        }
+        else
+        {
+            nr.failed = true;
+            nr.reason = "the pre-SR active colour staging texture could not be allocated";
+            LOG_ERROR("DLSS-NR unavailable: {}", nr.reason);
+        }
         return false;
     }
 
@@ -104,8 +91,8 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
     }
     else if (nr.passScratch == nullptr && !nr.passScratchFailed)
     {
-        nr.passScratch = CreateScratch(device, desc.Format, workWidth, workHeight);
-        nr.passClamp = CreateScratch(device, desc.Format, workWidth, workHeight);
+        nr.passScratch = CreateScratch(device, modelFormat, workWidth, workHeight);
+        nr.passClamp = CreateScratch(device, modelFormat, workWidth, workHeight);
         nr.passScratchFailed = nr.passScratch == nullptr || nr.passClamp == nullptr;
         if (nr.passScratchFailed)
         {
@@ -117,49 +104,30 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
             LOG_ERROR("DLSS-NR: could not allocate the multipass textures; extra passes are disabled");
     }
 
-    if (reduced && nr.colorSmall == nullptr)
+    if (reduced && !spatial && nr.colorSmall == nullptr)
         nr.colorSmall = CreateScratch(device, desc.Format, workWidth, workHeight);
 
     // The down-leg target is native (the answer is brought back to frame size before the resolve).
-    if (workScale > 1.0f && nr.outputNative == nullptr)
+    if (workScale > 1.0f && !spatial && nr.outputNative == nullptr)
         nr.outputNative = CreateScratch(device, desc.Format, width, height);
-
-    if (nr.meter == nullptr)
-    {
-        nr.meter = CreateScratch(device, DXGI_FORMAT_R32_FLOAT, kDlssNrMeterGrid, kDlssNrMeterGrid);
-
-        D3D12_HEAP_PROPERTIES readback {};
-        readback.Type = D3D12_HEAP_TYPE_READBACK;
-
-        D3D12_RESOURCE_DESC bufferDesc {};
-        bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-        bufferDesc.Width = kMeterBytes;
-        bufferDesc.Height = 1;
-        bufferDesc.DepthOrArraySize = 1;
-        bufferDesc.MipLevels = 1;
-        bufferDesc.Format = DXGI_FORMAT_UNKNOWN;
-        bufferDesc.SampleDesc.Count = 1;
-        bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-        for (auto& rb : nr.meterReadback)
-        {
-            if (FAILED(device->CreateCommittedResource(&readback, D3D12_HEAP_FLAG_NONE, &bufferDesc,
-                                                       D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&rb))))
-            {
-                rb = nullptr;
-                LOG_WARN("DLSS-NR: the white point meter could not allocate its readback; falling back "
-                         "to the paper white slider");
-            }
-        }
-
-        if (nr.meter != nullptr)
-            LOG_INFO("DLSS-NR: white point meter up, {}x{} tiles", kDlssNrMeterGrid, kDlssNrMeterGrid);
-    }
 
     if (!nr.output || !nr.colorCopy || !nr.hdrCopy)
     {
-        nr.failed = true;
-        nr.reason = "the Neural Rendering staging textures could not be allocated";
+        if (spatial)
+        {
+            nr.spatialFallback = true;
+            nr.spatialFallbackReason = "packed model staging textures could not be allocated";
+            modelRunning = false;
+            ParkNrResource(nr.output);
+            ParkNrResource(nr.colorCopy);
+            ParkNrResource(nr.hdrCopy);
+            nr.width = nr.height = nr.workWidth = nr.workHeight = 0;
+        }
+        else
+        {
+            nr.failed = true;
+            nr.reason = "the Neural Rendering staging textures could not be allocated";
+        }
         return false;
     }
 
@@ -176,35 +144,45 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
         if (nr.passCreateFailed[pass])
             break;
         bool ready = false;
-        const auto prepared = nr.models[pass].Prepare(cmdList, device, workWidth, workHeight, ModelSettings(cfg, pass),
+        const auto prepared = nr.models[pass].Prepare(cmdList, device, workWidth, workHeight, PassSettings(cfg, pass),
                                                       frame.SubmissionEpoch, &ready);
         if (prepared != NVSDK_NGX_Result_Success)
         {
-            nr.passCreateFailed[pass] = true;
-            if (pass == 0)
+            if (spatial)
             {
-                nr.failed = true;
-                if (!frame.BeforeUpscale)
-                {
-                    nr.reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)";
-                }
-                else
-                {
-                    nr.reason = "the NVIDIA NGX driver could not create Neural Rendering";
-                }
+                nr.spatialFallback = true;
+                nr.spatialFallbackReason = "NGX rejected the packed model extent";
+                nr.reset = true;
+                modelRunning = false;
+                nr.models[pass].RetryAfterFailure();
+                nr.passCreateFailed[pass] = false;
+                LOG_WARN("DLSS-NR spatial creation for pass {} returned 0x{:X} ({}); trying ordinary NR next frame",
+                         pass + 1, prepared, NgxResultName(prepared));
             }
-            LOG_ERROR("DLSS-NR driver creation for pass {} failed: 0x{:X} ({}) [resolution: {}x{}, BeforeUpscale: {}]",
-                      pass + 1, prepared, NgxResultName(prepared), workWidth, workHeight,
-                      frame.BeforeUpscale ? "true" : "false");
-                return false;
+            else
+            {
+                nr.passCreateFailed[pass] = true;
+                if (pass == 0)
+                {
+                    nr.failed = true;
+                    if (!frame.BeforeUpscale)
+                    {
+                        nr.reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)";
+                    }
+                    else
+                    {
+                        nr.reason = "the NVIDIA NGX driver could not create Neural Rendering";
+                    }
+                }
+                LOG_ERROR("DLSS-NR driver creation for pass {} failed: 0x{:X} ({}) [resolution: {}x{}, BeforeUpscale: {}]",
+                          pass + 1, prepared, NgxResultName(prepared), workWidth, workHeight,
+                          frame.BeforeUpscale ? "true" : "false");
+            }
+            return false;
         }
-        nr.builtPreset[pass] = PassPreset(cfg, pass);
-        nr.builtPassTuning[pass] = PassTuning(cfg, pass);
-        nr.builtStyle[pass] = PassStyle(cfg, pass);
+        nr.builtSettings[pass] = PassSettings(cfg, pass);
         if (!ready)
-        {
-                return false;
-        }
+            return false;
     }
 
     return true;
@@ -266,8 +244,7 @@ auto DlssNr_Dx12::State::TuningMatchesFeature(const Config& cfg, unsigned int re
         if (!nr.models[pass].HasFeature())
             continue;
 
-        if (nr.builtPassTuning[pass] != PassTuning(cfg, pass) || nr.builtPreset[pass] != PassPreset(cfg, pass) ||
-            nr.builtStyle[pass] != PassStyle(cfg, pass))
+        if (nr.builtSettings[pass] != PassSettings(cfg, pass))
             return false;
     }
 

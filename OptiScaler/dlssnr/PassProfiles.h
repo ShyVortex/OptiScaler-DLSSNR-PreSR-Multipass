@@ -1,5 +1,6 @@
-#pragma once
+﻿#pragma once
 #include <Config.h>
+#include "DlssNr_ModelParameters.h"
 #include <algorithm>
 #include <cmath>
 
@@ -95,4 +96,20 @@ inline NrPassTuning PassTuning(const Config& cfg, unsigned int pass)
     result.skin = bounded(result.skin, -1.0f, -1.0f);
     return result;
 }
+
+inline ModelSettings PassSettings(const Config& cfg, unsigned int pass)
+{
+    const unsigned int preset = PassPreset(cfg, pass);
+    const unsigned int style = PassStyle(cfg, pass);
+    const auto tuning = PassTuning(cfg, pass);
+    return ModelSettings {
+        preset,
+        style,
+        tuning.intensity,
+        tuning.structure,
+        tuning.tone,
+        tuning.skin,
+        tuning.autoMask
+    };
 }
+} // namespace DlssNr::Profiles

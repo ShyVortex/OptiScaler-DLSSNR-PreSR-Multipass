@@ -2220,6 +2220,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
     case DLL_PROCESS_DETACH:
         State::Instance().isShuttingDown = true;
+        // ExitProcess has already stopped other threads. No DLL unloading, logging,
+        // thread joins or GPU cleanup is safe here; the OS reclaims process resources.
+        if (lpReserved != nullptr)
+            break;
 
         // Unhooking and cleaning stuff causing issues during shutdown.
         // Disabled for now to check if it cause any issues

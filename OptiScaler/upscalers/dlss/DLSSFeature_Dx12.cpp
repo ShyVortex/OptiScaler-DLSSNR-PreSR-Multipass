@@ -1,4 +1,4 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include "DLSSFeature_Dx12.h"
 #include <dxgi1_4.h>
 #include <Config.h>
@@ -108,17 +108,12 @@ bool DLSSFeatureDx12::EvaluateInternal(ID3D12GraphicsCommandList* InCommandList,
     return true;
 }
 
-void DLSSFeatureDx12::Shutdown(ID3D12Device* InDevice)
+void DLSSFeatureDx12::Shutdown(ID3D12Device*)
 {
-    if (_dlssInitedDx12)
-    {
-        if (NVNGXProxy::D3D12_Shutdown() != nullptr)
-            NVNGXProxy::D3D12_Shutdown()();
-        else if (NVNGXProxy::D3D12_Shutdown1() != nullptr)
-            NVNGXProxy::D3D12_Shutdown1()(InDevice);
-    }
-
-    DLSSFeature::Shutdown();
+    // The public NGX shutdown path owns runtime teardown; this is backend bookkeeping only.
+    _dlssInitedDx12 = false;
+    if (!State::Instance().isShuttingDown)
+        DLSSFeature::Shutdown();
 }
 
 DLSSFeatureDx12::DLSSFeatureDx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters)

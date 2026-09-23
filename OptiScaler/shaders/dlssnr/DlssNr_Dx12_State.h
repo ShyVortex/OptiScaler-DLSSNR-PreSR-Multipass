@@ -4,6 +4,8 @@
 #include <dlssnr/DlssNr_FinishedReady.h>
 #include <dlssnr/PassProfiles.h>
 
+#include <dlssnr/DlssNr_Exposure.h>
+#include <gpu_time/Vitals.h>
 #include <set>
 #include <wrl/client.h>
 #include <resource_tracking/ResTrack_Dx12.h>
@@ -17,7 +19,6 @@
 #include <dlssnr/DlssNr_PipelineCapture.h>
 #include <dlssnr/DlssNr_Proxy.h>
 #include <dlssnr/DlssNr_GpuLifetime.h>
-#include <dlssnr/DlssNr_ExposureScan.h>
 
 #include "DlssNr_Dx12.h"
 #include "DlssNr_ActiveColor.h"
@@ -41,21 +42,13 @@
 #include "DlssNr_ResidualPair.h"
 #include "../output_scaling/OS_Dx12.h"
 
-
-using DlssNr::Profiles::NrPassTuning;
-using DlssNr::Profiles::PassPreset;
-using DlssNr::Profiles::PassStyle;
-using DlssNr::Profiles::PassTuning;
-
-using DlssNr::CalibrationReading;
+using DlssNr::Profiles::PassSettings;
 
 struct DlssNr_Dx12::State
 {
 
     // NGX result names for diagnostics.
     const char* NgxResultName(unsigned int r);
-
-
 
     using NrState = DlssNr::Detail::ModelStateDx12;
     NrState nr;
@@ -71,6 +64,7 @@ struct DlssNr_Dx12::State
         unsigned w = 0, h = 0, outW = 0, outH = 0;
         uint64_t lastFrame = 0;
         bool submitted = false, failed = false, depthInverted = false, readable = false, reset = true;
+        bool structural = false;
         ~Enlarger() { dlss.reset(); } // Release NGX before its borrowed input/output resources.
     };
     std::unique_ptr<Enlarger> enlarger;
@@ -79,9 +73,10 @@ struct DlssNr_Dx12::State
     std::string enlargementStatus;
     void ReleaseEnlarger();
     void CollectEnlargers();
-    ID3D12Resource* EnlargeMatchedResidual(ID3D12GraphicsCommandList* cmd, ID3D12Device* device,
-        ID3D12Resource* proxy, ID3D12Resource* answer, ID3D12Resource* depth, ID3D12Resource* motion,
-        const DlssNrFrameInfo& frame, const DlssNrConstants& resolve, bool reset, ID3D12CommandQueue* queue);
+    ID3D12Resource* EnlargeMatchedResidual(ID3D12GraphicsCommandList* cmd, ID3D12Device* device, ID3D12Resource* proxy,
+                                           ID3D12Resource* answer, ID3D12Resource* depth, ID3D12Resource* motion,
+                                           const DlssNrFrameInfo& frame, const DlssNrConstants& resolve, bool reset,
+                                           ID3D12CommandQueue* queue);
 
     // What the pass costs on the GPU, for the breakdown in the overlay.
     std::unique_ptr<DlssNrGpuTime> gpuTime;
@@ -97,14 +92,6 @@ struct DlssNr_Dx12::State
     std::filesystem::path pipelineCaptureDirectory;
     unsigned pipelineCaptureRemaining = 0;
 
-    // One capture happens on its own each session, so there is always a fresh sample without anyone having
-    // to remember to ask. Started after the scene has had a moment to settle: the first frames after a
-    // feature is built carry its reset, and are not representative of anything.
-    static constexpr unsigned long long kAutoCaptureAfterFrames = 180;
-    bool autoCaptureDone = false;
-
-    // Cleared once per run, so a session's captures are its own and nothing accumulates across launches.
-
     unsigned long long frames = 0;
 
     // Logical frame identity for deferred pairing; feature readiness keeps the raw submission counter.
@@ -119,12 +106,10 @@ struct DlssNr_Dx12::State
             ID3D12Resource* frozen = nullptr;
             D3D12_RESOURCE_DESC desc {};
         };
-        std::array<Texture, 4> textures {{
-            { NVSDK_NGX_Parameter_Color, "DLSSD.Color" },
-            { NVSDK_NGX_Parameter_Depth, "DLSSD.Depth" },
-            { NVSDK_NGX_Parameter_MotionVectors, "DLSSD.MotionVectors" },
-            { NVSDK_NGX_Parameter_ExposureTexture, "DLSSD.ExposureTexture" }
-        }};
+        std::array<Texture, 4> textures { { { NVSDK_NGX_Parameter_Color, "DLSSD.Color" },
+                                            { NVSDK_NGX_Parameter_Depth, "DLSSD.Depth" },
+                                            { NVSDK_NGX_Parameter_MotionVectors, "DLSSD.MotionVectors" },
+                                            { NVSDK_NGX_Parameter_ExposureTexture, "DLSSD.ExposureTexture" } } };
         NrHoldParameters_Dx12 parameters;
         D3D12_RESOURCE_DESC outputDesc {};
         bool active = false;
@@ -140,60 +125,17 @@ struct DlssNr_Dx12::State
     void BeginInputHold(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params,
                         const D3D12_RESOURCE_STATES* states);
 
-    // A capture requested from outside the game: when the render path has no fence of its own, the write
-    // waits until this frame count, by which point the GPU is certainly past the copies.
-    unsigned long long captureWriteAtFrame = 0;
-
-    // Dropping a file named dlssnr-capture.trigger beside OptiScaler requests a capture, so a session can
-    // be asked for one from outside the game -- no alt-tab, no menu. Checked once a second, effectively.
+    // Poll dlssnr-capture.trigger beside OptiScaler every 60 evaluations.
     void CheckCaptureTrigger();
-
-    // The encoded mean is aimed here. Mid-grey rather than anything brighter: the model has to see both the
-    // shadow detail it might lift and the highlights it must not blow out.
-    static constexpr float kTargetEncodedMean = 0.45f;
-
-    // How fast the derived value follows the scene. Readings arrive a few times a second, and an exposure
-    // that lunges at every cut is worse than one that arrives a moment late.
-    static constexpr float kWhitePointBlend = 0.25f;
-
-    // Recomputes the white point from a measured mean. Inverting the encode for the white point that puts
-    // that mean at the target gives wp = mean * (1 - t^g) / t^g.
-    float WhitePointForMean(float meanLuma);
 
     DlssNr::GpuLifetime lifetime;
 
     void ParkNrResource(ID3D12Resource*& resource);
 
-    void TickNrRetired([[maybe_unused]] uint64_t epoch);
-
-    // The inject point decides which buffer is being measured -- the upscaler's linear output or the
-    // finished frame in swapchain format -- so a reading taken before a change describes a different
-    // picture to one taken after. Everything else that depends on the format is invalidated here.
-    void ForgetCalibration();
-
-    void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed);
-
-    // The meter's grid is R32_FLOAT, which makes a row exactly 64 * 4 = 256 bytes -- the alignment a
-    // texture-to-buffer copy demands, met without padding, so the readback is a flat array of floats.
-    static constexpr unsigned int kMeterRowBytes = kDlssNrMeterGrid * sizeof(float);
-    static constexpr unsigned int kMeterBytes = kMeterRowBytes * kDlssNrMeterGrid;
-
-    // Records the copy of this frame's grid into whichever readback buffer is furthest from being read.
-    // Same shape as the meter's copy, against the calibration surface and its own ring.
-    void CopyCalibrationToReadback(ID3D12GraphicsCommandList* cmdList);
-
-    void CopyMeterToReadback(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, bool exposureBound);
-
-    // Consume texel zero from the delayed readback ring, retaining the last plausible exposure.
-    void ConsumeCalibrationReadback();
-
-    void ConsumeMeterReadback();
-
-    // Invalidate pending and held samples when the exposure source changes.
-    void InvalidateExposureMeter();
-
-    // Resolve the encode divisor from game exposure or the configured manual fallback.
-    float ResolveWhitePoint(const Config& cfg, bool isHdrBuffer);
+    void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT modelFormat, DXGI_FORMAT nativeFormat);
+    bool PrepareSpatialResources(ID3D12Device* device, const DlssNr::Spatial::Layout& layout);
+    void ReleaseSpatialResources();
+    void ReleaseSupersamplers();
 
     ID3D12Resource* CreateScratch(ID3D12Device* device, DXGI_FORMAT format, unsigned int width, unsigned int height);
 
@@ -216,15 +158,12 @@ struct DlssNr_Dx12::State
                                   ID3D12Resource** clone);
 
     // Try both SR and ray-reconstruction parameter names; absent values return null.
-    bool FormatCanHoldLinearHdr(DXGI_FORMAT format);
 
     ID3D12Resource* GetResource(NVSDK_NGX_Parameter* params, const char* a, const char* b);
 
     bool TuningMatchesFeature(const Config& cfg, unsigned int requestedPasses);
 
-    // Guards the module's state. Every caller is now on the game's render thread, so this is no longer
-    // holding two threads apart -- but the D3D11-on-D3D12 bridge enters from its own call site, and the
-    // cost is a CPU-side lock on a path that already records command lists.
+    // Serialize rendering, presentation and submission callbacks; destruction can re-enter hooks.
     std::recursive_mutex mutex;
 
     // Restore the caller's compute bindings on every exit, without capturing NR's own state.
@@ -266,13 +205,13 @@ struct DlssNr_Dx12::State
             ID3D12Resource *edited = nullptr, *residualInput = nullptr, *residualOutput = nullptr, *clean = nullptr,
                            *composed = nullptr, *exposure = nullptr, *readback = nullptr;
             ID3D12QueryHeap* queries = nullptr;
+            volatile UINT64* completed = nullptr;
+            bool occupied[MarkerCount] {};
+            unsigned nextMarker = 0;
             ID3D12Resource* accumulatedEdit[2] {};
             unsigned accumulatedIndex = 0;
             bool accumulationReadable = false, accumulationValid = false;
-            volatile UINT64* completed = nullptr;
-            bool occupied[MarkerCount] {};
-            unsigned nextMarker = 0, lastMarker = 0;
-            bool everRecorded = false, smallReadable = false, reset = true, failed = false;
+            bool smallReadable = false, reset = true, failed = false;
             bool rayReconstruction = false, finishedPicture = false, privateRr = false;
             DlssNr::PrivateUpscaler backend = DlssNr::PrivateUpscaler::DLSS;
             std::unique_ptr<DlssNr::PrivateUpscalerDx12> upscaler;
@@ -281,7 +220,6 @@ struct DlssNr_Dx12::State
             unsigned long long lastBeginEpoch = 0;
             bool began = false;
             std::unique_ptr<DlssNr_Dx12> codec;
-            bool Idle() const { return !everRecorded || completed[lastMarker] != 0; }
             ~Generation()
             {
                 DlssNr_Dx12::Retire(std::move(codec));
@@ -292,7 +230,8 @@ struct DlssNr_Dx12::State
                     if (r)
                         r->Release();
                 for (auto* r : accumulatedEdit)
-                    if (r) r->Release();
+                    if (r)
+                        r->Release();
                 if (queries)
                     queries->Release();
                 if (queue)
@@ -302,8 +241,7 @@ struct DlssNr_Dx12::State
             }
         };
 
-        // Record an actual GPU completion marker after EACH seam. A later CPU frame/Present count alone
-        // does not prove a resource is no longer in flight. Slots aren't reused until the GPU wrote them.
+        // Preserve v0.8.4's recording limit as well as GPU-safe generation retirement.
         struct Use
         {
             Generation& g;
@@ -317,8 +255,6 @@ struct DlssNr_Dx12::State
                     return;
                 g.completed[slot] = 0;
                 g.occupied[slot] = true;
-                g.lastMarker = slot;
-                g.everRecorded = true;
                 g.nextMarker = (slot + 1) % MarkerCount;
             }
             ~Use()
@@ -332,7 +268,8 @@ struct DlssNr_Dx12::State
         };
 
         std::unique_ptr<Generation> current;
-        std::vector<std::unique_ptr<Generation>> retired;
+        unsigned retiredCount = 0;
+        DlssNr::GpuLifetime lifetime;
         std::string status = "not started";
         struct Pending
         {
@@ -344,7 +281,7 @@ struct DlssNr_Dx12::State
 
         void Say(const std::string& text);
         void Cancel();
-        void Collect();
+        void RetireCurrent();
 
         unsigned UInt(NVSDK_NGX_Parameter* p, const char* key, unsigned fallback = 0);
         float Float(NVSDK_NGX_Parameter* p, const char* key, float fallback);
@@ -359,8 +296,6 @@ struct DlssNr_Dx12::State
         void ReleaseResources();
     };
     DeferredSrContext deferredSr { *this };
-
-    std::string SynchronousDeferredDlssStatus();
 
     struct LateContext
     {
@@ -405,9 +340,6 @@ struct DlssNr_Dx12::State
         std::string status = "Waiting for a finished picture.";
         bool reset = true;
         std::atomic<bool> tracking { false };
-        static constexpr GUID colorSpaceKey = {
-            0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 }
-        };
 
         void Say(const char* message);
 
@@ -436,8 +368,6 @@ struct DlssNr_Dx12::State
 
     void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
 
-    void FinishedPictureColorSpace(IDXGISwapChain* swapchain, DXGI_COLOR_SPACE_TYPE colorSpace);
-
     DXGI_COLOR_SPACE_TYPE FinishedColorSpace(IDXGISwapChain* swapchain, DXGI_FORMAT format);
 
     void ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain);
@@ -445,11 +375,9 @@ struct DlssNr_Dx12::State
     bool ApplyFinishedColor(ID3D12Resource* color, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE colorSpace,
                             bool gameFrameHandoff = false);
 
-    DlssNr::Proxy::Settings ModelSettings(const Config& cfg, unsigned int pass);
-    bool PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device,
-                          const DlssNrFrameInfo& frame, const D3D12_RESOURCE_DESC& desc,
-                          DlssNr::ColorExtent native, DlssNr::ColorExtent work,
-                          float workScale, unsigned int requestedPasses);
+    bool PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, const DlssNrFrameInfo& frame,
+                          const D3D12_RESOURCE_DESC& desc, DlssNr::ColorExtent native, DlssNr::ColorExtent work,
+                          float workScale, unsigned int requestedPasses, bool spatial);
     struct EncodeContext
     {
         ID3D12GraphicsCommandList* cmdList;
@@ -459,14 +387,17 @@ struct DlssNr_Dx12::State
         const DlssNrFrameInfo& frame;
         float workScale;
         bool targetSupportsUav;
-        float whitePoint = 1.0f, exposurePreMul = 0.0f;
-        unsigned int useGameExposure = 0;
-        ID3D12Resource* exposureTex = nullptr;
+        bool spatial = false;
+        bool encodeSucceeded = false;
+        float whitePoint = 1.0f;
         ID3D12Resource* modelInput = nullptr;
+        ID3D12Resource* exposure = nullptr;
+        DlssNrConstants exposureConstants {};
     };
     void EncodeInput(EncodeContext& context);
     DlssNrConstants MakeResolveConstants(const EncodeContext& context, unsigned int effectivePasses);
-    void EndGpuTiming(ID3D12GraphicsCommandList* cmdList, ID3D12CommandQueue* timingQueue);
+    OptiScaler::RollingVitals vitals;
+    void EndGpuTiming(ID3D12GraphicsCommandList* cmdList);
 
     void Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* colour, ID3D12Resource* depth, ID3D12Resource* motion,
              ID3D12Resource* output, const DlssNrFrameInfo& frame, ID3D12CommandQueue* timingQueue);
@@ -480,13 +411,6 @@ struct DlssNr_Dx12::State
                           ID3D12CommandQueue* timingQueue, bool rayReconstruction, unsigned long long submissionEpoch,
                           bool interop);
 
-    // The pass. Resources in, nothing read from anywhere the caller cannot see.
-
-    DlssNr::CalibrationReading Calibration();
-
-    // What the game offers by way of exposure, and what has been read from it. For the menu, so a user
-    // can see whether this game supplies one at all without having to read a log.
-
     void ReleaseResources();
 
     struct GuideReport
@@ -499,6 +423,7 @@ struct DlssNr_Dx12::State
         unsigned int guideH;
         unsigned int frameW;
         unsigned int frameH;
+        bool operator==(const GuideReport&) const = default;
     };
     GuideReport loggedGuides {};
     struct ComposeReport
@@ -515,18 +440,10 @@ struct DlssNr_Dx12::State
         unsigned int workW;
         unsigned int workH;
         unsigned int passes;
+        bool operator==(const ComposeReport&) const = default;
     };
     ComposeReport loggedCompose {};
 
-    struct ExposureReport
-    {
-        bool valid;
-        float pre;
-        bool havePre;
-        bool haveTexture;
-        bool autoFlag;
-    };
-    ExposureReport logged {};
     std::set<std::string> seen;
     unsigned long long resets = 0;
     bool reportedHdr = false;
@@ -538,11 +455,6 @@ struct DlssNr_Dx12::State
     unsigned int lastSuper = 0;
     unsigned long long lastSplitLog = 0;
     unsigned lastFinishedMode = 0;
-    bool reportedPadding = false;
-    bool warnedSubrect = false;
-    ApiUpscalerInput saidApi = (ApiUpscalerInput) -1;
-    float loggedExposure = -1.0f;
-    float loggedScan = -1.0f;
 
     bool modelRunning = false;
     ID3D12Resource* buffer = nullptr;

@@ -18,6 +18,7 @@
 //   Resolve  proxy + model answer + untouched copy -> the frame, edited
 
 #include "DlssNr_Common.h"
+#include "DlssNr_Spatial.h"
 #include <dlssnr/DlssNrFeature_Dx12.h>
 #include <memory>
 
@@ -26,9 +27,9 @@
 #include <shaders/Shader_Dx12.h>
 #include <shaders/Shader_Dx12Utils.h>
 
-// Twelve-frame descriptor budget, including two clamp bindings and two DLSS enlargement passes.
-// A model chain reuses those two bindings regardless of its pass count.
-#define DLSSNR_NUM_OF_HEAPS 96
+// A maximal spatial frame uses 11 codec dispatches: meter 2, encode 1, pack 2, clamps 2,
+// unpack 1, private enlargement 2 and resolve 1. Twelve queued frames need 132 slots.
+#define DLSSNR_NUM_OF_HEAPS 132
 
 class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
 {
@@ -62,12 +63,21 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     // from the committed one). Null on backends/builds where the residual shader is absent.
     ID3D12PipelineState* _residualPipelineState = nullptr;
     ID3D12PipelineState* _finishedColorPipelineState = nullptr;
+    ID3D12PipelineState* _spatialPipelineState = nullptr;
+    ID3D12PipelineState* _spatialGuidesPipelineState = nullptr;
+
+    // Caller holds the owner and state locks. All NR compute shaders share this descriptor layout.
+    bool DispatchCompute(ID3D12GraphicsCommandList* cmd, const DlssNrConstants& constants,
+                         ID3D12PipelineState* pipeline, ID3D12Resource* source, ID3D12Resource* model,
+                         ID3D12Resource* original, ID3D12Resource* motion, ID3D12Resource* previousEdit,
+                         ID3D12Resource* target, ID3D12Resource* keep, uint32_t* immutableSlot);
 
   public:
     DlssNr_Dx12(std::string InName, ID3D12Device* InDevice);
     ~DlssNr_Dx12();
     static void Retire(std::unique_ptr<DlssNr_Dx12> owner);
     bool ReadyToDestroy();
+    void FinishSubmitted();
 
     // The pass. Resources in, and nothing read from anywhere the caller cannot see.
     //
@@ -124,4 +134,9 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     bool DispatchResidualPass(ID3D12GraphicsCommandList* InCmdList, const DlssNrConstants& InConstants,
                               ID3D12Resource* InSource, ID3D12Resource* InModel, ID3D12Resource* InOriginal,
                               ID3D12Resource* InMotion, ID3D12Resource* OutTarget, bool finishedColor = false);
+
+    bool SpatialReady();
+    bool DispatchSpatial(ID3D12GraphicsCommandList* cmd, const DlssNr::Spatial::Constants& constants,
+                         ID3D12Resource* source, ID3D12Resource* depthOrAnswer, ID3D12Resource* motion,
+                         ID3D12Resource* target, ID3D12Resource* secondary = nullptr);
 };

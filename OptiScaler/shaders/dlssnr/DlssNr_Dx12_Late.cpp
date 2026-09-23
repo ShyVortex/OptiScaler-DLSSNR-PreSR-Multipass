@@ -20,10 +20,17 @@ auto DlssNr_Dx12::State::LateContext::Cancel() -> void
 {
     // Submitted copies may still be in flight; their fences still protect reuse.
     for (auto& slot : slots)
+    {
         if (slot.submitted)
             slot.pending = false;
         else if (slot.pending)
             slot.frame.OutputWidth = 0; // Invalidate presentation, retaining unsubmitted recording ownership.
+        // NR always resets these owned lists before recording another picture. Once cancelled,
+        // they cannot be replayed. Keep submitted fences, but do not pin later model generations
+        // to dormant presentation lists. The game's producer recording remains untouched.
+        if (slot.commands)
+            owner.FinishedPictureResetCommandList(slot.commands.Get());
+    }
     reset = true;
 }
 
@@ -88,8 +95,7 @@ auto DlssNr_Dx12::State::LateContext::Acquire(ID3D12GraphicsCommandList* cmd) ->
     if (!slot.commands)
     {
         if (FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&slot.fence))) ||
-            FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                  IID_PPV_ARGS(&slot.allocator))) ||
+            FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&slot.allocator))) ||
             FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, slot.allocator.Get(), nullptr,
                                              IID_PPV_ARGS(&slot.commands))) ||
             FAILED(slot.commands->Close()))
@@ -118,7 +124,8 @@ auto DlssNr_Dx12::State::LateContext::Arm(Slot& slot, ID3D12GraphicsCommandList*
     slot.pending = true;
 }
 
-auto DlssNr_Dx12::State::LateContext::Capture(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, bool rr) -> void
+auto DlssNr_Dx12::State::LateContext::Capture(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, bool rr)
+    -> void
 {
     if (!params)
         return;
@@ -173,6 +180,10 @@ auto DlssNr_Dx12::State::LateContext::Capture(ID3D12GraphicsCommandList* cmd, NV
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, &frame.MotionSubrectBaseY);
     params->Get(NVSDK_NGX_Parameter_MV_Scale_X, &frame.MvScaleX);
     params->Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.MvScaleY);
+    if (!std::isfinite(frame.MvScaleX) || frame.MvScaleX == 0)
+        frame.MvScaleX = 1;
+    if (!std::isfinite(frame.MvScaleY) || frame.MvScaleY == 0)
+        frame.MvScaleY = 1;
     frame.ColourIsLinearHdr = false;
     frame.IndependentCommands = true;
     frame.FinishedPicture = true;
@@ -181,8 +192,9 @@ auto DlssNr_Dx12::State::LateContext::Capture(ID3D12GraphicsCommandList* cmd, NV
     Arm(slot, cmd);
 }
 
-auto DlssNr_Dx12::State::LateContext::CaptureResidual(ID3D12GraphicsCommandList* cmd, ID3D12Resource* clean, ID3D12Resource* residual,
-                             float scale, bool sceneLinear, bool reset) -> bool
+auto DlssNr_Dx12::State::LateContext::CaptureResidual(ID3D12GraphicsCommandList* cmd, ID3D12Resource* clean,
+                                                      ID3D12Resource* residual, float scale, bool sceneLinear,
+                                                      bool reset) -> bool
 {
     auto* next = Acquire(cmd);
     if (!next)
@@ -197,8 +209,7 @@ auto DlssNr_Dx12::State::LateContext::CaptureResidual(ID3D12GraphicsCommandList*
     cmd->CopyResource(slot.residual.Get(), residual);
     owner.Barrier(cmd, residual, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     slot.cleanSceneValid = false;
-    if (Config::Instance()->DlssNrHdrTransfer.value_or_default() && sceneLinear &&
-        Clone(slot.cleanScene, clean))
+    if (Config::Instance()->DlssNrHdrTransfer.value_or_default() && sceneLinear && Clone(slot.cleanScene, clean))
     {
         const auto arrival = Config::Instance()->OutputResourceBarrier.has_value()
                                  ? (D3D12_RESOURCE_STATES) Config::Instance()->OutputResourceBarrier.value()
@@ -215,6 +226,7 @@ auto DlssNr_Dx12::State::LateContext::CaptureResidual(ID3D12GraphicsCommandList*
     slot.frame.OutputWidth = (unsigned) clean->GetDesc().Width;
     slot.frame.OutputHeight = clean->GetDesc().Height;
     slot.frame.PreExposure = scale;
+    slot.frame.ExposureTexture = nullptr;
     slot.frame.SubmissionEpoch = ::State::Instance().frameCount;
     slot.residualOnly = true;
     slot.sceneLinear = sceneLinear;

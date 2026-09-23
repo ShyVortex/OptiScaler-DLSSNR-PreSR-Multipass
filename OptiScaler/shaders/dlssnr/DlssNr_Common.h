@@ -21,26 +21,25 @@ enum DlssNrMode : uint32_t
     DlssNrMode_Encode = 0,         // the frame -> a tone-mapped proxy, plus an untouched copy
     DlssNrMode_Resolve = 1,        // proxy + the model's answer + the untouched copy -> the edited frame
     DlssNrMode_Downsample = 2,     // the proxy -> a smaller proxy, when the model works below full size
-    DlssNrMode_Meter = 3,          // the exposure texture -> tile (0,0), for the white point
-    DlssNrMode_Calibrate = 4,      // the untouched frame -> a grid of tile peak luminances
     DlssNrMode_EncodeResidual = 5, // NR-composed minus original; signed difference encoded around 0.5
     DlssNrMode_ApplyResidual = 6,  // decode private DLSS result and add to clean SR output
     DlssNrMode_UnitExposure = 7,   // constant exposure for the private DLSS feature
     DlssNrMode_ClampProxy = 8,     // restore the encoded RGB range between model passes
     DlssNrMode_EncodeProxyResidual = 9,
-    DlssNrMode_ResizePrivateGuides = 10
+    DlssNrMode_Meter = 3,
+    DlssNrMode_AutoExposure = 11,
+    DlssNrMode_ResizePrivateGuides = 10,
+    DlssNrMode_EncodeResizeField = 12
 };
 
-// The meter's grid. 64 x 64 tiles over the whole frame, whatever its size.
-//
-// Tiles rather than pixels because the number wanted is where white sits, not how bright the
-// brightest pixel is: a single specular hit or a sky pixel is not the white point, and a frame's
-// maximum is exactly the statistic that would be dominated by one. Averaging each tile first means
-// anything smaller than a four-thousandth of the frame cannot decide the answer on its own.
-//
-// 4096 values is also small enough to read back and take a real percentile of on the CPU, rather
-// than approximating one on the GPU.
-constexpr uint32_t kDlssNrMeterGrid = 64;
+inline bool DlssNrUsesDlssEnlargement(uint32_t transfer) { return transfer == 2 || transfer == 4; }
+
+// The spatial mode is used until the caller has supplied an enlarged DLSS carrier.
+inline uint32_t DlssNrSpatialTransfer(uint32_t transfer)
+{
+    return DlssNrUsesDlssEnlargement(transfer) ? transfer - 1 : std::min(transfer, 3u);
+}
+
 // Finished-colour shader's exposure-normalised brightness response, -12..12 stops.
 constexpr uint32_t kDlssNrHdrCurveBins = 48;
 
@@ -101,19 +100,11 @@ struct DlssNrFrameInfo
     unsigned long long SubmissionEpoch = 0;
     float FrameTimeMs = 16.67f;
 
-    // The game's own exposure: a 1x1 texture holding, in the SDK's words, "the final exposure scale".
-    //
-    // This is the number that makes a cave and a field comparable, and it is the reason a fixed paper
-    // white cannot serve both. It comes from the game, decided before anything here runs, so unlike a
-    // statistic measured off the frame it cannot be pulled around by what this pass writes.
-    //
-    // May be null on any given frame -- GTA V supplied it, then did not, three times in one session --
-    // so whoever consumes it holds the last good value rather than falling back to a default.
-    void* ExposureTexture = nullptr;
-
     // The scale the game multiplied its buffer by for float precision, which DLSS is told so it can
     // undo it. Usually 1. Divided out before the exposure is applied, exactly as FSR's PrepareRgb does.
     float PreExposure = 1.0f;
+    void* ExposureTexture = nullptr; // Borrowed for this synchronous evaluation only.
+    uint32_t ExposureState = 0;
 
     // How much of the depth and motion vector textures the game actually rendered into.
     // Before SR this also selects the origin-zero active colour rectangle, not its allocation.
@@ -189,7 +180,8 @@ struct alignas(256) DlssNrConstants
     // left and right, so a difference can look like an improvement purely from where it sits.
     uint32_t CompareSwap;
 
-    // How a model that worked below the frame's size is brought back. 0 classic, 1 matched residual.
+    // Below-size reconstruction: 0 classic, 1/2 matched residual spatial/DLSS,
+    // 3/4 relative lighting and chromaticity spatial/DLSS. Native size bypasses resizing.
     //
     // Classic composes the model's own low-resolution picture against the full-resolution frame, so
     // the two disagree by the blur the downsample introduced as well as by the edit -- and the
@@ -206,7 +198,7 @@ struct alignas(256) DlssNrConstants
     // They have to be scaled into the frame's units or the game's tonemapper shows them wrong, but
     // scaling them by the live white point makes the instrument move with the thing being measured:
     // two captures at different exposures then differ by the exposure, whatever the edit did. This
-    // is the user's own multiplier, which holds still while the meter works.
+    // is the user's own multiplier, independent of the image's brightness.
     float DebugScale;
 
     // The reversible-proxy mode. 0 soft knee + our composition (default), 1 unclipped Neutwo proxy +
@@ -219,11 +211,8 @@ struct alignas(256) DlssNrConstants
     // to A/B against), 1 = apply the model's edit. Trailing scalar, mirrored in the shader cbuffer.
     uint32_t ApplyModel;
 
-    // D3D12 source-1 zero-latency exposure. UseGameExposure = 1 makes the shader read the game's live
-    // exposure texture (bound at t4) instead of the CPU-resolved white point; ExposurePreMul is
-    // preExposure * trim, so the live white point is ExposurePreMul / exposure. Mirrored in the cbuffer.
-    uint32_t UseGameExposure;
-    float ExposurePreMul;
+    uint32_t Reserved;   // Preserve the shared constant-buffer layout.
+    float ResidualScale; // Scene pre-exposure used to encode/decode the private residual carrier.
     // Optional colour-based final-composition mask. Not the runtime's semantic mask.
     uint32_t SkinProtection;
     uint32_t ShowSkinMask;
@@ -240,8 +229,22 @@ struct alignas(256) DlssNrConstants
     uint32_t ResidualHistoryValid;
     uint32_t ResidualMotionBaseX;
     uint32_t ResidualMotionBaseY;
+    float ReplaceDetailStrength;
+    float ModelWorkScale;
+    float ResidualConfidenceSensitivity;
+    uint32_t ExposureMode;
+    float PreExposure;
+    float ExposureTrim;
+    float ExposureProtection;
+    uint32_t ExposureAnchorCount;
+    uint32_t ExposureSourceWidth;
+    uint32_t ExposureSourceHeight;
+    uint32_t ExposurePadding;
+    float ExposureAnchors[16]; // Eight float2 pairs, packed as four float4s in HLSL.
 };
 static_assert(sizeof(DlssNrConstants) == 256);
+static_assert(offsetof(DlssNrConstants, ReplaceDetailStrength) == 132);
+static_assert(offsetof(DlssNrConstants, ExposureAnchors) == 176);
 
 // Local mode numbering for dlssnr_residual.hlsl (a separate blob / PSO from the DlssNrMode shader).
 enum DlssNrResidualMode : uint32_t
@@ -268,7 +271,7 @@ class DlssNr_Common
         constants.ColourStrength = config.DlssNrColourStrength.value_or_default();
         constants.DebugView = config.DlssNrDebugView.value_or_default();
         constants.MaxRatio = config.DlssNrMaxRatio.value_or_default();
-        constants.Transfer = std::min(config.DlssNrTransfer.value_or_default(), 1u);
+        constants.Transfer = DlssNrSpatialTransfer(config.DlssNrTransfer.value_or_default());
         constants.DebugScale = config.DlssNrWhitePointScale.value_or_default();
         constants.CompareMode = config.DlssNrCompare.value_or_default();
         constants.CompareSplit = config.DlssNrCompareSplit.value_or_default();
@@ -284,50 +287,4 @@ class DlssNr_Common
         constants.EnvironmentColour = config.DlssNrEnvironmentColour.value_or_default();
         return constants;
     }
-
-  protected:
-    // The model's own parameter names, spelled once.
-    //
-    // These are not ours to choose and they do not vary by API, which is the whole reason they are
-    // here rather than in the Direct3D 12 file. Getting one wrong is silent: the model keeps its
-    // previous value and the control simply appears to do nothing.
-    static constexpr const char* kEnabled = "DLSSNR.Enabled";
-    static constexpr const char* kWidth = "DLSSNR.Width";
-    static constexpr const char* kHeight = "DLSSNR.Height";
-
-    static constexpr const char* kColor = "DLSSNR.Color";
-    static constexpr const char* kDepth = "DLSSNR.Depth";
-    static constexpr const char* kMotion = "DLSSNR.MVec";
-    static constexpr const char* kOutput = "DLSSNR.Output";
-
-    static constexpr const char* kDepthInverted = "DLSSNR.DepthInverted";
-    static constexpr const char* kReset = "DLSSNR.Reset";
-    static constexpr const char* kMvScaleX = "DLSSNR.MVecScaleX";
-    static constexpr const char* kMvScaleY = "DLSSNR.MVecScaleY";
-
-    // Read once, while the feature is built. Writing these only at evaluate does nothing at all,
-    // which is why several of them appeared to be dead controls for a long time.
-    static constexpr const char* kPreset = "DLSSNR.Hint.Render.Preset";
-    static constexpr const char* kIntensity = "DLSSNR.Intensity";
-    static constexpr const char* kStyle = "DLSSNR.Style";
-    static constexpr const char* kLocalStructure = "DLSSNR.LocalStructureStrength";
-    static constexpr const char* kLocalTone = "DLSSNR.LocalToneStrength";
-    // Not a parameter of this model. Kept named so nobody re-adds it: a scan of nvngx_dlssnr.dll for
-    // DLSSNR.* yields 61 names and this is absent from them, while every other name here is present.
-    // Writing it was harmless -- the block is string-keyed -- but it made a control look real when
-    // nothing was listening, which is worse than not having one.
-    // static constexpr const char* kGlobalTone = "DLSSNR.GlobalToneStrength";
-
-    // Despite the name, this is the automatic *skin* mask, not an interface mask.
-    static constexpr const char* kAutoMask = "DLSSNR.UseAutoMask";
-
-    // Defaults to -1, meaning follow local structure. It is not a 0..1 strength and -1 is not "off".
-    static constexpr const char* kSkinStructure = "DLSSNR.SkinStructureStrength";
-
-    // The interface layer, its alpha, and the composited frame. The model accepts all three and is
-    // currently given none of them: with no interface supplied there is nothing to correct.
-    static constexpr const char* kUi = "DLSSNR.UI";
-    static constexpr const char* kUiAlpha = "DLSSNR.UIAlpha";
-    static constexpr const char* kBackbuffer = "DLSSNR.Backbuffer";
-    static constexpr const char* kUiCorrection = "DLSSNR.UICorrection";
 };
