@@ -10,27 +10,17 @@
 
 namespace
 {
-// Use the SDK interface so the compiler selects the correct overloaded virtual method.
-// Declaration order is not vtable order under the MSVC ABI.
-void SetUInt(NVSDK_NGX_Parameter* params, const char* name, unsigned int value) { params->Set(name, value); }
-
-void SetResource(NVSDK_NGX_Parameter* params, const char* name, ID3D12Resource* value) { params->Set(name, value); }
-
-void SetFloat(NVSDK_NGX_Parameter* params, const char* name, float value) { params->Set(name, value); }
-
 struct ProxyState
 {
     NVSDK_NGX_Handle* feature = nullptr;
     NVSDK_NGX_Parameter* params = nullptr;
     std::shared_ptr<DlssNr::CompatibilityRuntime> compatibility;
 
-    DlssNr::Proxy::Settings settings {};
+    DlssNr::ModelSettings settings {};
     unsigned int width = 0, height = 0;
     uint64_t creationEpoch = 0;
-    uint64_t creationFrameCount = 0;
-    uint64_t prepareCallCount = 0;
-    bool creationReady = false;
     std::function<bool()> creationComplete;
+    bool creationReady = false;
     ID3D12Device* device = nullptr;
     bool failed = false;
     bool reset = true;
@@ -40,7 +30,8 @@ void DestroyState(ProxyState& state)
 {
     if (state.feature != nullptr)
     {
-        if (state.compatibility) state.compatibility->Release(state.feature);
+        if (state.compatibility)
+            state.compatibility->Release(state.feature);
         else if (NVNGXProxy::D3D12_ReleaseFeature() != nullptr)
             NVNGXProxy::D3D12_ReleaseFeature()(state.feature);
     }
@@ -56,38 +47,33 @@ void DestroyState(ProxyState& state)
 // These have to be set before create, not at evaluate. The model reads its tuning once, while
 // building the feature; values written only at evaluate are ignored, which is why several of these
 // controls appeared to do nothing for a long time.
-void SetCreationParameters(NVSDK_NGX_Parameter* params, const DlssNr::Proxy::Settings& settings, unsigned int width,
+void SetCreationParameters(NVSDK_NGX_Parameter* params, const DlssNr::ModelSettings& settings, unsigned int width,
                            unsigned int height)
 {
-    SetUInt(params, "DLSSNR.Enabled", 1u);
-    SetUInt(params, "DLSSNR.Width", width);
-    SetUInt(params, "DLSSNR.Height", height);
-    SetUInt(params, "CreationNodeMask", 1u);
-    SetUInt(params, "VisibilityNodeMask", 1u);
+    params->Set("DLSSNR.Enabled", 1u);
+    params->Set("DLSSNR.Width", width);
+    params->Set("DLSSNR.Height", height);
+    params->Set("CreationNodeMask", 1u);
+    params->Set("VisibilityNodeMask", 1u);
 
     // Set the default preset explicitly, too.
-    SetUInt(params, "DLSSNR.Hint.Render.Preset", (unsigned int) settings.preset);
+    params->Set("DLSSNR.Hint.Render.Preset", (unsigned int) settings.preset);
 
-    SetFloat(params, "DLSSNR.Intensity", settings.intensity);
-    SetUInt(params, "DLSSNR.Style", (unsigned int) settings.style);
-    SetFloat(params, "DLSSNR.LocalStructureStrength", settings.localStructure);
-    SetFloat(params, "DLSSNR.LocalToneStrength", settings.localTone);
-    SetFloat(params, "DLSSNR.SkinStructureStrength", settings.skinStructure);
-    SetUInt(params, "DLSSNR.UseAutoMask", settings.autoMask ? 1u : 0u);
+    DlssNr::SetModelTuning(params, settings);
 
     // UI correction at the model's own default: with no UI layer fed to it there is nothing to
     // correct.
-    SetUInt(params, "DLSSNR.UICorrection", 1u);
-    SetResource(params, "DLSSNR.ControlMask", nullptr);
-    SetResource(params, "DLSSNR.UI", nullptr);
-    SetResource(params, "DLSSNR.UIAlpha", nullptr);
-    SetResource(params, "DLSSNR.Backbuffer", nullptr);
+    params->Set("DLSSNR.UICorrection", 1u);
+    params->Set("DLSSNR.ControlMask", static_cast<ID3D12Resource*>(nullptr));
+    params->Set("DLSSNR.UI", static_cast<ID3D12Resource*>(nullptr));
+    params->Set("DLSSNR.UIAlpha", static_cast<ID3D12Resource*>(nullptr));
+    params->Set("DLSSNR.Backbuffer", static_cast<ID3D12Resource*>(nullptr));
     for (const char* key :
          { "DLSSNR.UISubrectBaseX", "DLSSNR.UISubrectBaseY", "DLSSNR.UISubrectWidth", "DLSSNR.UISubrectHeight",
            "DLSSNR.UIAlphaSubrectBaseX", "DLSSNR.UIAlphaSubrectBaseY", "DLSSNR.UIAlphaSubrectWidth",
            "DLSSNR.UIAlphaSubrectHeight", "DLSSNR.BackbufferSubrectBaseX", "DLSSNR.BackbufferSubrectBaseY",
            "DLSSNR.BackbufferSubrectWidth", "DLSSNR.BackbufferSubrectHeight" })
-        SetUInt(params, key, 0u);
+        params->Set(key, 0u);
 }
 } // namespace
 
@@ -105,16 +91,9 @@ struct Context::Impl
                                      (state.creationComplete && state.creationComplete());
     }
     void RetireState();
-    void TickRetired(uint64_t epoch);
     unsigned int Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
-                         unsigned int height, const Settings& settings, uint64_t submissionEpoch, bool* ready);
+                         unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready);
     void Release();
-    unsigned int Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, ID3D12Resource* color,
-                     ID3D12Resource* depth, ID3D12Resource* motion, ID3D12Resource* output, unsigned int width,
-                     unsigned int height, unsigned int guideWidth, unsigned int guideHeight, unsigned int motionWidth,
-                     unsigned int motionHeight, unsigned int depthBaseX, unsigned int depthBaseY,
-                     unsigned int motionBaseX, unsigned int motionBaseY, bool depthInverted, bool reset, float mvScaleX,
-                     float mvScaleY, const Settings& settings, uint64_t submissionEpoch, bool* evaluated);
 };
 
 void Context::Impl::RetireState()
@@ -124,8 +103,6 @@ void Context::Impl::RetireState()
     state = {};
     lifetime.BeginGeneration();
 }
-
-void Context::Impl::TickRetired([[maybe_unused]] uint64_t epoch) { lifetime.Collect(); }
 
 bool Context::Available()
 {
@@ -143,11 +120,11 @@ void Context::Impl::Release()
 void Context::RetryAfterFailure() { _impl->RetireState(); }
 
 unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
-                                    unsigned int height, const Settings& settings, uint64_t submissionEpoch,
+                                    unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch,
                                     bool* ready)
 {
     *ready = false;
-    TickRetired(submissionEpoch);
+    lifetime.Collect();
     if (state.failed || !cmdList || !device || !width || !height)
         return 0;
     if ((!NVNGXProxy::IsDx12Inited() && !NVNGXProxy::InitDx12(device)) || !Context::Available())
@@ -161,8 +138,8 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         // GetParameters API, GetCapabilityParameters transfers ownership to the caller.
         NgxDiagnostics::Scope nrCapabilityTrace;
         const auto allocated = NVNGXProxy::D3D12_GetCapabilityParameters()(&state.params);
-        LOG_INFO("NR diagnostic capability parameters: result=0x{:08X} params={}",
-                 (unsigned)allocated, (void*)state.params);
+        LOG_INFO("NR diagnostic capability parameters: result=0x{:08X} params={}", (unsigned) allocated,
+                 (void*) state.params);
         if (allocated != NVSDK_NGX_Result_Success || state.params == nullptr)
         {
             DestroyState(state);
@@ -183,9 +160,9 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         SetCreationParameters(state.params, settings, width, height);
 
         lifetime.Record(cmdList);
-        auto created =
-            NVNGXProxy::D3D12_CreateFeature()(cmdList, (NVSDK_NGX_Feature) 18, state.params, &state.feature);
-        LOG_INFO("NR diagnostic CreateFeature(18): result=0x{:08X} handle={}", (unsigned)created, (void*)state.feature);
+        auto created = NVNGXProxy::D3D12_CreateFeature()(cmdList, (NVSDK_NGX_Feature) 18, state.params, &state.feature);
+        LOG_INFO("NR diagnostic CreateFeature(18): result=0x{:08X} handle={}", (unsigned) created,
+                 (void*) state.feature);
         if (NVSDK_NGX_FAILED(created) && !state.feature)
         {
             const auto candidates = CompatibilityRuntime::CandidatePaths();
@@ -200,13 +177,13 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
                     SetCreationParameters(state.params, settings, width, height);
                     created = state.compatibility->Create(cmdList, state.params, &state.feature);
                     LOG_INFO("NR compatibility: candidate {} CreateFeature(18) result=0x{:08X} handle={}",
-                             candidate.string(), (unsigned)created, (void*)state.feature);
+                             candidate.string(), (unsigned) created, (void*) state.feature);
 
                     if (created == NVSDK_NGX_Result_Success && state.feature != nullptr)
                         break;
 
                     LOG_WARN("NR compatibility: candidate {} CreateFeature(18) failed (0x{:08X}); releasing runtime to attempt next candidate",
-                             candidate.string(), (unsigned)created);
+                             candidate.string(), (unsigned) created);
                     if (state.feature)
                     {
                         state.compatibility->Release(state.feature);
@@ -222,8 +199,8 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
                 {
                     SetCreationParameters(state.params, settings, width, height);
                     created = state.compatibility->Create(cmdList, state.params, &state.feature);
-                    LOG_INFO("NR compatibility: CreateFeature(18) result=0x{:08X} handle={}",
-                             (unsigned)created, (void*)state.feature);
+                    LOG_INFO("NR compatibility: CreateFeature(18) result=0x{:08X} handle={}", (unsigned) created,
+                             (void*) state.feature);
                 }
             }
         }
@@ -242,8 +219,6 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         state.width = width;
         state.height = height;
         state.creationEpoch = submissionEpoch;
-        state.creationFrameCount = ++state.prepareCallCount;
-        state.creationReady = false;
         state.creationComplete = lifetime.CompletionProbe(cmdList);
         LOG_INFO("DLSS-NR: feature created at {}x{} through {}", width, height,
                  state.compatibility ? "direct compatibility runtime" : "NVIDIA NGX driver");
@@ -252,76 +227,55 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         return (unsigned int) NVSDK_NGX_Result_Success;
     }
 
-    ++state.prepareCallCount;
     *ready = CreationReady(submissionEpoch);
     return (unsigned int) NVSDK_NGX_Result_Success;
 }
 
-unsigned int Context::Impl::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, ID3D12Resource* color,
-                                ID3D12Resource* depth, ID3D12Resource* motion, ID3D12Resource* output,
-                                unsigned int width, unsigned int height, unsigned int guideWidth,
-                                unsigned int guideHeight, unsigned int motionWidth, unsigned int motionHeight,
-                                unsigned int depthBaseX, unsigned int depthBaseY, unsigned int motionBaseX,
-                                unsigned int motionBaseY, bool depthInverted, bool reset, float mvScaleX,
-                                float mvScaleY, const Settings& settings, uint64_t submissionEpoch, bool* evaluated)
+unsigned int Context::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, const Frame& frame,
+                          const ModelSettings& settings, uint64_t submissionEpoch, bool* evaluated)
 {
+    auto& state = _impl->state;
+    auto& lifetime = _impl->lifetime;
     if (evaluated)
         *evaluated = false;
-    if (!color || !depth || !motion || !output || !guideWidth || !guideHeight || !motionWidth || !motionHeight)
+    if (!frame.color || !frame.depth || !frame.motion || !frame.output || !frame.guides.depth.valid() ||
+        !frame.guides.motion.valid())
         return 0;
     bool ready = false;
-    const auto prepared = Prepare(cmdList, device, width, height, settings, submissionEpoch, &ready);
+    const auto prepared =
+        Prepare(cmdList, device, frame.size.width, frame.size.height, settings, submissionEpoch, &ready);
     if (prepared != NVSDK_NGX_Result_Success || !ready)
         return prepared;
 
     NVSDK_NGX_Parameter* params = state.params;
 
-    SetResource(params, "DLSSNR.Color", color);
-    SetResource(params, "DLSSNR.Depth", depth);
-    SetResource(params, "DLSSNR.MVec", motion);
-    SetResource(params, "DLSSNR.Output", output);
+    params->Set("DLSSNR.Color", frame.color);
+    params->Set("DLSSNR.Depth", frame.depth);
+    params->Set("DLSSNR.MVec", frame.motion);
+    params->Set("DLSSNR.Output", frame.output);
 
-    SetUInt(params, "DLSSNR.Enabled", 1u);
-    SetUInt(params, "DLSSNR.Width", width);
-    SetUInt(params, "DLSSNR.Height", height);
-    SetUInt(params, "DLSSNR.DepthInverted", depthInverted ? 1u : 0u);
-    SetUInt(params, "DLSSNR.Reset", (reset || state.reset) ? 1u : 0u);
+    params->Set("DLSSNR.Enabled", 1u);
+    params->Set("DLSSNR.Width", frame.size.width);
+    params->Set("DLSSNR.Height", frame.size.height);
+    params->Set("DLSSNR.DepthInverted", frame.depthInverted ? 1u : 0u);
+    params->Set("DLSSNR.Reset", (frame.reset || state.reset) ? 1u : 0u);
 
     // Colour and output are display resolution; depth and motion come from the game's own DLSS
     // evaluation and may be render resolution, so each resource carries its own subrect.
-    SetUInt(params, "DLSSNR.ColorSubrectBaseX", 0u);
-    SetUInt(params, "DLSSNR.ColorSubrectBaseY", 0u);
-    SetUInt(params, "DLSSNR.ColorSubrectWidth", width);
-    SetUInt(params, "DLSSNR.ColorSubrectHeight", height);
-    SetUInt(params, "DLSSNR.OutputSubrectBaseX", 0u);
-    SetUInt(params, "DLSSNR.OutputSubrectBaseY", 0u);
-    SetUInt(params, "DLSSNR.OutputSubrectWidth", width);
-    SetUInt(params, "DLSSNR.OutputSubrectHeight", height);
-    SetUInt(params, "DLSSNR.DepthSubrectBaseX", depthBaseX);
-    SetUInt(params, "DLSSNR.DepthSubrectBaseY", depthBaseY);
-    SetUInt(params, "DLSSNR.DepthSubrectWidth", guideWidth);
-    SetUInt(params, "DLSSNR.DepthSubrectHeight", guideHeight);
-    SetUInt(params, "DLSSNR.MVecSubrectBaseX", motionBaseX);
-    SetUInt(params, "DLSSNR.MVecSubrectBaseY", motionBaseY);
-    SetUInt(params, "DLSSNR.MVecSubrectWidth", motionWidth);
-    SetUInt(params, "DLSSNR.MVecSubrectHeight", motionHeight);
+    SetModelRegions(params, frame.size, frame.guides);
 
     // The game's own encoding, passed through. Deriving this from the resolutions was a guess, and
     // at native resolution it came out as exactly 1.0 -- so a game using normalised vectors was
     // telling the model that almost nothing had moved.
-    SetFloat(params, "DLSSNR.MVecScaleX", mvScaleX);
-    SetFloat(params, "DLSSNR.MVecScaleY", mvScaleY);
+    params->Set("DLSSNR.MVecScaleX", frame.mvScaleX);
+    params->Set("DLSSNR.MVecScaleY", frame.mvScaleY);
 
-    SetFloat(params, "DLSSNR.Intensity", settings.intensity);
-    SetUInt(params, "DLSSNR.Style", (unsigned int) settings.style);
-    SetFloat(params, "DLSSNR.LocalStructureStrength", settings.localStructure);
-    SetFloat(params, "DLSSNR.LocalToneStrength", settings.localTone);
-    SetFloat(params, "DLSSNR.SkinStructureStrength", settings.skinStructure);
-    SetUInt(params, "DLSSNR.UseAutoMask", settings.autoMask ? 1u : 0u);
+    DlssNr::SetModelTuning(params, settings);
 
     lifetime.Record(cmdList);
-    const auto result = state.compatibility ? state.compatibility->Evaluate(cmdList, state.feature, params)
-                                           : NVNGXProxy::D3D12_EvaluateFeature()(cmdList, state.feature, params, nullptr);
+    const auto result = state.compatibility
+                            ? state.compatibility->Evaluate(cmdList, state.feature, params)
+                            : NVNGXProxy::D3D12_EvaluateFeature()(cmdList, state.feature, params, nullptr);
 
     if (result == NVSDK_NGX_Result_Success)
     {
@@ -345,9 +299,10 @@ void Context::Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList
 }
 void Context::ResetRecording(ID3D12CommandList* commands) { _impl->lifetime.ResetRecording(commands); }
 bool Context::Idle() { return _impl->lifetime.Idle(); }
+void Context::FinishSubmitted() { _impl->lifetime.FinishSubmitted(); }
 
 unsigned int Context::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
-                              unsigned int height, const Settings& settings, uint64_t submissionEpoch, bool* ready)
+                              unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready)
 {
     return _impl->Prepare(cmdList, device, width, height, settings, submissionEpoch, ready);
 }
@@ -356,19 +311,7 @@ bool Context::Ready(uint64_t epoch) const
 {
     return HasFeature() && !_impl->state.failed && _impl->CreationReady(epoch);
 }
-void Context::AdvanceEpoch(uint64_t epoch) { _impl->TickRetired(epoch); }
+void Context::Collect() { _impl->lifetime.Collect(); }
 
-unsigned int Context::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, ID3D12Resource* color,
-                          ID3D12Resource* depth, ID3D12Resource* motion, ID3D12Resource* output, unsigned int width,
-                          unsigned int height, unsigned int guideWidth, unsigned int guideHeight,
-                          unsigned int motionWidth, unsigned int motionHeight, unsigned int depthBaseX,
-                          unsigned int depthBaseY, unsigned int motionBaseX, unsigned int motionBaseY,
-                          bool depthInverted, bool reset, float mvScaleX, float mvScaleY, const Settings& settings,
-                          uint64_t submissionEpoch, bool* evaluated)
-{
-    return _impl->Run(cmdList, device, color, depth, motion, output, width, height, guideWidth, guideHeight,
-                      motionWidth, motionHeight, depthBaseX, depthBaseY, motionBaseX, motionBaseY, depthInverted, reset,
-                      mvScaleX, mvScaleY, settings, submissionEpoch, evaluated);
-}
 } // namespace Proxy
 } // namespace DlssNr

@@ -1,4 +1,4 @@
-﻿#include <pch.h>
+#include <pch.h>
 #include "DlssNr_Status.h"
 
 #include <array>
@@ -17,13 +17,13 @@ struct PublishedStatus
 std::mutex statusMutex;
 std::array<PublishedStatus, 2> published;
 ControlRequests requests;
+} // namespace
 
 StatusSnapshot ReadStatus(Backend backend)
 {
     std::lock_guard lock(statusMutex);
     return published[static_cast<size_t>(backend)].value;
 }
-} // namespace
 
 void PublishStatus(const void* owner, Backend backend, const StatusSnapshot& status)
 {
@@ -58,27 +58,5 @@ void RequestCapture(unsigned int frames)
     ++requests.captureGeneration;
 }
 
-bool IsRunning() { return ReadStatus(Backend::Dx12).running; }
-bool IsRunningVk() { return ReadStatus(Backend::Vulkan).running; }
-
-const char* FailureReason()
-{
-    thread_local std::string reason;
-    reason = ReadStatus(Backend::Dx12).failureReason;
-    return reason.c_str();
-}
-
-const char* FailureReasonVk()
-{
-    thread_local std::string reason;
-    reason = ReadStatus(Backend::Vulkan).failureReason;
-    return reason.c_str();
-}
-
-ExposureStatus GameExposureStatus() { return ReadStatus(Backend::Dx12).exposure; }
 std::optional<double> LastGpuTime() { return ReadStatus(Backend::Dx12).gpuTime; }
-std::optional<double> LastGpuTimeVk() { return ReadStatus(Backend::Vulkan).gpuTime; }
-unsigned long long FramesVk() { return ReadStatus(Backend::Vulkan).frames; }
-bool ExposureOfferedVk() { return ReadStatus(Backend::Vulkan).exposure.offeredNow; }
-bool CaptureInProgress() { return ReadStatus(Backend::Dx12).captureInProgress; }
 } // namespace DlssNr

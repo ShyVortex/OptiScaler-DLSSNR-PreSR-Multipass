@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <shaders/Shader_Vk.h>
 

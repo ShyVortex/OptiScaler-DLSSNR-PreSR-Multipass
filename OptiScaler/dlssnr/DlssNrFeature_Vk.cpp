@@ -173,7 +173,7 @@ bool ModelVk::Impl::Evaluate(VkCommandBuffer cmdBuffer, const VkImageInfo& colou
     if (!state.spatialDisabled)
     {
         if (spatial.active)
-            state.spatialStatus = std::format("Spatial compression {}x{} → {}x{} ({:.1f}% pixels)", spatial.ordinaryW,
+            state.spatialStatus = std::format("Spatial compression {}x{} -> {}x{} ({:.1f}% pixels)", spatial.ordinaryW,
                                               spatial.ordinaryH, spatial.modelW, spatial.modelH,
                                               100.0 * double(spatial.modelW) * spatial.modelH /
                                                   (double(spatial.ordinaryW) * spatial.ordinaryH));

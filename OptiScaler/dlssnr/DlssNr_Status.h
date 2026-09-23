@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <cstdint>
 #include <optional>
@@ -14,15 +14,6 @@ enum class Backend
     Vulkan
 };
 
-struct ExposureStatus
-{
-    unsigned long long seenFrames = 0;
-    bool offeredNow = false;
-    bool everOffered = false;
-    float exposure = 0.0f;
-    float preExposure = 1.0f;
-};
-
 // Menu telemetry contains values only. GPU resources remain owned by the shader instance.
 struct StatusSnapshot
 {
@@ -30,8 +21,8 @@ struct StatusSnapshot
     std::string failureReason;
     std::optional<double> gpuTime;
     unsigned long long frames = 0;
-    ExposureStatus exposure;
-    bool captureInProgress = false;
+    std::string spatialStatus;
+    bool spatialActive = false;
 };
 
 struct ControlRequests
@@ -43,20 +34,11 @@ struct ControlRequests
 
 void PublishStatus(const void* owner, Backend backend, const StatusSnapshot& status);
 void ClearStatus(const void* owner);
+StatusSnapshot ReadStatus(Backend backend);
 ControlRequests ReadControlRequests();
 
 void RenderMenu(::Config* config, float menuResScale);
 void RetryAfterFailure();
-bool IsRunning();
-const char* FailureReason();
-ExposureStatus GameExposureStatus();
 std::optional<double> LastGpuTime();
 void RequestCapture(unsigned int frames);
-bool CaptureInProgress();
-
-bool IsRunningVk();
-const char* FailureReasonVk();
-unsigned long long FramesVk();
-std::optional<double> LastGpuTimeVk();
-bool ExposureOfferedVk();
 } // namespace DlssNr

@@ -1,5 +1,6 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "DlssNrFinished_Vk.h"
+#include "DlssNr_Image_Vk.h"
 #include <Config.h>
 #include <hooks/VulkanwDx12_Hooks.h>
 #include <algorithm>
@@ -33,73 +34,6 @@ void Say(const char* message)
         LOG_INFO("DLSS-NR Vulkan finished picture: {}", message);
     }
 }
-struct Image
-{
-    VkImageInfo info {};
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    void Destroy(VkDevice device)
-    {
-        if (info.ImageView)
-            vkDestroyImageView(device, info.ImageView, nullptr);
-        if (info.Image)
-            vkDestroyImage(device, info.Image, nullptr);
-        if (memory)
-            vkFreeMemory(device, memory, nullptr);
-        info = {};
-        memory = VK_NULL_HANDLE;
-        layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    }
-    bool Ensure(VkDevice device, VkPhysicalDevice physical, uint32_t width, uint32_t height, VkFormat format)
-    {
-        if (info.Image && info.Width == width && info.Height == height && info.Format == format)
-            return true;
-        Destroy(device); // caller has retired the slot
-        VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-        ci.imageType = VK_IMAGE_TYPE_2D;
-        ci.format = format;
-        ci.extent = { width, height, 1 };
-        ci.mipLevels = ci.arrayLayers = 1;
-        ci.samples = VK_SAMPLE_COUNT_1_BIT;
-        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                   VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        if (vkCreateImage(device, &ci, nullptr, &info.Image) != VK_SUCCESS)
-            return false;
-        VkMemoryRequirements need {};
-        vkGetImageMemoryRequirements(device, info.Image, &need);
-        VkPhysicalDeviceMemoryProperties props {};
-        vkGetPhysicalDeviceMemoryProperties(physical, &props);
-        uint32_t type = UINT32_MAX;
-        for (uint32_t i = 0; i < props.memoryTypeCount; ++i)
-            if ((need.memoryTypeBits & (1u << i)) &&
-                (props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
-            {
-                type = i;
-                break;
-            }
-        if (type == UINT32_MAX)
-            return false;
-        VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        ai.allocationSize = need.size;
-        ai.memoryTypeIndex = type;
-        if (vkAllocateMemory(device, &ai, nullptr, &memory) != VK_SUCCESS ||
-            vkBindImageMemory(device, info.Image, memory, 0) != VK_SUCCESS)
-            return false;
-        VkImageViewCreateInfo vi { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-        vi.image = info.Image;
-        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format = format;
-        vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        if (vkCreateImageView(device, &vi, nullptr, &info.ImageView) != VK_SUCCESS)
-            return false;
-        info.SubresourceRange = vi.subresourceRange;
-        info.Format = format;
-        info.Width = width;
-        info.Height = height;
-        return true;
-    }
-};
 void Transition(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to)
 {
     VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -116,7 +50,7 @@ void Transition(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageL
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &b);
 }
-void Transition(VkCommandBuffer cmd, Image& image, VkImageLayout to)
+void Transition(VkCommandBuffer cmd, ImageVk& image, VkImageLayout to)
 {
     Transition(cmd, image.info.Image, image.layout, to);
     image.layout = to;
@@ -137,7 +71,7 @@ struct FinishedVk::Impl
     VkPhysicalDevice physical;
     struct Slot
     {
-        Image depth, motion, input, linear, output, encoded;
+        ImageVk depth, motion, input, linear, output, encoded;
         DlssNrFrameInfo_Vk frame {};
         VkInstance instance = VK_NULL_HANDLE;
         VkCommandBuffer producer = VK_NULL_HANDLE, cmd = VK_NULL_HANDLE;
@@ -257,7 +191,7 @@ struct FinishedVk::Impl
             return;
         if (vkResetEvent(device, s.captured) != VK_SUCCESS)
             return;
-        auto copy = [&](const VkImageInfo& source, Image& dest, bool readWrite)
+        auto copy = [&](const VkImageInfo& source, ImageVk& dest, bool readWrite)
         {
             Transition(cmd, dest, VK_IMAGE_LAYOUT_GENERAL);
             DlssNrConstants c {};
@@ -271,7 +205,6 @@ struct FinishedVk::Impl
         s.validCapture = copy(depth, s.depth, frame.DepthReadWrite) && copy(motion, s.motion, frame.MotionReadWrite);
         vkCmdSetEvent(cmd, s.captured, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
         s.frame = frame;
-        s.frame.ExposureTexture = nullptr;
         s.frame.PreExposure = 1.0f;
         s.frame.FinishedPicture = true;
         s.frame.BeforeUpscale = false;
@@ -339,7 +272,7 @@ struct FinishedVk::Impl
             if (vkCreateSemaphore(device, &ci, nullptr, &presentReady[index]) != VK_SUCCESS)
                 return false;
         }
-        auto ensure = [&](Image& image)
+        auto ensure = [&](ImageVk& image)
         {
             return image.Ensure(device, physical, screen.size.width, screen.size.height, VK_FORMAT_R16G16B16A16_SFLOAT);
         };
@@ -358,7 +291,7 @@ struct FinishedVk::Impl
         Transition(s.cmd, s.output, VK_IMAGE_LAYOUT_GENERAL);
         Transition(s.cmd, s.depth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         Transition(s.cmd, s.motion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        Image* input = &s.input;
+        ImageVk* input = &s.input;
         bool colorReady = true;
         if (pq)
         {
@@ -368,8 +301,9 @@ struct FinishedVk::Impl
             conversion.Height = screen.size.height;
             Transition(s.cmd, s.input, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             colorReady = shader.Dispatch(s.cmd, conversion, conversion.Width, conversion.Height, s.input.info.ImageView,
-                            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, s.linear.info.ImageView, VK_NULL_HANDLE,
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true);
+                                         VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, s.linear.info.ImageView,
+                                         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true);
             input = &s.linear;
         }
         auto frame = s.frame;
@@ -379,7 +313,7 @@ struct FinishedVk::Impl
         if (colorReady)
             shader.Dispatch(s.cmd, input->info, s.depth.info, s.motion.info, s.output.info, frame, s.instance,
                             VK_IMAGE_LAYOUT_GENERAL, &ran);
-        Image* result = &s.output;
+        ImageVk* result = &s.output;
         if (pq && ran)
         {
             Transition(s.cmd, s.output, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -388,10 +322,10 @@ struct FinishedVk::Impl
             conversion.Mode = 1;
             conversion.Width = screen.size.width;
             conversion.Height = screen.size.height;
-            colorReady = shader.Dispatch(s.cmd, conversion, conversion.Width, conversion.Height, s.output.info.ImageView,
-                            VK_NULL_HANDLE, s.input.info.ImageView, VK_NULL_HANDLE, s.encoded.info.ImageView,
-                            VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true);
+            colorReady = shader.Dispatch(
+                s.cmd, conversion, conversion.Width, conversion.Height, s.output.info.ImageView, VK_NULL_HANDLE,
+                s.input.info.ImageView, VK_NULL_HANDLE, s.encoded.info.ImageView, VK_NULL_HANDLE,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true);
             result = &s.encoded;
         }
         // The original presentable image is only modified after a successful model evaluation.
@@ -479,6 +413,8 @@ void FinishedVk::ResetPool(VkCommandPool pool)
 bool FinishedVk::Present(VkQueue queue, VkPresentInfoKHR* present) { return impl->Present(queue, present); }
 void FinishedVkSwapchain(VkDevice device, VkSwapchainKHR swapchain, const VkSwapchainCreateInfoKHR& info)
 {
+    if (State::Instance().isShuttingDown)
+        return;
     std::lock_guard lock(finishedMutex);
     screen = {};
     screen.device = device;
@@ -495,24 +431,32 @@ void FinishedVkSwapchain(VkDevice device, VkSwapchainKHR swapchain, const VkSwap
 }
 void FinishedVkSubmitted(VkQueue queue, VkCommandBuffer cmd)
 {
+    if (State::Instance().isShuttingDown)
+        return;
     std::lock_guard lock(finishedMutex);
     for (auto* owner : owners)
         owner->Submitted(queue, cmd);
 }
 void FinishedVkReset(VkCommandBuffer cmd)
 {
+    if (State::Instance().isShuttingDown)
+        return;
     std::lock_guard lock(finishedMutex);
     for (auto* owner : owners)
         owner->Reset(cmd);
 }
 void FinishedVkResetPool(VkCommandPool pool)
 {
+    if (State::Instance().isShuttingDown)
+        return;
     std::lock_guard lock(finishedMutex);
     for (auto* owner : owners)
         owner->ResetPool(pool);
 }
 void FinishedVkPresent(VkQueue queue, VkPresentInfoKHR* present)
 {
+    if (State::Instance().isShuttingDown)
+        return;
     std::lock_guard lock(finishedMutex);
     for (auto* owner : owners)
         if (owner->Present(queue, present))

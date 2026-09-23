@@ -1,10 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include <imgui/imgui.h>
 #include <algorithm>
 #include <string>
 #include <vector>
-#include <utility>
+#include <span>
 #include <cmath>
 
 namespace DlssNr::PipelineUi
@@ -38,18 +38,8 @@ struct View
 
 inline const char* SectionName(Section section)
 {
-    switch (section)
-    {
-    case Section::Placement:
-        return "Placement";
-    case Section::Input:
-        return "Input";
-    case Section::Model:
-        return "Model passes";
-    case Section::Blend:
-        return "Apply NR edit";
-    }
-    return "";
+    static constexpr const char* names[] = { "Placement", "Input", "Model passes", "Apply NR edit" };
+    return names[(int) section];
 }
 
 // Keep both top-level toggles on one row, wrapping their clickable labels in narrow overlays.
@@ -83,19 +73,10 @@ inline void DrawTimingBar(double nrMs, double frameMs)
     const double remaining = std::max(frameMs - nrMs, 0.0);
     const bool overlapping = nrMs > frameMs;
     ImGui::TextWrapped("NR %.2f ms  |  Rest of frame ~%.2f ms", nrMs, remaining);
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    const ImVec2 size(std::max(ImGui::GetContentRegionAvail().x, 1.0f), ImGui::GetFontSize());
-    const float split = size.x * static_cast<float>(nrMs / std::max(frameMs, nrMs));
     const auto text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-    auto* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(at, ImVec2(at.x + size.x, at.y + size.y), ImGui::GetColorU32(ImGuiCol_FrameBg));
-    if (split > 0.0f)
-        draw->AddRectFilled(at, ImVec2(at.x + split, at.y + size.y),
-                            ImGui::GetColorU32(ImVec4(text.x * 0.20f, text.y * 0.55f, text.z * 0.25f, text.w)));
-    if (split < size.x)
-        draw->AddRectFilled(ImVec2(at.x + split, at.y), ImVec2(at.x + size.x, at.y + size.y),
-                            ImGui::GetColorU32(ImGuiCol_Button));
-    ImGui::Dummy(size);
+    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(text.x * 0.20f, text.y * 0.55f, text.z * 0.25f, text.w));
+    ImGui::ProgressBar(float(nrMs / std::max(frameMs, nrMs)), ImVec2(-1.0f, ImGui::GetFontSize()), "");
+    ImGui::PopStyleColor();
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("NR GPU time versus frame interval. Work can overlap.");
     ImGui::PushTextWrapPos(0.0f);
@@ -111,110 +92,86 @@ inline void Draw(const View& view, Section& selected)
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
     const float gap = ImGui::GetFontSize() * 1.5f;
-    const bool split = view.enabled && (view.route == Route::Deferred ||
-                                        view.route == Route::FinishedBefore);
+    const bool split = view.enabled && (view.route == Route::Deferred || view.route == Route::FinishedBefore);
     const bool finished = view.route == Route::Finished || view.route == Route::FinishedBefore;
     const float nodeWidth =
         split ? std::max((width - gap) * 0.5f, 1.0f) : std::min(width, ImGui::GetFontSize() * 27.0f);
-    struct Node
+    enum Stage
     {
-        int lane, row; // -1: left branch, 0: main path, 1: right branch
+        GameInput,
+        Upscale,
+        Effects,
+        Prepare,
+        Model,
+        Apply,
+        Enlarge,
+        GameOutput
+    };
+    struct Label
+    {
         const char* title;
         std::string detail;
-        int section;
+        int section = -1;
     };
-    struct Edge
+    const Label labels[] = {
+        { "Game input", "Placement / routing", (int) Section::Placement },
+        { view.rayReconstruction ? "RR + Super Resolution" : "Super Resolution",
+          split ? "Clean game image" : "Game upscaler" },
+        { "Game effects + HUD", "Game rendering" },
+        { "Prepare NR input", "HDR / paper white / " + std::to_string(view.scalePercent) + "%", (int) Section::Input },
+        { "NR model", std::to_string(view.passes) + (view.passes == 1 ? " pass" : " passes"), (int) Section::Model },
+        { "Apply NR edit", view.applyModel ? "Strength / skin" : "Edit hidden; model runs", (int) Section::Blend },
+        { "Upscale NR edit", std::string("Separate ") + view.privateUpscaler + " pass (no RR)" },
+        { "Game output", "FG / presentation" }
+    };
+    // Parents encode the two branches directly; ordinary routes are simple ordered stages.
+    struct Node
     {
-        int from, to;
+        Stage stage;
+        int lane, row, parent, otherParent = -1;
     };
     std::vector<Node> nodes;
-    std::vector<Edge> edges;
-    const auto add = [&](int lane, int row, const char* title, std::string detail, int section = -1)
-    {
-        nodes.push_back({ lane, row, title, std::move(detail), section });
-        return (int) nodes.size() - 1;
-    };
-    const auto connect = [&](int from, int to) { edges.push_back({ from, to }); };
-    const auto prepare = [&](int lane, int row)
-    {
-        return add(lane, row, "Prepare NR input", "HDR / exposure / " + std::to_string(view.scalePercent) + "%",
-                   (int) Section::Input);
-    };
-    const auto model = [&](int lane, int row)
-    {
-        return add(lane, row, "NR model",
-                   std::to_string(view.passes) + (view.passes == 1 ? " pass" : " passes"),
-                   (int) Section::Model);
-    };
-    const auto apply = [&](int row)
-    {
-        return add(0, row, "Apply NR edit", view.applyModel ? "Strength / skin" : "Edit hidden; model runs",
-                   (int) Section::Blend);
-    };
-    const auto upscale = [&](int lane, int row)
-    {
-        return add(lane, row, view.rayReconstruction ? "RR + Super Resolution" : "Super Resolution",
-                   split ? "Clean game image" : "Game upscaler");
-    };
-    const auto effects = [&](int lane, int row) { return add(lane, row, "Game effects + HUD", "Game rendering"); };
-    const int input = add(0, 0, "Game input", "Placement / routing", (int) Section::Placement);
-    int last = input, lastRow = 0;
     if (split)
     {
-        // Only a separately carried edit branches. Both paths reunite at its application point.
-        const int prep = prepare(-1, 1), nr = model(-1, 2);
-        const int edit = add(-1, 3, "Upscale NR edit", std::string("Separate ") + view.privateUpscaler + " pass (no RR)");
-        int game = upscale(1, 1);
-        connect(input, prep);
-        connect(prep, nr);
-        connect(nr, edit);
-        connect(input, game);
+        nodes = { { GameInput, 0, 0, -1 },
+                  { Prepare, -1, 1, 0 },
+                  { Model, -1, 2, 1 },
+                  { Enlarge, -1, 3, 2 },
+                  { Upscale, 1, 1, 0 } };
         if (finished)
-        {
-            const int fx = effects(1, 2);
-            connect(game, fx);
-            game = fx;
-        }
-        last = apply(4);
-        connect(edit, last);
-        connect(game, last);
-        lastRow = 4;
+            nodes.push_back({ Effects, 1, 2, 4 });
+        nodes.push_back({ Apply, 0, 4, 3, (int) nodes.size() - 1 });
+        if (!finished)
+            nodes.push_back({ Effects, 0, 5, (int) nodes.size() - 1 });
+        nodes.push_back({ GameOutput, 0, finished ? 5 : 6, (int) nodes.size() - 1 });
     }
     else
     {
-        const auto append = [&](int next)
-        {
-            connect(last, next);
-            last = next;
-        };
-        if (!view.enabled || view.route != Route::Before)
-            append(upscale(0, ++lastRow));
-        if (!view.enabled || finished)
-            append(effects(0, ++lastRow));
+        static constexpr Stage off[] = { GameInput, Upscale, Effects, GameOutput };
+        static constexpr Stage before[] = { GameInput, Prepare, Model, Apply, Upscale, Effects, GameOutput };
+        static constexpr Stage after[] = { GameInput, Upscale, Prepare, Model, Apply, Effects, GameOutput };
+        static constexpr Stage present[] = { GameInput, Upscale, Effects, Prepare, Model, Apply, GameOutput };
+        std::span<const Stage> flow = off;
         if (view.enabled)
+            flow = view.route == Route::Before ? std::span(before) : finished ? std::span(present) : std::span(after);
+        for (auto stage : flow)
         {
-            append(prepare(0, ++lastRow));
-            append(model(0, ++lastRow));
-            append(apply(++lastRow));
-            if (view.route == Route::Before)
-                append(upscale(0, ++lastRow));
+            const int row = (int) nodes.size();
+            nodes.push_back({ stage, 0, row, row - 1 });
         }
     }
-    if (view.enabled && !finished)
-    {
-        const int fx = effects(0, ++lastRow);
-        connect(last, fx);
-        last = fx;
-    }
-    connect(last, add(0, ++lastRow, "Game output", "FG / presentation"));
+    const int lastRow = nodes.back().row;
 
     // Wrap labels inside their nodes so a narrow overlay does not crop either branch.
     const float padding = ImGui::GetStyle().FramePadding.x + 4.0f;
     const float wrapWidth = std::max(nodeWidth - padding * 2.0f, 1.0f);
     float height = 0.0f;
     for (const auto& node : nodes)
-        height = std::max(height, ImGui::CalcTextSize(node.title, nullptr, false, wrapWidth).y +
-                                      ImGui::CalcTextSize(node.detail.c_str(), nullptr, false, wrapWidth).y + 12.0f);
+    {
+        const auto& label = labels[node.stage];
+        height = std::max(height, ImGui::CalcTextSize(label.title, nullptr, false, wrapWidth).y +
+                                      ImGui::CalcTextSize(label.detail.c_str(), nullptr, false, wrapWidth).y + 12.0f);
+    }
     const float step = height + gap;
     const auto topLeft = [&](int index)
     {
@@ -224,29 +181,32 @@ inline void Draw(const View& view, Section& selected)
     };
     auto* draw = ImGui::GetWindowDrawList();
     const ImU32 lineColour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    for (const auto& edge : edges)
-    {
-        const auto a = topLeft(edge.from), b = topLeft(edge.to);
-        const ImVec2 start(a.x + nodeWidth * 0.5f, a.y + height), end(b.x + nodeWidth * 0.5f, b.y);
-        const float bend = end.y - gap * 0.5f;
-        draw->AddLine(start, ImVec2(start.x, bend), lineColour, 1.5f);
-        draw->AddLine(ImVec2(start.x, bend), ImVec2(end.x, bend), lineColour, 1.5f);
-        draw->AddLine(ImVec2(end.x, bend), end, lineColour, 1.5f);
-        draw->AddTriangleFilled(end, ImVec2(end.x - 3, end.y - 5), ImVec2(end.x + 3, end.y - 5), lineColour);
-    }
+    for (int i = 0; i < (int) nodes.size(); ++i)
+        for (int parent : { nodes[i].parent, nodes[i].otherParent })
+        {
+            if (parent < 0)
+                continue;
+            const auto a = topLeft(parent), b = topLeft(i);
+            const ImVec2 start(a.x + nodeWidth * 0.5f, a.y + height), end(b.x + nodeWidth * 0.5f, b.y);
+            const float bend = end.y - gap * 0.5f;
+            draw->AddLine(start, ImVec2(start.x, bend), lineColour, 1.5f);
+            draw->AddLine(ImVec2(start.x, bend), ImVec2(end.x, bend), lineColour, 1.5f);
+            draw->AddLine(ImVec2(end.x, bend), end, lineColour, 1.5f);
+            draw->AddTriangleFilled(end, ImVec2(end.x - 3, end.y - 5), ImVec2(end.x + 3, end.y - 5), lineColour);
+        }
     for (int i = 0; i < (int) nodes.size(); ++i)
     {
-        const auto& node = nodes[i];
+        const auto& label = labels[nodes[i].stage];
         const auto at = topLeft(i);
         ImGui::SetCursorScreenPos(at);
         ImGui::PushID(i);
-        const bool editable = node.section >= 0;
-        const bool chosen = editable && node.section == (int) selected;
+        const bool editable = label.section >= 0;
+        const bool chosen = editable && label.section == (int) selected;
         bool hovered = false;
         if (editable)
         {
             if (ImGui::InvisibleButton("stage", ImVec2(nodeWidth, height)))
-                selected = (Section) node.section;
+                selected = (Section) label.section;
             hovered = ImGui::IsItemHovered();
         }
         else
@@ -256,7 +216,7 @@ inline void Draw(const View& view, Section& selected)
                                 : editable ? ImGuiCol_Button
                                            : ImGuiCol_FrameBg;
         auto fill = ImGui::GetStyleColorVec4(background);
-        if (node.section == (int) Section::Model)
+        if (label.section == (int) Section::Model)
         {
             // Preserve the theme's HDR brightness and interaction states, changing only the hue.
             const float brightness = std::max({ fill.x, fill.y, fill.z });
@@ -264,13 +224,13 @@ inline void Draw(const View& view, Section& selected)
         }
         draw->AddRectFilled(at, ImVec2(at.x + nodeWidth, at.y + height), ImGui::GetColorU32(fill),
                             ImGui::GetStyle().FrameRounding);
-        const auto titleSize = ImGui::CalcTextSize(node.title, nullptr, false, wrapWidth);
-        const auto detailSize = ImGui::CalcTextSize(node.detail.c_str(), nullptr, false, wrapWidth);
+        const auto titleSize = ImGui::CalcTextSize(label.title, nullptr, false, wrapWidth);
+        const auto detailSize = ImGui::CalcTextSize(label.detail.c_str(), nullptr, false, wrapWidth);
         const float y = at.y + (height - titleSize.y - detailSize.y) * 0.5f;
         draw->AddText(nullptr, 0.0f, ImVec2(at.x + (nodeWidth - titleSize.x) * 0.5f, y),
-                      ImGui::GetColorU32(ImGuiCol_Text), node.title, nullptr, wrapWidth);
+                      ImGui::GetColorU32(ImGuiCol_Text), label.title, nullptr, wrapWidth);
         draw->AddText(nullptr, 0.0f, ImVec2(at.x + (nodeWidth - detailSize.x) * 0.5f, y + titleSize.y),
-                      ImGui::GetColorU32(editable ? ImGuiCol_Text : ImGuiCol_TextDisabled), node.detail.c_str(),
+                      ImGui::GetColorU32(editable ? ImGuiCol_Text : ImGuiCol_TextDisabled), label.detail.c_str(),
                       nullptr, wrapWidth);
         ImGui::PopID();
     }

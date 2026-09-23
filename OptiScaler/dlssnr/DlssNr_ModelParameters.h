@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../shaders/dlssnr/DlssNr_Guides.h"
 #include <nvsdk_ngx_params.h>
