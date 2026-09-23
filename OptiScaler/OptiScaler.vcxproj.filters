@@ -1614,8 +1614,6 @@
     <ClInclude Include="dlssnr\DlssNr.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNr_Capture.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNr_PipelineCapture.h"><Filter>Header Files</Filter></ClInclude>
-    <ClCompile Include="dlssnr\DlssNr_ExposureScan.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClInclude Include="dlssnr\DlssNr_ExposureScan.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="dlssnr\DlssNr_GpuLifetime.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="dlssnr\DlssNr_GpuLifetime.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNr_HoldParameters_Dx12.h"><Filter>Header Files</Filter></ClInclude>
@@ -1650,13 +1648,9 @@
     <ClInclude Include="shaders\dlssnr\DlssNr_Vk.h"><Filter>Header Files</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="dlssnr\DlssNr_ExposureAnchors.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="dlssnr\DlssNr_ExposureReadback.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClInclude Include="dlssnr\DlssNr_ExposureScan_Internal.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_DeferredSr.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Enlarge.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Evaluate.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Exposure.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_FinishedCompose.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_FinishedQueue.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Hold.cpp"><Filter>Source Files</Filter></ClCompile>
