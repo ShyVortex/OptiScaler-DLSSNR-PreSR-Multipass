@@ -8245,12 +8245,29 @@ void KeyUp(UINT vKey)
     inputFpsCycle = vKey == Config::Instance()->FpsCycleShortcutKey.value_or_default();
 }
 
-// The lamp, and only the lamp.
-//
-// Red for dark, green for full light, with its reading beside it. No status sentence: the whole
-// point of a light meter is that it is read at a glance while playing, and a paragraph in the corner
-// of somebody's game is not that. Everything wordy lives in the menu, which is where someone has
-// already decided to stop and read.
+bool MenuCommon::RenderMenu()
+{
+    if (!_isInited)
+        return false;
+
+    RenderMenuContext ctx { State::Instance(), Config::Instance(), ImGui::GetIO() };
+    ctx.now = Util::MillisecondsNow();
+    ctx.currentFeature = ctx.state.currentFeature;
+
+    // 1) Collect timing and input state before any ImGui drawing.
+    UpdateRenderTiming(ctx);
+    UpdateMenuInputMode(ctx);
+    HandleMenuShortcuts(ctx);
+
+    // 2) Prepare one-shot notifications and start a new ImGui frame only when needed.
+    UpdateVersionAndStartupNotifications(ctx);
+    BeginMenuFrameIfNeeded(ctx);
+    OptiInput::EndFrame(_isVisible);
+
+    // 3) Draw lightweight overlay windows first, preserving the original order.
+    ctx.menuResScale = MenuResolutionScale(ctx.io);
+    RenderSplashWindow(ctx);
+    RenderNotifications(ctx);
     UpdateFrameTimeAverages(ctx);
     RenderPerformanceOverlay(ctx);
 
