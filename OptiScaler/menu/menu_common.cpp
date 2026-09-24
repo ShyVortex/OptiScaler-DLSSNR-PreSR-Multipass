@@ -3660,10 +3660,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         }
 
         const auto& ampereStatus = AmpereMfgLoader::LastStatus();
-        if (ampereStatus.SmoothMotionActive || smoothMotion)
+        const auto& nvSmoothStatus = NVSmooth30Loader::LastStatus();
+        if (ampereStatus.SmoothMotionActive || nvSmoothStatus.SmoothMotionActive || smoothMotion)
         {
             ImGui::SameLine();
-            if (isAmpere && NVSmooth30Loader::GetStatus() == NVSmooth30Loader::Status::Active)
+            if (isAmpere && nvSmoothStatus.DllLoaded)
             {
                 ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active (RTX 30)]");
             }
@@ -3690,30 +3691,29 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "allowing RTX 30 (Ampere) cards to run NVIDIA driver-level Smooth Motion.\n"
                            "Requires driver 571.86+ on Windows.");
 
-            const auto nvSmoothStatus = NVSmooth30Loader::GetStatus();
             ImGui::Text("NVSmooth30 Status:");
             ImGui::SameLine();
-            if (nvSmoothStatus == NVSmooth30Loader::Status::Active)
+            if (nvSmoothStatus.DllLoaded)
             {
                 ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Active");
                 ImGui::SameLine();
-                ImGui::TextDisabled("(%s)", NVSmooth30Loader::GetLoadedPath().c_str());
+                ImGui::TextDisabled("(%s)", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());
             }
-            else if (nvSmoothStatus == NVSmooth30Loader::Status::MissingBinary)
-            {
-                ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "OptiScaler/nvsmooth30.dll not found");
-            }
-            else if (nvSmoothStatus == NVSmooth30Loader::Status::LoadFailed)
-            {
-                ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "Load failed");
-            }
-            else if (nvSmoothStatus == NVSmooth30Loader::Status::Disabled)
+            else if (!nvSmoothStatus.Enabled)
             {
                 ImGui::TextDisabled("Disabled in config");
             }
+            else if (!nvSmoothStatus.DllFound)
+            {
+                ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "OptiScaler/nvsmooth30.dll not found");
+            }
+            else if (!nvSmoothStatus.ErrorMessage.empty())
+            {
+                ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "%s", nvSmoothStatus.ErrorMessage.c_str());
+            }
             else
             {
-                ImGui::TextDisabled("%s", NVSmooth30Loader::StatusToString(nvSmoothStatus));
+                ImGui::TextDisabled("Not loaded");
             }
             ImGui::Unindent();
         }
