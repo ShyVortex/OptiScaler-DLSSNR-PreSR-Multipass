@@ -27,6 +27,7 @@
 
 #include <fsr4/FSR4ModelSelection.h>
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include <hooks/Dxgi_Hooks.h>
 #include <hooks/D3D11_Hooks.h>
@@ -1765,6 +1766,7 @@ DWORD WINAPI getGpuInfo(LPVOID hModuleVoid)
     // This existing worker runs after DLL_PROCESS_ATTACH has returned. GPU
     // enumeration and loading another graphics proxy must not run in DllMain.
     AmpereMfgLoader::TrySetup();
+    NVSmooth30Loader::TrySetup();
 
     return 0;
 }

@@ -647,6 +647,7 @@ class Config
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFsrFallback; // Linux fallback mode: auto / true / false
     CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgLinuxFallbackType; // Target pipeline: fsrfg / xefg
     CustomOptional<bool> FGDLSSGSmoothMotion { false };        // NVIDIA Smooth Motion pacing/interpolation via DRS (strictly opt-in, default false)
+    CustomOptional<bool> SmoothMotionNVSmooth30 { false };     // Sideload nvsmooth30.dll from OptiScaler directory on RTX 30 (SM86) cards
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };
     CustomOptional<bool> FGDrawUIOverFG { false };

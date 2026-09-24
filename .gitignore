@@ -451,3 +451,6 @@ release
 # dlssg_sm86 files & local runtime experiments
 dlssg_for_sm86/
 
+# smooth motion mod
+nvsmooth30/
+

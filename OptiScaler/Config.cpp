@@ -179,6 +179,13 @@ bool Config::Reload(std::filesystem::path iniPath)
             else if (auto smOptFg = readBool("FrameGen", "AmpereMfgSmoothMotion"); smOptFg.has_value())
                 FGDLSSGSmoothMotion.set_from_config(smOptFg.value());
 
+            if (auto nsOpt = readBool("SmoothMotion", "EnableNVSmooth30"); nsOpt.has_value())
+                SmoothMotionNVSmooth30.set_from_config(nsOpt.value());
+            else if (auto nsOptD = readBool("DLSSG", "NVSmooth30"); nsOptD.has_value())
+                SmoothMotionNVSmooth30.set_from_config(nsOptD.value());
+            else if (auto nsOptF = readBool("FrameGen", "NVSmooth30"); nsOptF.has_value())
+                SmoothMotionNVSmooth30.set_from_config(nsOptF.value());
+
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
                 ExternalFrameGeneration.set_from_config(true);
@@ -1102,6 +1109,7 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType", Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
         ini.SetValue("DLSSG", "SmoothMotion", GetBoolValue(Instance()->FGDLSSGSmoothMotion.value_for_config()).c_str());
         ini.Delete("DLSSG", "AmpereMfgSmoothMotion");
+        ini.SetValue("SmoothMotion", "EnableNVSmooth30", GetBoolValue(Instance()->SmoothMotionNVSmooth30.value_for_config()).c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())
