@@ -69,6 +69,26 @@ struct ModelStateDx12
     OS_Dx12* spatialProxyDown = nullptr;
     Scaler nrScaler = Scaler::Count;
 
+    // Cached alternate-format surfaces (e.g. for games like FF7 Rebirth that alternate between
+    // R11G11B10_FLOAT gameplay and R16G16B16A16_FLOAT on cutscene camera cuts).
+    struct CachedSurfaces
+    {
+        DXGI_FORMAT modelFormat = DXGI_FORMAT_UNKNOWN;
+        DXGI_FORMAT nativeFormat = DXGI_FORMAT_UNKNOWN;
+        unsigned int width = 0;
+        unsigned int height = 0;
+        unsigned int workWidth = 0;
+        unsigned int workHeight = 0;
+        ID3D12Resource* colorCopy = nullptr;
+        ID3D12Resource* output = nullptr;
+        ID3D12Resource* passScratch = nullptr;
+        ID3D12Resource* passClamp = nullptr;
+        ID3D12Resource* hdrCopy = nullptr;
+        ID3D12Resource* activeColor = nullptr;
+        ID3D12Resource* colorSmall = nullptr;
+        ID3D12Resource* outputNative = nullptr;
+    } altSurfaces;
+
     // Frame hold (design/frame-hold.md): a persistent copy of the output taken on hold-on and restored
     // over the live output before the encode reads it while held, so a setting change re-renders the
     // same frame. heldWhitePoint preserves the encode scale for the comparison.

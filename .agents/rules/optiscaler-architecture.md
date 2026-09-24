@@ -110,6 +110,12 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp`: Contextual error message when post-upscale creation fails at display resolution: `"the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)"`.
        - `OptiScaler/dlssnr/DlssNr_MenuPlacement.cpp`: One-click button `"Switch to Pre-SR (Generate model before upscale)"` under the failure text to instantly switch and retry.
        - Associated test: `tests/nr_status_reporting_unit.cpp`.
+     - **Format Bouncing Stability & Cutscene Camera-Cut Surface Caching (FF7 Rebirth Stutter Issue #33)**:
+       - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_ModelState.h`: `CachedSurfaces altSurfaces` in `ModelStateDx12` caching staging textures across both `modelFormat` and `nativeFormat`.
+       - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Resources.cpp`: `ReleaseSurfacesIfFormatChanged` must **never** call `model.RetryAfterFailure()` or reset `modelRunning = false` on format transitions. It must execute zero-allocation O(1) pointer swaps using `altSurfaces` and set `nr.reset = true` without tearing down or rebuilding the NGX feature context. `altSurfaces` must be cleanly retired in `ReleaseResources()`.
+       - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp`: `PrepareRunModels` must strictly limit `altSurfaces` invalidation to genuine resolution or placement changes (`resolutionChanged || placementChanged`).
+       - Documentation: `docs/NR-FF7-REBIRTH.md`.
+       - Associated test: `tests/nr_format_bouncing_unit.cpp`.
 
 7. **Preservation of NVSmooth30 (RTX 30 Smooth Motion Unlocker) Integration Across Upstream Merges**:
    - Upstream author (`wilsjo2`) does not maintain the NVSmooth30 proxy integration.

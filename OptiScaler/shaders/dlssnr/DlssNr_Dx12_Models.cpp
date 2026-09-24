@@ -45,6 +45,16 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
             ParkNrResource(nr.outputNative);
             ParkNrResource(nr.activeColor);
             nr.passScratchFailed = false;
+
+            ParkNrResource(nr.altSurfaces.output);
+            ParkNrResource(nr.altSurfaces.passScratch);
+            ParkNrResource(nr.altSurfaces.passClamp);
+            ParkNrResource(nr.altSurfaces.colorCopy);
+            ParkNrResource(nr.altSurfaces.hdrCopy);
+            ParkNrResource(nr.altSurfaces.activeColor);
+            ParkNrResource(nr.altSurfaces.colorSmall);
+            ParkNrResource(nr.altSurfaces.outputNative);
+            nr.altSurfaces = {};
         }
     }
 

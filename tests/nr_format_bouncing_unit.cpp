@@ -61,7 +61,8 @@ struct MockModelState
 
     struct CachedSurfaces
     {
-        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+        DXGI_FORMAT modelFormat = DXGI_FORMAT_UNKNOWN;
+        DXGI_FORMAT nativeFormat = DXGI_FORMAT_UNKNOWN;
         unsigned int width = 0;
         unsigned int height = 0;
         unsigned int workWidth = 0;
@@ -97,16 +98,19 @@ struct MockModelState
         res = nullptr;
     }
 
-    void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT needed)
+    void ReleaseSurfacesIfFormatChanged(DXGI_FORMAT modelFormat, DXGI_FORMAT nativeFormat)
     {
-        if (output == nullptr || output->format == needed)
+        const auto currentModelFormat = output ? output->format : DXGI_FORMAT_UNKNOWN;
+        const auto currentNativeFormat = colorCopy ? colorCopy->format : DXGI_FORMAT_UNKNOWN;
+
+        if (output == nullptr || (currentModelFormat == modelFormat && colorCopy && hdrCopy &&
+                                  currentNativeFormat == nativeFormat && hdrCopy->format == nativeFormat))
             return;
 
-        const auto currentFormat = output->format;
-
         // Check if we have cached surfaces matching the requested format and current dimensions
-        if (altSurfaces.format == needed && altSurfaces.width == width && altSurfaces.height == height &&
-            altSurfaces.workWidth == workWidth && altSurfaces.workHeight == workHeight)
+        if (altSurfaces.modelFormat == modelFormat && altSurfaces.nativeFormat == nativeFormat &&
+            altSurfaces.width == width && altSurfaces.height == height && altSurfaces.workWidth == workWidth &&
+            altSurfaces.workHeight == workHeight)
         {
             std::swap(output, altSurfaces.output);
             std::swap(passScratch, altSurfaces.passScratch);
@@ -116,7 +120,8 @@ struct MockModelState
             std::swap(activeColor, altSurfaces.activeColor);
             std::swap(colorSmall, altSurfaces.colorSmall);
             std::swap(outputNative, altSurfaces.outputNative);
-            altSurfaces.format = currentFormat;
+            altSurfaces.modelFormat = currentModelFormat;
+            altSurfaces.nativeFormat = currentNativeFormat;
             swapsCount++;
         }
         else
@@ -131,7 +136,8 @@ struct MockModelState
             ParkNrResource(altSurfaces.colorSmall);
             ParkNrResource(altSurfaces.outputNative);
 
-            altSurfaces.format = currentFormat;
+            altSurfaces.modelFormat = currentModelFormat;
+            altSurfaces.nativeFormat = currentNativeFormat;
             altSurfaces.width = width;
             altSurfaces.height = height;
             altSurfaces.workWidth = workWidth;
@@ -235,7 +241,7 @@ int main()
     std::cout << "Test 1: Initial format 26 setup verified." << std::endl;
 
     // Test 2: First camera cut switches to format 10 (DXGI_FORMAT_R16G16B16A16_FLOAT)
-    state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R16G16B16A16_FLOAT);
+    state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT);
 
     // Assert that model feature is NOT destroyed / retried!
     assert(state.models[0].retries == 0);
@@ -245,7 +251,8 @@ int main()
 
     // Current output is cleared, altSurfaces holds the format 26 surfaces
     assert(state.output == nullptr);
-    assert(state.altSurfaces.format == DXGI_FORMAT_R11G11B10_FLOAT);
+    assert(state.altSurfaces.modelFormat == DXGI_FORMAT_R11G11B10_FLOAT);
+    assert(state.altSurfaces.nativeFormat == DXGI_FORMAT_R11G11B10_FLOAT);
     assert(state.altSurfaces.output != nullptr);
     assert(state.altSurfaces.output->format == DXGI_FORMAT_R11G11B10_FLOAT);
 
@@ -260,7 +267,7 @@ int main()
     std::cout << "Test 2: Camera cut format 10 switch verified (models preserved, zero retries)." << std::endl;
 
     // Test 3: Normal frame after cut switches back to format 26 (DXGI_FORMAT_R11G11B10_FLOAT)
-    state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R11G11B10_FLOAT);
+    state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R11G11B10_FLOAT);
 
     // Must swap instantly without allocating!
     assert(state.swapsCount == 1);
@@ -270,7 +277,8 @@ int main()
     assert(state.output != nullptr);
     assert(state.output->format == DXGI_FORMAT_R11G11B10_FLOAT);
     assert(state.output->id == fmt26OutputId); // Reused cached format 26 resource!
-    assert(state.altSurfaces.format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    assert(state.altSurfaces.modelFormat == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    assert(state.altSurfaces.nativeFormat == DXGI_FORMAT_R16G16B16A16_FLOAT);
     assert(state.altSurfaces.output->id == fmt10OutputId); // Stashed format 10 resource!
     std::cout << "Test 3: Post-cut switch back to format 26 verified (instant swap, zero allocations)." << std::endl;
 
@@ -279,12 +287,12 @@ int main()
     for (int i = 0; i < 50; ++i)
     {
         // Camera cut -> format 10
-        state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R16G16B16A16_FLOAT);
+        state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT);
         assert(state.output->format == DXGI_FORMAT_R16G16B16A16_FLOAT);
         assert(state.output->id == fmt10OutputId);
 
         // Next frame -> format 26
-        state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R11G11B10_FLOAT);
+        state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R11G11B10_FLOAT);
         assert(state.output->format == DXGI_FORMAT_R11G11B10_FLOAT);
         assert(state.output->id == fmt26OutputId);
     }
@@ -301,10 +309,40 @@ int main()
     state.HandleResolutionOrPlacementChange(true, false);
     assert(state.output == nullptr);
     assert(state.altSurfaces.output == nullptr);
-    assert(state.altSurfaces.format == DXGI_FORMAT_UNKNOWN);
+    assert(state.altSurfaces.modelFormat == DXGI_FORMAT_UNKNOWN);
+    assert(state.altSurfaces.nativeFormat == DXGI_FORMAT_UNKNOWN);
     assert(state.models[0].retries == 1);
     assert(state.modelRunning == false);
     std::cout << "Test 5: Resolution change full invalidation verified." << std::endl;
+
+    // Test 6: Mixed spatial formats (modelFormat = 10, nativeFormat = 26)
+    state.models[0].Prepare();
+    state.modelRunning = true;
+    state.width = 1708;
+    state.height = 960;
+    state.workWidth = 1708;
+    state.workHeight = 960;
+    state.output = state.CreateScratch(DXGI_FORMAT_R16G16B16A16_FLOAT, 1708, 960);
+    state.colorCopy = state.CreateScratch(DXGI_FORMAT_R11G11B10_FLOAT, 1708, 960);
+    state.hdrCopy = state.CreateScratch(DXGI_FORMAT_R11G11B10_FLOAT, 1708, 960);
+    const auto spatialOutputId = state.output->id;
+
+    // Switch to uniform format 10
+    state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    assert(state.output == nullptr);
+    assert(state.altSurfaces.modelFormat == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    assert(state.altSurfaces.nativeFormat == DXGI_FORMAT_R11G11B10_FLOAT);
+    state.output = state.CreateScratch(DXGI_FORMAT_R16G16B16A16_FLOAT, 1708, 960);
+    state.colorCopy = state.CreateScratch(DXGI_FORMAT_R16G16B16A16_FLOAT, 1708, 960);
+    state.hdrCopy = state.CreateScratch(DXGI_FORMAT_R16G16B16A16_FLOAT, 1708, 960);
+
+    // Switch back to mixed spatial format
+    state.ReleaseSurfacesIfFormatChanged(DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R11G11B10_FLOAT);
+    assert(state.output != nullptr);
+    assert(state.output->id == spatialOutputId);
+    assert(state.colorCopy->format == DXGI_FORMAT_R11G11B10_FLOAT);
+    assert(state.output->format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    std::cout << "Test 6: Spatial mixed format caching verified." << std::endl;
 
     std::cout << "PASS: nr_format_bouncing_unit (FF7 Rebirth camera cut format stability)" << std::endl;
     return 0;

@@ -12,25 +12,74 @@ auto DlssNr_Dx12::State::ParkNrResource(ID3D12Resource*& resource) -> void
 
 auto DlssNr_Dx12::State::ReleaseSurfacesIfFormatChanged(DXGI_FORMAT modelFormat, DXGI_FORMAT nativeFormat) -> void
 {
-    if (nr.output == nullptr ||
-        (nr.output->GetDesc().Format == modelFormat && nr.colorCopy && nr.hdrCopy &&
-         nr.colorCopy->GetDesc().Format == nativeFormat && nr.hdrCopy->GetDesc().Format == nativeFormat))
+    const auto currentModelFormat = nr.output ? nr.output->GetDesc().Format : DXGI_FORMAT_UNKNOWN;
+    const auto currentNativeFormat = nr.colorCopy ? nr.colorCopy->GetDesc().Format : DXGI_FORMAT_UNKNOWN;
+
+    if (nr.output == nullptr || (currentModelFormat == modelFormat && nr.colorCopy && nr.hdrCopy &&
+                                 currentNativeFormat == nativeFormat && nr.hdrCopy->GetDesc().Format == nativeFormat))
         return;
 
-    LOG_INFO("DLSS-NR rebuilding surfaces: model format {} -> {}, frame format {}", (int) nr.output->GetDesc().Format,
-             (int) modelFormat, (int) nativeFormat);
+    LOG_INFO("DLSS-NR adapting surfaces: model format {} -> {}, frame format {} -> {}",
+             static_cast<uint32_t>(currentModelFormat), static_cast<uint32_t>(modelFormat),
+             static_cast<uint32_t>(currentNativeFormat), static_cast<uint32_t>(nativeFormat));
 
-    for (auto& model : nr.models)
-        model.RetryAfterFailure();
-    std::fill(std::begin(nr.passCreateFailed), std::end(nr.passCreateFailed), false);
-    modelRunning = false;
+    // Notice: model features are NOT retried here! modelRunning remains untouched.
+    // The NGX feature is extent/tuning-dependent and does not depend on intermediate surface format.
+    // Retrying models or tearing down compatibility runtime here causes massive 700ms+ stutter!
 
-    for (ID3D12Resource** r : { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.colorSmall,
-                                &nr.outputNative, &nr.activeColor })
-        ParkNrResource(*r);
+    // Check if we have cached surfaces matching the requested format and current dimensions
+    if (nr.altSurfaces.modelFormat == modelFormat && nr.altSurfaces.nativeFormat == nativeFormat &&
+        nr.altSurfaces.width == nr.width && nr.altSurfaces.height == nr.height &&
+        nr.altSurfaces.workWidth == nr.workWidth && nr.altSurfaces.workHeight == nr.workHeight)
+    {
+        std::swap(nr.output, nr.altSurfaces.output);
+        std::swap(nr.passScratch, nr.altSurfaces.passScratch);
+        std::swap(nr.passClamp, nr.altSurfaces.passClamp);
+        std::swap(nr.colorCopy, nr.altSurfaces.colorCopy);
+        std::swap(nr.hdrCopy, nr.altSurfaces.hdrCopy);
+        std::swap(nr.activeColor, nr.altSurfaces.activeColor);
+        std::swap(nr.colorSmall, nr.altSurfaces.colorSmall);
+        std::swap(nr.outputNative, nr.altSurfaces.outputNative);
+        nr.altSurfaces.modelFormat = currentModelFormat;
+        nr.altSurfaces.nativeFormat = currentNativeFormat;
+    }
+    else
+    {
+        ParkNrResource(nr.altSurfaces.output);
+        ParkNrResource(nr.altSurfaces.passScratch);
+        ParkNrResource(nr.altSurfaces.passClamp);
+        ParkNrResource(nr.altSurfaces.colorCopy);
+        ParkNrResource(nr.altSurfaces.hdrCopy);
+        ParkNrResource(nr.altSurfaces.activeColor);
+        ParkNrResource(nr.altSurfaces.colorSmall);
+        ParkNrResource(nr.altSurfaces.outputNative);
+
+        nr.altSurfaces.modelFormat = currentModelFormat;
+        nr.altSurfaces.nativeFormat = currentNativeFormat;
+        nr.altSurfaces.width = nr.width;
+        nr.altSurfaces.height = nr.height;
+        nr.altSurfaces.workWidth = nr.workWidth;
+        nr.altSurfaces.workHeight = nr.workHeight;
+        nr.altSurfaces.output = nr.output;
+        nr.altSurfaces.passScratch = nr.passScratch;
+        nr.altSurfaces.passClamp = nr.passClamp;
+        nr.altSurfaces.colorCopy = nr.colorCopy;
+        nr.altSurfaces.hdrCopy = nr.hdrCopy;
+        nr.altSurfaces.activeColor = nr.activeColor;
+        nr.altSurfaces.colorSmall = nr.colorSmall;
+        nr.altSurfaces.outputNative = nr.outputNative;
+
+        nr.output = nullptr;
+        nr.passScratch = nullptr;
+        nr.passClamp = nullptr;
+        nr.colorCopy = nullptr;
+        nr.hdrCopy = nullptr;
+        nr.activeColor = nullptr;
+        nr.colorSmall = nullptr;
+        nr.outputNative = nullptr;
+    }
 
     nr.passScratchFailed = false;
-
     nr.reset = true;
 }
 
@@ -241,6 +290,16 @@ auto DlssNr_Dx12::State::ReleaseResources() -> void
     for (auto** resource :
          { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.activeColor, &nr.colorSmall })
         ParkNrResource(*resource);
+
+    ParkNrResource(nr.altSurfaces.output);
+    ParkNrResource(nr.altSurfaces.passScratch);
+    ParkNrResource(nr.altSurfaces.passClamp);
+    ParkNrResource(nr.altSurfaces.colorCopy);
+    ParkNrResource(nr.altSurfaces.hdrCopy);
+    ParkNrResource(nr.altSurfaces.activeColor);
+    ParkNrResource(nr.altSurfaces.colorSmall);
+    ParkNrResource(nr.altSurfaces.outputNative);
+    nr.altSurfaces = {};
     ReleaseSpatialResources();
     nr.spatialSignatureValid = false;
     nr.spatialFallback = false;
