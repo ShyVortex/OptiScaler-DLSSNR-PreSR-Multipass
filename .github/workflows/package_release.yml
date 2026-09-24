@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      include_nvsmooth30:
+        description: 'Include NVSmooth30 (RTX 30 Smooth Motion unlocker in OptiScaler/nvsmooth30.dll)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -64,6 +69,32 @@ jobs:
         }
         Write-Host "dlssg_for_sm86 ready."
 
+    - name: Ensure NVSmooth30 files are present
+      if: ${{ inputs.include_nvsmooth30 }}
+      shell: powershell
+      run: |
+        if (-not (Test-Path "nvsmooth30\bin\version.dll") -and -not (Test-Path "nvsmooth30\build\Release\version.dll")) {
+            if (-not (Test-Path "nvsmooth30\CMakeLists.txt")) {
+                Write-Host "nvsmooth30 not found; cloning from https://github.com/ItsAdeline/NVSmooth30.git..."
+                git clone --depth 1 https://github.com/ItsAdeline/NVSmooth30.git nvsmooth30
+                if ($LASTEXITCODE -ne 0) { throw 'Cannot clone NVSmooth30 repository' }
+            }
+            Write-Host "Building nvsmooth30 from source with CMake..."
+            cmake -S nvsmooth30 -B nvsmooth30\build -A x64
+            if ($LASTEXITCODE -ne 0) { throw 'CMake configuration for nvsmooth30 failed' }
+            cmake --build nvsmooth30\build --config Release
+            if ($LASTEXITCODE -ne 0) { throw 'CMake build for nvsmooth30 failed' }
+            if (-not (Test-Path "nvsmooth30\bin")) {
+                New-Item -ItemType Directory -Force -Path "nvsmooth30\bin" | Out-Null
+            }
+            Copy-Item "nvsmooth30\build\Release\version.dll" -Destination "nvsmooth30\bin\version.dll"
+        }
+        if (-not (Test-Path "nvsmooth30\bin\version.dll") -and -not (Test-Path "nvsmooth30\build\Release\version.dll")) {
+            Write-Error "Failed to acquire or build nvsmooth30 version.dll"
+            exit 1
+        }
+        Write-Host "nvsmooth30 ready."
+
     - name: Acquire verified hybrid kernels
       shell: powershell
       run: .\get_hybrid_assets.ps1 -Destination "$env:RUNNER_TEMP\hybrid-assets"
@@ -88,6 +119,9 @@ jobs:
         }
         if ("${{ inputs.accept_nvidia_licenses }}" -eq "true") {
             $params["AcceptNvidiaLicenses"] = $true
+        }
+        if ("${{ inputs.include_nvsmooth30 }}" -eq "true") {
+            $params["IncludeNVSmooth30"] = $true
         }
 
         Write-Host "Executing package_release.ps1 with options:"

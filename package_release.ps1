@@ -17,6 +17,7 @@ param(
     [switch]$IncludeAmpereMfg,
     [switch]$AcceptAmpereMfgLicenses,
     [switch]$UpdateAmpereMfg,
+    [switch]$IncludeNVSmooth30,
     [string]$HybridAssetsDirectory,
     [string]$StreamlineArchive
 )
@@ -26,6 +27,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSCommandPath
 $flavour = if ($IncludeDlssFrameGeneration) { '-with-dlss-fg' } else { '' }
 if ($IncludeAmpereMfg) { $flavour += '-with-sm86-mfg' }
+if ($IncludeNVSmooth30) { $flavour += '-with-nvsmooth30' }
 
 $stage = "$root\release\$Version$flavour"
 $zip = "$root\release\OptiScaler-DLSSNR-$Version$flavour.zip"
@@ -340,6 +342,46 @@ if ($IncludeAmpereMfg) {
         Copy-Item -LiteralPath $docs -Destination "$sm86DestDir\docs" -Recurse -Force
     }
     Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, 310.1 runtime (if present), documentation, and notices staged"
+}
+
+if ($IncludeNVSmooth30) {
+    $nvSmoothSrc = "$root\nvsmooth30"
+    $nvSmoothDll = "$nvSmoothSrc\bin\version.dll"
+    if (-not (Test-Path -LiteralPath $nvSmoothDll) -and (Test-Path -LiteralPath "$nvSmoothSrc\build\Release\version.dll")) {
+        $nvSmoothDll = "$nvSmoothSrc\build\Release\version.dll"
+    }
+    if (-not (Test-Path -LiteralPath $nvSmoothDll)) {
+        if (-not (Test-Path -LiteralPath "$nvSmoothSrc\CMakeLists.txt")) {
+            Write-Host "nvsmooth30 not found; cloning from https://github.com/ItsAdeline/NVSmooth30.git..."
+            git clone --depth 1 https://github.com/ItsAdeline/NVSmooth30.git $nvSmoothSrc
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot clone NVSmooth30 repository' }
+        }
+        $cmake = (Get-Command cmake.exe -ErrorAction SilentlyContinue).Source
+        if ($cmake -and (Test-Path -LiteralPath "$nvSmoothSrc\CMakeLists.txt")) {
+            Write-Host "Building nvsmooth30 from source with CMake..."
+            & $cmake -S $nvSmoothSrc -B "$nvSmoothSrc\build" -A x64
+            if ($LASTEXITCODE -ne 0) { throw 'CMake configuration for nvsmooth30 failed' }
+            & $cmake --build "$nvSmoothSrc\build" --config Release
+            if ($LASTEXITCODE -ne 0) { throw 'CMake build for nvsmooth30 failed' }
+            if (Test-Path -LiteralPath "$nvSmoothSrc\build\Release\version.dll") {
+                $nvSmoothDll = "$nvSmoothSrc\build\Release\version.dll"
+            }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $nvSmoothDll)) {
+        throw "NVSmooth30 binary not found at $nvSmoothDll"
+    }
+    $optiScalerDir = "$stage\OptiScaler"
+    New-Item -ItemType Directory -Force -Path $optiScalerDir | Out-Null
+    Copy-Item -LiteralPath $nvSmoothDll -Destination "$optiScalerDir\nvsmooth30.dll"
+
+    $nvSmoothLicense = "$nvSmoothSrc\LICENSE"
+    if (Test-Path -LiteralPath $nvSmoothLicense) {
+        $licenseDir = "$optiScalerDir\licenses"
+        New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
+        Copy-Item -LiteralPath $nvSmoothLicense -Destination "$licenseDir\LICENSE.nvsmooth30.txt"
+    }
+    Write-Host "NVSmooth30: staged to OptiScaler\nvsmooth30.dll"
 }
 
 $checksumLines = Get-ChildItem -LiteralPath $stage -Recurse -File |

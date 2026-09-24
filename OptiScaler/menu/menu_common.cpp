@@ -5,6 +5,7 @@
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 #include <nvapi/NvApiHooks.h>
 
 #include <algorithm>
@@ -3590,7 +3591,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     ImGui::Separator();
     bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
-    const bool disableSmoothMotion = onLinux || !isAdaOrBlackwell;
+    const bool isAmpere = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_GA100);
+    const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere);
 
     if (disableSmoothMotion)
     {
@@ -3609,9 +3611,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         }
         else
         {
-            ShowHelpMarker("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50).\n"
-                           "NVIDIA driver-level Smooth Motion requires an RTX 40 or 50 series GPU (driver 571.86+).\n"
-                           "On RTX 30 series, an external driver patcher is required.");
+            ShowHelpMarker("Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or Blackwell (RTX 50).\n"
+                           "NVIDIA driver-level Smooth Motion requires driver 571.86+ on Windows with RTX 40/50 natively, or RTX 30 via NVSmooth30.\n"
+                           "Turing (RTX 20 / GTX 16) and older architectures lack hardware support for driver-level frame generation.");
         }
     }
     else
@@ -3620,18 +3622,86 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             config->FGDLSSGSmoothMotion = smoothMotion;
             NvApiHooks::ApplySmoothMotionDrs(smoothMotion);
+            if (smoothMotion && isAmpere && config->SmoothMotionNVSmooth30.value_or(true))
+            {
+                NVSmooth30Loader::TrySetup();
+            }
         }
-        ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
-                       "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
-                       "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                       "Supported on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
-                       "Can be toggled dynamically on the fly.");
+
+        if (isAmpere)
+        {
+            ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                           "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                           "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                           "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
+                           "Can be toggled dynamically on the fly.");
+        }
+        else
+        {
+            ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                           "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                           "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                           "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
+                           "Can be toggled dynamically on the fly.");
+        }
 
         const auto& ampereStatus = AmpereMfgLoader::LastStatus();
         if (ampereStatus.SmoothMotionActive || smoothMotion)
         {
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active]");
+            if (isAmpere && NVSmooth30Loader::GetStatus() == NVSmooth30Loader::Status::Active)
+            {
+                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active (RTX 30)]");
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active]");
+            }
+        }
+
+        if (isAmpere)
+        {
+            ImGui::Indent();
+            bool nvSmooth30 = config->SmoothMotionNVSmooth30.value_or(true);
+            if (ImGui::Checkbox("Enable NVSmooth30 Unlocker (RTX 30)##nv_smooth30", &nvSmooth30))
+            {
+                config->SmoothMotionNVSmooth30 = nvSmooth30;
+                if (nvSmooth30 && smoothMotion)
+                {
+                    NVSmooth30Loader::TrySetup();
+                }
+            }
+            ShowHelpMarker("NVSmooth30 Unlocker (placed in OptiScaler/nvsmooth30.dll):\n"
+                           "Patches NvPresent64 architecture gates and redirects CUDA kernels to SM86,\n"
+                           "allowing RTX 30 (Ampere) cards to run NVIDIA driver-level Smooth Motion.\n"
+                           "Requires driver 571.86+ on Windows.");
+
+            const auto nvSmoothStatus = NVSmooth30Loader::GetStatus();
+            ImGui::Text("NVSmooth30 Status:");
+            ImGui::SameLine();
+            if (nvSmoothStatus == NVSmooth30Loader::Status::Active)
+            {
+                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Active");
+                ImGui::SameLine();
+                ImGui::TextDisabled("(%s)", NVSmooth30Loader::GetLoadedPath().c_str());
+            }
+            else if (nvSmoothStatus == NVSmooth30Loader::Status::MissingBinary)
+            {
+                ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.2f, 1.0f), "OptiScaler/nvsmooth30.dll not found");
+            }
+            else if (nvSmoothStatus == NVSmooth30Loader::Status::LoadFailed)
+            {
+                ImGui::TextColored(ImVec4(0.9f, 0.2f, 0.2f, 1.0f), "Load failed");
+            }
+            else if (nvSmoothStatus == NVSmooth30Loader::Status::Disabled)
+            {
+                ImGui::TextDisabled("Disabled in config");
+            }
+            else
+            {
+                ImGui::TextDisabled("%s", NVSmooth30Loader::StatusToString(nvSmoothStatus));
+            }
+            ImGui::Unindent();
         }
     }
 

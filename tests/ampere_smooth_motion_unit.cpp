@@ -194,7 +194,8 @@ int main()
 
         auto evaluateUiState = [](bool onLinux, bool isNvidia, uint32_t archId) -> SmoothMotionUiState {
             const bool isAdaOrBlackwell = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
-            const bool disableSmoothMotion = onLinux || !isAdaOrBlackwell;
+            const bool isAmpere = isNvidia && (archId == NV_GPU_ARCHITECTURE_GA100);
+            const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere);
             if (disableSmoothMotion)
             {
                 if (onLinux)
@@ -212,16 +213,25 @@ int main()
                 else
                 {
                     return { true,
-                             "Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50).\n"
-                             "NVIDIA driver-level Smooth Motion requires an RTX 40 or 50 series GPU (driver 571.86+).\n"
-                             "On RTX 30 series, an external driver patcher is required." };
+                             "Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or Blackwell (RTX 50).\n"
+                             "NVIDIA driver-level Smooth Motion requires driver 571.86+ on Windows with RTX 40/50 natively, or RTX 30 via NVSmooth30.\n"
+                             "Turing (RTX 20 / GTX 16) and older architectures lack hardware support for driver-level frame generation." };
                 }
+            }
+            if (isAmpere)
+            {
+                return { false,
+                         "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                         "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                         "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                         "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
+                         "Can be toggled dynamically on the fly." };
             }
             return { false,
                      "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
                      "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
                      "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                     "Supported on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
+                     "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
                      "Can be toggled dynamically on the fly." };
         };
 
@@ -230,7 +240,7 @@ int main()
             auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_AD100);
             assert(!ui.disabled);
             assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
-            assert(ui.helpMarker.find("Supported on GeForce RTX 40 (Ada) and RTX 50 (Blackwell)") != std::string::npos);
+            assert(ui.helpMarker.find("Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell)") != std::string::npos);
             assert(ui.helpMarker.find("Disabled because") == std::string::npos);
             std::printf("  [PASS] Case 8a: Windows + Ada GPU evaluates to interactive checkbox\n");
         }
@@ -244,21 +254,22 @@ int main()
             std::printf("  [PASS] Case 8b: Windows + Blackwell GPU evaluates to interactive checkbox\n");
         }
 
-        // Case 8c: Windows + Ampere GPU (GA100 / RTX 30) -> Disabled with Ada/Blackwell explanation and external patcher note
+        // Case 8c: Windows + Ampere GPU (GA100 / RTX 30) -> Enabled via NVSmooth30 unlocker!
         {
             auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_GA100);
-            assert(ui.disabled);
-            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50)") != std::string::npos);
-            assert(ui.helpMarker.find("On RTX 30 series, an external driver patcher is required") != std::string::npos);
-            std::printf("  [PASS] Case 8c: Windows + Ampere GPU evaluates to disabled with Ada/Blackwell requirement\n");
+            assert(!ui.disabled);
+            assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
+            assert(ui.helpMarker.find("unlocked via OptiScaler/nvsmooth30.dll") != std::string::npos);
+            assert(ui.helpMarker.find("Disabled because") == std::string::npos);
+            std::printf("  [PASS] Case 8c: Windows + Ampere GPU evaluates to interactive checkbox (unlocked via NVSmooth30)\n");
         }
 
-        // Case 8d: Windows + Turing GPU (TU100 / RTX 20) -> Disabled with Ada/Blackwell explanation
+        // Case 8d: Windows + Turing GPU (TU100 / RTX 20) -> Disabled with architecture explanation
         {
             auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_TU100);
             assert(ui.disabled);
-            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ada Lovelace (RTX 40) or Blackwell (RTX 50)") != std::string::npos);
-            std::printf("  [PASS] Case 8d: Windows + Turing GPU evaluates to disabled with Ada/Blackwell requirement\n");
+            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or Blackwell (RTX 50)") != std::string::npos);
+            std::printf("  [PASS] Case 8d: Windows + Turing GPU evaluates to disabled with architecture explanation\n");
         }
 
         // Case 8e: Linux + Ada GPU -> Disabled with OS explanation
