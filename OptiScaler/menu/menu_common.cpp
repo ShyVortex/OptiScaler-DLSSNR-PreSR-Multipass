@@ -3307,12 +3307,24 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     config->ExternalFrameGeneration = true;
                     config->FGDLSSGAdaMfgUnlock = false;
+                    AmpereMfgLoader::ProbeCandidate(true);
                 }
             }
-            ShowHelpMarker("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
-                           "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
-                           "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
-                           "Do not combine with the Ada unlock or another external MFG unlocker.");
+
+            const auto& probeStatus = AmpereMfgLoader::LastStatus();
+            std::string helpText =
+                (probeStatus.Variant == AmpereMfgLoader::ModVariant::SilyNoMeta)
+                    ? ("SilyNoMeta Ampere/Turing unlock (" + probeStatus.ModName +
+                       "). Sideloads the dlssg_for_sm86 proxy.\n"
+                       "Supports Dynamic Multi-Frame Generation, live control, and universal proxy initialization.\n"
+                       "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
+                       "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
+                       "Do not combine with the Ada unlock or another external MFG unlocker.")
+                    : ("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
+                       "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
+                       "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
+                       "Do not combine with the Ada unlock or another external MFG unlocker.");
+            ShowHelpMarker(helpText.c_str());
         }
 
         if (ampereUnlock)
@@ -3346,8 +3358,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     std::string routerStr = AmpereMfgLoader::ResolveRouter();
                     std::string liveStr =
                         status.LiveControlActive ? "active" : (status.LiveControlSupported ? "ready" : "n/a");
-                    ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s | Live: %s",
-                                       status.DllFound ? "found" : "missing", routerStr.c_str(),
+                    const std::string& modStr = status.ModName.empty() ? "sdli1995" : status.ModName;
+                    ImGui::TextWrapped("Mod: %s | DLL: %s | Router: %s | INI: %s | Loaded: %s | Live: %s",
+                                       modStr.c_str(), status.DllFound ? "found" : "missing", routerStr.c_str(),
                                        status.IniWritten ? "written" : "not written", status.DllLoaded ? "yes" : "no",
                                        liveStr.c_str());
                 }
@@ -3542,7 +3555,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 config->FGDLSSGAmpereMfgLogLevel = currentLogLevel;
             }
             ShowHelpMarker(
-                "Controls sdli1995's dlssg_sm86 logging level written to dlssg_sm86.ini [Logging] Level:\n"
+                "Controls dlssg_sm86 logging level written to dlssg_sm86.ini [Logging] Level:\n"
                 "0: Off (minimal logging)\n"
                 "1: Default (info and error logging)\n"
                 "2: Debug\n"

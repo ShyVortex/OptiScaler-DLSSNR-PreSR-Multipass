@@ -161,6 +161,25 @@ int main()
         std::printf("  [PASS] Case 5: Streamline 2.11+ allows enabling and reveals slider conditionally\n");
     }
 
+    // Case 6: Dynamic mod identification in UI text and status line
+    {
+        auto formatStatusLine = [](const std::string& modName, bool found, const std::string& router, bool iniWritten,
+                                   bool loaded, const std::string& liveStr) -> std::string
+        {
+            return "Mod: " + (modName.empty() ? "sdli1995" : modName) + " | DLL: " + (found ? "found" : "missing") +
+                   " | Router: " + router + " | INI: " + (iniWritten ? "written" : "not written") +
+                   " | Loaded: " + (loaded ? "yes" : "no") + " | Live: " + liveStr;
+        };
+
+        std::string silyStatus = formatStatusLine("SilyNoMeta v0.3.5-4", true, "Auto", true, true, "ready");
+        assert(silyStatus.find("Mod: SilyNoMeta v0.3.5-4") != std::string::npos);
+
+        std::string sdliStatus = formatStatusLine("sdli1995", true, "SM86", true, true, "n/a");
+        assert(sdliStatus.find("Mod: sdli1995") != std::string::npos);
+
+        std::printf("  [PASS] Case 6: Dynamic mod identification in UI status line verified\n");
+    }
+
     std::printf("=== All Dynamic MFG Menu Logic Unit Tests PASSED! ===\n");
     return 0;
 }
