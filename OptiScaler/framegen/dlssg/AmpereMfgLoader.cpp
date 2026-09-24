@@ -162,6 +162,43 @@ bool WriteCompanionIni()
             s_status.IniWritten = true;
         }
         LOG_INFO("AmpereMfgLoader: Successfully written companion INI at {}", wstring_to_string(iniPath.wstring()));
+
+        // When SilyNoMeta Dynamic MFG support is present, also synchronize [DLSSG-SM86-75-COMPANION] in ReShade.ini
+        if (hasDynamic)
+        {
+            auto reshadeIniPath = std::filesystem::path(dllPathStr).parent_path() / L"ReShade.ini";
+            std::string existingReshade;
+            std::ifstream existingFile(reshadeIniPath);
+            if (existingFile.is_open())
+            {
+                std::ostringstream ss;
+                ss << existingFile.rdbuf();
+                existingReshade = ss.str();
+                existingFile.close();
+            }
+
+            auto* cfg = Config::Instance();
+            const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+            const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
+            const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+            const int maxCeiling = is3101 ? 3 : 5;
+            const int effectiveFrames = dynamicMfg ? maxCeiling : configuredFrames;
+            const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, false, maxCeiling);
+
+            std::string updatedReshade = MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
+            std::ofstream reshadeOut(reshadeIniPath, std::ios::out | std::ios::trunc);
+            if (reshadeOut.is_open())
+            {
+                reshadeOut << updatedReshade;
+                reshadeOut.close();
+                LOG_INFO("AmpereMfgLoader: Successfully synchronized companion section in {}", wstring_to_string(reshadeIniPath.wstring()));
+            }
+            else
+            {
+                LOG_WARN("AmpereMfgLoader: Could not open {} to synchronize companion section", wstring_to_string(reshadeIniPath.wstring()));
+            }
+        }
+
         return true;
     }
     catch (const std::exception& ex)
@@ -377,6 +414,39 @@ void TrySetup()
         if (!iniFile)
             throw std::runtime_error("Could not finish writing dlssg_sm86.ini");
         s_status.IniWritten = true;
+
+        if (s_status.HasDynamicMfgSupport)
+        {
+            auto reshadeIniPath = dllPath.parent_path() / L"ReShade.ini";
+            std::string existingReshade;
+            std::ifstream existingFile(reshadeIniPath);
+            if (existingFile.is_open())
+            {
+                std::ostringstream ss;
+                ss << existingFile.rdbuf();
+                existingReshade = ss.str();
+                existingFile.close();
+            }
+
+            const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+            const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
+            const int maxCeiling = s_status.Is3101Runtime ? 3 : 5;
+            const int effectiveFrames = dynamicMfg ? maxCeiling : configuredFrames;
+            const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, false, maxCeiling);
+
+            std::string updatedReshade = MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
+            std::ofstream reshadeOut(reshadeIniPath, std::ios::out | std::ios::trunc);
+            if (reshadeOut.is_open())
+            {
+                reshadeOut << updatedReshade;
+                reshadeOut.close();
+                LOG_INFO("AmpereMfgLoader: Successfully synchronized companion section in {}", wstring_to_string(reshadeIniPath.wstring()));
+            }
+            else
+            {
+                LOG_WARN("AmpereMfgLoader: Could not open {} to synchronize companion section", wstring_to_string(reshadeIniPath.wstring()));
+            }
+        }
     }
     catch (const std::exception& ex)
     {

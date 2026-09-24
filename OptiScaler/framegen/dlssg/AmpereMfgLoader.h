@@ -241,6 +241,91 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     return ss.str();
 }
 
+/// Merges or appends the [DLSSG-SM86-75-COMPANION] section into existing ReShade.ini text content,
+/// or creates a new ReShade.ini string if existingContent is empty.
+/// All other sections and keys in ReShade.ini are preserved verbatim.
+inline std::string MergeReshadeCompanionContent(const std::string& existingContent,
+                                                bool dynamicMfg,
+                                                float dynamicTargetFps,
+                                                int maxFrames,
+                                                int uiRecomposition = 1)
+{
+    // In ReShade.ini companion:
+    // Multiplier: 0 = FollowGame, 2..6 = Fixed multiplier (maxFrames + 1)
+    int multiplier = (maxFrames >= 1 && maxFrames <= 5) ? (maxFrames + 1) : 0;
+    int dynamicVal = dynamicMfg ? 1 : 0;
+    int targetFpsInt = (dynamicTargetFps > 0.0f) ? static_cast<int>(dynamicTargetFps + 0.5f) : 0;
+    int validUi = (uiRecomposition >= 0 && uiRecomposition <= 2) ? uiRecomposition : 1;
+
+    std::ostringstream newSection;
+    newSection << "[DLSSG-SM86-75-COMPANION]\n";
+    newSection << "VulkanFamily=0\n";
+    newSection << "Multiplier=" << (dynamicMfg ? 0 : multiplier) << "\n";
+    newSection << "Dynamic=" << dynamicVal << "\n";
+    newSection << "TargetFPS=" << targetFpsInt << "\n";
+    newSection << "DLSSRenderScale=0\n";
+    newSection << "UIRecomposition=" << validUi << "\n";
+
+    if (existingContent.empty())
+    {
+        std::ostringstream out;
+        out << "; Merge this section; preserve the rest of your ReShade.ini.\n";
+        out << "; Do not add this companion to ADDON.LoadFromDllMain.\n";
+        out << newSection.str();
+        return out.str();
+    }
+
+    std::istringstream inStream(existingContent);
+    std::ostringstream outStream;
+    std::string line;
+    bool inCompanionSection = false;
+    bool sectionWritten = false;
+
+    while (std::getline(inStream, line))
+    {
+        // Strip trailing carriage return if CRLF
+        std::string trimmed = line;
+        if (!trimmed.empty() && trimmed.back() == '\r')
+            trimmed.pop_back();
+
+        // Check for section header
+        if (!trimmed.empty() && trimmed.front() == '[')
+        {
+            if (trimmed == "[DLSSG-SM86-75-COMPANION]")
+            {
+                inCompanionSection = true;
+                if (!sectionWritten)
+                {
+                    outStream << newSection.str();
+                    sectionWritten = true;
+                }
+                continue;
+            }
+            else
+            {
+                inCompanionSection = false;
+            }
+        }
+
+        if (inCompanionSection)
+        {
+            // Skip old keys inside [DLSSG-SM86-75-COMPANION]
+            continue;
+        }
+
+        outStream << line << "\n";
+    }
+
+    if (!sectionWritten)
+    {
+        if (!existingContent.empty() && existingContent.back() != '\n')
+            outStream << "\n";
+        outStream << "\n" << newSection.str();
+    }
+
+    return outStream.str();
+}
+
 /// Checks if an architecture ID represents Turing (SM75).
 inline bool IsTuringArch(uint32_t archId)
 {

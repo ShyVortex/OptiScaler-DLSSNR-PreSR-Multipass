@@ -1,4 +1,4 @@
-#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+﻿#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -269,6 +269,62 @@ int main()
         assert(iniStandard.find("DynamicTargetFPS") == std::string::npos);
 
         std::printf("  [PASS] Case 13: DynamicMFG and DynamicTargetFPS formatting verified (enabled, SilyNoMeta disabled, sdli1995 clean)\n");
+    }
+
+    // Test 14: ReShade.ini companion section generation from scratch
+    {
+        std::string newReshade = MergeReshadeCompanionContent("", true, 144.0f, 5, 1);
+        assert(newReshade.find("[DLSSG-SM86-75-COMPANION]\n") != std::string::npos);
+        assert(newReshade.find("Dynamic=1\n") != std::string::npos);
+        assert(newReshade.find("TargetFPS=144\n") != std::string::npos);
+        assert(newReshade.find("Multiplier=0\n") != std::string::npos); // Dynamic mode sets Multiplier=0 (FollowGame/Dynamic)
+        assert(newReshade.find("UIRecomposition=1\n") != std::string::npos);
+
+        // Fixed multiplier mode (dynamicMfg = false, maxFrames = 3 -> Multiplier = 4 (4X))
+        std::string fixedReshade = MergeReshadeCompanionContent("", false, 0.0f, 3, 2);
+        assert(fixedReshade.find("Dynamic=0\n") != std::string::npos);
+        assert(fixedReshade.find("Multiplier=4\n") != std::string::npos);
+        assert(fixedReshade.find("TargetFPS=0\n") != std::string::npos);
+        assert(fixedReshade.find("UIRecomposition=2\n") != std::string::npos);
+
+        std::printf("  [PASS] Case 14: ReShade.ini companion section generation from scratch verified\n");
+    }
+
+    // Test 15: Non-destructive merging into existing ReShade.ini
+    {
+        std::string existing = 
+            "[GENERAL]\n"
+            "EffectSearchPaths=.\\reshade-shaders\\Shaders\n"
+            "PerformanceMode=1\n"
+            "\n"
+            "[DLSSG-SM86-75-COMPANION]\n"
+            "VulkanFamily=0\n"
+            "Multiplier=2\n"
+            "Dynamic=0\n"
+            "TargetFPS=60\n"
+            "DLSSRenderScale=0\n"
+            "UIRecomposition=0\n"
+            "\n"
+            "[OVERLAY]\n"
+            "ShowFPS=1\n";
+
+        std::string merged = MergeReshadeCompanionContent(existing, true, 120.0f, 5, 1);
+
+        // Verify other sections are preserved verbatim
+        assert(merged.find("[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nPerformanceMode=1\n") != std::string::npos);
+        assert(merged.find("[OVERLAY]\nShowFPS=1\n") != std::string::npos);
+
+        // Verify companion section updated
+        assert(merged.find("Dynamic=1\n") != std::string::npos);
+        assert(merged.find("TargetFPS=120\n") != std::string::npos);
+        assert(merged.find("Multiplier=0\n") != std::string::npos);
+        assert(merged.find("UIRecomposition=1\n") != std::string::npos);
+
+        // Old values removed
+        assert(merged.find("TargetFPS=60") == std::string::npos);
+        assert(merged.find("Multiplier=2") == std::string::npos);
+
+        std::printf("  [PASS] Case 15: Non-destructive merging into existing ReShade.ini verified\n");
     }
 
     std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
