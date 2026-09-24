@@ -31,9 +31,151 @@ PFN_DLSSG_SetDisplayTarget s_pfnSetDisplayTarget = nullptr;
 PFN_DLSSG_RequestUI s_pfnRequestUI = nullptr;
 } // namespace
 
+Status ProbeCandidate(bool forceRefresh)
+{
+    std::lock_guard lock(s_mutex);
+    if (s_status.DllLoaded)
+        return s_status;
+
+    if (s_status.DllFound && !forceRefresh)
+        return s_status;
+
+    auto* cfg = Config::Instance();
+    const auto& gpu = IdentifyGpu::getPrimaryGpu();
+    const uint32_t archId = static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id);
+    const bool isTuring =
+        IsTuringArch(archId) ||
+        (gpu.name.find("RTX 20") != std::string::npos || gpu.name.find("GTX 16") != std::string::npos ||
+         gpu.name.find("TITAN RTX") != std::string::npos || gpu.name.find("Turing") != std::string::npos ||
+         gpu.name.find("TU10") != std::string::npos || gpu.name.find("TU11") != std::string::npos);
+
+    auto basePath = Util::DllPath().parent_path();
+    std::filesystem::path dllPath;
+    std::error_code fileError;
+
+    auto probePath = [&](const std::filesystem::path& candidate) -> bool
+    { return !candidate.empty() && candidate != Util::DllPath() && std::filesystem::exists(candidate, fileError); };
+
+    auto mainOverride =
+        cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
+
+    std::filesystem::path rootCandidates[] = {
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_for_sm86" / L"version.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"version.dll",
+        basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
+        basePath / L"dlssg_sm86" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"dlssg_sm86.dll",
+        basePath / L"dlssg_sm86.dll",
+        basePath / L"version.dll"
+    };
+
+    std::filesystem::path legacy3101Candidates[] = {
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"sdli1995" / L"310.1" / L"version.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+        basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        basePath / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
+        basePath / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"sdli1995" / L"310.1" / L"version.dll",
+        basePath / L"310.1" / L"dlssg_sm86.dll",
+        basePath / L"310.1" / L"version.dll"
+    };
+
+    std::filesystem::path rootDll;
+    for (const auto& candidate : rootCandidates)
+    {
+        if (probePath(candidate))
+        {
+            rootDll = candidate;
+            break;
+        }
+    }
+
+    if (isTuring)
+    {
+        if (!rootDll.empty() && HasSm75KernelFamily(rootDll))
+        {
+            dllPath = rootDll;
+        }
+        else
+        {
+            for (const auto& candidate : legacy3101Candidates)
+            {
+                if (probePath(candidate))
+                {
+                    dllPath = candidate;
+                    break;
+                }
+            }
+            if (dllPath.empty() && !rootDll.empty())
+            {
+                dllPath = rootDll;
+            }
+        }
+    }
+    else
+    {
+        if (!rootDll.empty())
+        {
+            dllPath = rootDll;
+        }
+        else
+        {
+            for (const auto& candidate : legacy3101Candidates)
+            {
+                if (probePath(candidate))
+                {
+                    dllPath = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!dllPath.empty())
+    {
+        s_status.DllFound = true;
+        s_status.LoadedDllPath = dllPath.wstring();
+        s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
+        s_status.Is3101Runtime = Is3101Runtime(dllPath);
+        s_status.Variant = DetectModVariant(dllPath, &s_status.ModName);
+        s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) || HasDynamicMfgSupport(dllPath);
+        s_status.LiveControlSupported = (s_status.Variant == ModVariant::SilyNoMeta);
+    }
+    else
+    {
+        s_status.DllFound = false;
+        s_status.LoadedDllPath.clear();
+        s_status.Variant = ModVariant::Unknown;
+        s_status.ModName = "Not found";
+        s_status.HasSm75Support = false;
+        s_status.Is3101Runtime = false;
+        s_status.HasDynamicMfgSupport = false;
+        s_status.LiveControlSupported = false;
+    }
+
+    return s_status;
+}
+
 Status LastStatus()
 {
     std::lock_guard lock(s_mutex);
+    if (!s_status.DllLoaded && !s_status.DllFound)
+    {
+        ProbeCandidate(false);
+    }
     return s_status;
 }
 
@@ -270,9 +412,6 @@ bool WriteCompanionIni()
 void TrySetup()
 {
     std::lock_guard lock(s_mutex);
-    if (s_setupAttempted)
-        return;
-    s_setupAttempted = true;
 
     auto* cfg = Config::Instance();
 
@@ -286,8 +425,18 @@ void TrySetup()
         }
     }
 
+    // Always probe candidates so status and UI metadata are available
+    ProbeCandidate(false);
+
+    if (s_status.DllLoaded)
+        return;
+
     if (!cfg->FGDLSSGAmpereMfgUnlock.value_or_default())
         return;
+
+    if (s_setupAttempted)
+        return;
+    s_setupAttempted = true;
 
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
@@ -350,10 +499,19 @@ void TrySetup()
     std::filesystem::path rootCandidates[] = {
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_for_sm86" / L"version.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"version.dll",
         basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86.dll",
         basePath / L"version.dll"
     };
@@ -362,10 +520,13 @@ void TrySetup()
     std::filesystem::path legacy3101Candidates[] = {
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"sdli1995" / L"310.1" / L"version.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"310.1" / L"version.dll",
         basePath / L"dlssg_sm86" / L"310.1" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86" / L"310.1" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"sdli1995" / L"310.1" / L"version.dll",
         basePath / L"310.1" / L"dlssg_sm86.dll",
         basePath / L"310.1" / L"version.dll"
     };
@@ -445,11 +606,13 @@ void TrySetup()
     s_status.LoadedDllPath = dllPath.wstring();
     s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
     s_status.Is3101Runtime = Is3101Runtime(dllPath);
-    s_status.HasDynamicMfgSupport = HasDynamicMfgSupport(dllPath);
+    s_status.Variant = DetectModVariant(dllPath, &s_status.ModName);
+    s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) || HasDynamicMfgSupport(dllPath);
 
-    LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}, Is3101Runtime: {}, HasDynamicMfgSupport: {}",
-             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support, s_status.Is3101Runtime,
-             s_status.HasDynamicMfgSupport);
+    LOG_INFO("AmpereMfgLoader: Located binary at {}, Mod: {} (Variant: {}), HasSm75Support: {}, Is3101Runtime: {}, "
+             "HasDynamicMfgSupport: {}",
+             wstring_to_string(dllPath.wstring()), s_status.ModName, static_cast<uint32_t>(s_status.Variant),
+             s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
 
     // Generate and write companion dlssg_sm86.ini beside the DLL
     auto iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
@@ -584,9 +747,10 @@ void TrySetup()
         }
     }
 
-    // SilyNoMeta ASI compatibility: when loaded under a custom filename (such as dlssg_sm86.dll),
+    // SilyNoMeta ASI & UniversalProxy compatibility: when loaded under a custom filename (such as dlssg_sm86.dll),
     // DllMain skips self-initialization to avoid conflict with standard proxy names.
-    // Explicitly invoke InitializeASI export so the mod installs hooks and starts worker threads.
+    // Explicitly invoke InitializeASI or DLSSG_UniversalProxy export so the mod installs hooks and starts worker
+    // threads.
     using PFN_InitializeASI = void (*)();
     auto pfnInitAsi = reinterpret_cast<PFN_InitializeASI>(GetProcAddress(hMod, "InitializeASI"));
     if (pfnInitAsi != nullptr)
@@ -594,6 +758,18 @@ void TrySetup()
         LOG_INFO("AmpereMfgLoader: Invoking InitializeASI() export on {}", wstring_to_string(dllPath.wstring()));
         pfnInitAsi();
         s_status.AsiInitInvoked = true;
+    }
+    else
+    {
+        using PFN_UniversalProxy = void (*)();
+        auto pfnUniversalProxy = reinterpret_cast<PFN_UniversalProxy>(GetProcAddress(hMod, "DLSSG_UniversalProxy"));
+        if (pfnUniversalProxy != nullptr)
+        {
+            LOG_INFO("AmpereMfgLoader: Invoking DLSSG_UniversalProxy() export on {}",
+                     wstring_to_string(dllPath.wstring()));
+            pfnUniversalProxy();
+            s_status.AsiInitInvoked = true;
+        }
     }
 }
 

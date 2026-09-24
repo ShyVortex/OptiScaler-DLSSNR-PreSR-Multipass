@@ -8,6 +8,13 @@
 
 namespace AmpereMfgLoader
 {
+enum class ModVariant : uint32_t
+{
+    Unknown = 0,
+    Sdli1995 = 1,
+    SilyNoMeta = 2
+};
+
 struct Status
 {
     bool Enabled = false;           // Config says to use it
@@ -22,7 +29,9 @@ struct Status
     bool SmoothMotionActive = false; // True if NVIDIA Smooth Motion DRS setting was applied/active
     bool HasDynamicMfgSupport =
         false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
-    bool AsiInitInvoked = false;       // True if InitializeASI export was detected and invoked on the loaded module
+    ModVariant Variant = ModVariant::Unknown; // Detected mod variant (Unknown, Sdli1995, SilyNoMeta)
+    std::string ModName;               // Human-readable mod name/version (e.g. "SilyNoMeta v0.3.5-4", "sdli1995")
+    bool AsiInitInvoked = false;       // True if InitializeASI / DLSSG_UniversalProxy export was invoked
     bool LiveControlSupported = false; // True if DLSSG_RequestControl / DLSSG_SetDisplayTarget exports are available
     bool LiveControlActive = false;    // True if a live control command has been dispatched to the running module
     std::wstring LoadedDllPath;        // Absolute path of loaded DLL
@@ -46,6 +55,10 @@ using PFN_DLSSG_SetDisplayTarget = bool (*)(uint32_t targetFps);
 using PFN_DLSSG_RequestUI = bool (*)(uint32_t mode);
 
 Status LastStatus();
+
+/// Probes candidate paths for a dlssg_sm86 binary without loading it or writing files.
+/// Populates status with candidate path, mod variant, SM75 support, 310.1 status, etc.
+Status ProbeCandidate(bool forceRefresh = false);
 
 /// Called after DLL initialization, once GPU/environment information is available.
 void TrySetup();
@@ -495,6 +508,11 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
     const std::string needleRequestControl = "DLSSG_RequestControl";
     const std::string needleUniversalProxy = "DLSSG_UniversalProxy";
     const std::string needleSetDisplayTarget = "DLSSG_SetDisplayTarget";
+    const std::string needleGetControlStatus = "DLSSG_GetControlStatus";
+    const std::string needleGetProxyRole = "DLSSG_GetProxyRole";
+    const std::string needleRuntimeAnchor = "DLSSG_RuntimeAnchor";
+    const std::string needleControlEngine = "Control engine";
+    const std::string needleControlEngine16 = makeUtf16Le(needleControlEngine);
     const std::string needleCompanion16 = makeUtf16Le("DLSSG-SM86-75-COMPANION");
     const std::string needleSm8675_16 = makeUtf16Le("DLSSG-SM86-75");
 
@@ -520,6 +538,11 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
                 chunk.find(needleRequestControl) != std::string::npos ||
                 chunk.find(needleUniversalProxy) != std::string::npos ||
                 chunk.find(needleSetDisplayTarget) != std::string::npos ||
+                chunk.find(needleGetControlStatus) != std::string::npos ||
+                chunk.find(needleGetProxyRole) != std::string::npos ||
+                chunk.find(needleRuntimeAnchor) != std::string::npos ||
+                chunk.find(needleControlEngine) != std::string::npos ||
+                chunk.find(needleControlEngine16) != std::string::npos ||
                 chunk.find(needleCompanion16) != std::string::npos || chunk.find(needleSm8675_16) != std::string::npos)
             {
                 return true;
@@ -572,6 +595,165 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
     }
 
     return false;
+}
+
+/// Detects which mod variant/fork a dlssg_sm86 binary represents (sdli1995 vs SilyNoMeta).
+inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::string* outModName = nullptr)
+{
+    if (dllPath.empty())
+    {
+        if (outModName)
+            *outModName = "Unknown";
+        return ModVariant::Unknown;
+    }
+
+    auto makeUtf16Le = [](std::string_view ascii) -> std::string
+    {
+        std::string out;
+        out.reserve(ascii.size() * 2);
+        for (char c : ascii)
+        {
+            out.push_back(c);
+            out.push_back('\0');
+        }
+        return out;
+    };
+
+    const std::string needleEngineV0354 = "Control engine v0.3.5-4";
+    const std::string needleEngineV0354_16 = makeUtf16Le(needleEngineV0354);
+    const std::string needleEngineV035 = "Control engine v0.3.5";
+    const std::string needleEngineV035_16 = makeUtf16Le(needleEngineV035);
+    const std::string needleControlEngine = "Control engine";
+    const std::string needleControlEngine16 = makeUtf16Le(needleControlEngine);
+
+    const std::string needleDynamicMfg = "DynamicMFG";
+    const std::string needleDynamicMfg16 = makeUtf16Le(needleDynamicMfg);
+    const std::string needleDynamicTarget = "DynamicTargetFPS";
+    const std::string needleDynamicTarget16 = makeUtf16Le(needleDynamicTarget);
+    const std::string needleSilyNoMeta = "SilyNoMeta";
+    const std::string needleSilyNoMeta16 = makeUtf16Le(needleSilyNoMeta);
+
+    const std::string needleUniversalProxy = "DLSSG_UniversalProxy";
+    const std::string needleRequestControl = "DLSSG_RequestControl";
+    const std::string needleGetControlStatus = "DLSSG_GetControlStatus";
+    const std::string needleGetProxyRole = "DLSSG_GetProxyRole";
+    const std::string needleRuntimeAnchor = "DLSSG_RuntimeAnchor";
+    const std::string needleCompanion16 = makeUtf16Le("DLSSG-SM86-75-COMPANION");
+
+    const std::string needleSdliProxyName = "DlssgProxy_Name";
+    const std::string needleSdliProxyRole = "DlssgProxy_Role";
+    const std::string needleSdliNoSm75 = "The 310.9 backend has no SM75";
+
+    bool isSily = false;
+    bool isSdli = false;
+    std::string detectedName = "Unknown";
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (file.is_open())
+    {
+        constexpr size_t bufferSize = 65536;
+        std::string buffer(bufferSize, '\0');
+
+        std::string overlap;
+        while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+        {
+            size_t bytesRead = file.gcount();
+            std::string chunk = overlap + std::string(buffer.data(), bytesRead);
+
+            if (chunk.find(needleEngineV0354) != std::string::npos ||
+                chunk.find(needleEngineV0354_16) != std::string::npos)
+            {
+                isSily = true;
+                detectedName = "SilyNoMeta v0.3.5-4";
+                break;
+            }
+            if (chunk.find(needleEngineV035) != std::string::npos ||
+                chunk.find(needleEngineV035_16) != std::string::npos)
+            {
+                isSily = true;
+                detectedName = "SilyNoMeta v0.3.5";
+            }
+            else if (!isSily && (chunk.find(needleControlEngine) != std::string::npos ||
+                                 chunk.find(needleControlEngine16) != std::string::npos ||
+                                 chunk.find(needleUniversalProxy) != std::string::npos ||
+                                 chunk.find(needleRequestControl) != std::string::npos ||
+                                 chunk.find(needleGetControlStatus) != std::string::npos ||
+                                 chunk.find(needleGetProxyRole) != std::string::npos ||
+                                 chunk.find(needleRuntimeAnchor) != std::string::npos ||
+                                 chunk.find(needleDynamicMfg) != std::string::npos ||
+                                 chunk.find(needleDynamicMfg16) != std::string::npos ||
+                                 chunk.find(needleDynamicTarget) != std::string::npos ||
+                                 chunk.find(needleDynamicTarget16) != std::string::npos ||
+                                 chunk.find(needleSilyNoMeta) != std::string::npos ||
+                                 chunk.find(needleSilyNoMeta16) != std::string::npos ||
+                                 chunk.find(needleCompanion16) != std::string::npos))
+            {
+                isSily = true;
+                detectedName = "SilyNoMeta";
+            }
+
+            if (!isSily && (chunk.find(needleSdliProxyName) != std::string::npos ||
+                            chunk.find(needleSdliProxyRole) != std::string::npos ||
+                            chunk.find(needleSdliNoSm75) != std::string::npos))
+            {
+                isSdli = true;
+            }
+
+            constexpr size_t maxNeedle = 64;
+            if (chunk.size() >= maxNeedle)
+                overlap = chunk.substr(chunk.size() - maxNeedle + 1);
+            else
+                overlap = chunk;
+        }
+    }
+
+    if (isSily)
+    {
+        if (outModName)
+            *outModName = detectedName;
+        return ModVariant::SilyNoMeta;
+    }
+
+    // Check directory path hints if file inspection didn't resolve conclusively
+    const std::string pathStr = dllPath.string();
+    if (pathStr.find("SilyNoMeta") != std::string::npos)
+    {
+        if (outModName)
+            *outModName = "SilyNoMeta";
+        return ModVariant::SilyNoMeta;
+    }
+
+    // Check companion files for SilyNoMeta markers
+    std::error_code ec;
+    std::filesystem::path reshadeIni = dllPath.parent_path() / L"ReShade.ini";
+    if (std::filesystem::exists(reshadeIni, ec))
+    {
+        std::ifstream rf(reshadeIni);
+        if (rf.is_open())
+        {
+            std::string line;
+            while (std::getline(rf, line))
+            {
+                if (line.find("DLSSG-SM86-75-COMPANION") != std::string::npos)
+                {
+                    if (outModName)
+                        *outModName = "SilyNoMeta";
+                    return ModVariant::SilyNoMeta;
+                }
+            }
+        }
+    }
+
+    if (isSdli || pathStr.find("sdli1995") != std::string::npos)
+    {
+        if (outModName)
+            *outModName = "sdli1995";
+        return ModVariant::Sdli1995;
+    }
+
+    if (outModName)
+        *outModName = "Unknown";
+    return ModVariant::Unknown;
 }
 
 /// Detects if a dlssg_sm86 binary contains the InitializeASI or DLSSG_UniversalProxy export symbol (e.g. SilyNoMeta

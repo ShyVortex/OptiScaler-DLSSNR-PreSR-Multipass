@@ -219,8 +219,15 @@ int main()
                        "Real SilyNoMeta version.dll must be detected as supporting Dynamic MFG");
                 assert(HasSm75KernelFamily(realSilyDll) &&
                        "Real SilyNoMeta version.dll must detect SM75/SM86 bridge support");
-                std::printf("  [PASS] Case 9: Real SilyNoMeta release binary verified directly (%s)\n",
-                            realSilyDll.string().c_str());
+
+                std::string silyName;
+                ModVariant silyVariant = DetectModVariant(realSilyDll, &silyName);
+                assert(silyVariant == ModVariant::SilyNoMeta &&
+                       "Real SilyNoMeta version.dll must detect ModVariant::SilyNoMeta");
+                assert(silyName.find("SilyNoMeta") != std::string::npos && "Detected mod name must contain SilyNoMeta");
+
+                std::printf("  [PASS] Case 9: Real SilyNoMeta release binary verified directly (%s, mod: %s)\n",
+                            realSilyDll.string().c_str(), silyName.c_str());
                 break;
             }
         }
@@ -232,11 +239,55 @@ int main()
             if (std::filesystem::exists(realSdliDll))
             {
                 assert(!HasDynamicMfgSupport(realSdliDll) && "Real sdli1995 version.dll must NOT report Dynamic MFG");
-                std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s)\n",
-                            realSdliDll.string().c_str());
+
+                std::string sdliName;
+                ModVariant sdliVariant = DetectModVariant(realSdliDll, &sdliName);
+                assert(sdliVariant == ModVariant::Sdli1995 &&
+                       "Real sdli1995 version.dll must detect ModVariant::Sdli1995");
+                assert(sdliName == "sdli1995" && "Detected mod name must be sdli1995");
+
+                std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s, mod: %s)\n",
+                            realSdliDll.string().c_str(), sdliName.c_str());
                 break;
             }
         }
+    }
+
+    // Test 10: DetectModVariant synthetic verification
+    {
+        auto tempDir = std::filesystem::temp_directory_path() / "optiscaler_mod_test";
+        std::filesystem::create_directories(tempDir);
+
+        // 10a: Empty / nonexistent
+        std::string name;
+        assert(DetectModVariant("", &name) == ModVariant::Unknown && name == "Unknown");
+        assert(DetectModVariant("non_existent_dll.dll", &name) == ModVariant::Unknown && name == "Unknown");
+
+        // 10b: Synthetic SilyNoMeta v0.3.5-4
+        auto silyV0354Dll = tempDir / "sily_0354.dll";
+        {
+            std::ofstream f(silyV0354Dll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Control engine v0.3.5-4 integrated in the proxy; optional panel is independent.";
+        }
+        assert(DetectModVariant(silyV0354Dll, &name) == ModVariant::SilyNoMeta);
+        assert(name == "SilyNoMeta v0.3.5-4");
+
+        // 10c: Synthetic sdli1995 with DlssgProxy exports
+        auto sdliSynthDll = tempDir / "sdli_synth.dll";
+        {
+            std::ofstream f(sdliSynthDll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Export: DlssgProxy_Name and DlssgProxy_Role with standard proxy exports";
+        }
+        assert(DetectModVariant(sdliSynthDll, &name) == ModVariant::Sdli1995);
+        assert(name == "sdli1995");
+
+        std::filesystem::remove(silyV0354Dll);
+        std::filesystem::remove(sdliSynthDll);
+        std::filesystem::remove_all(tempDir);
+
+        std::printf("  [PASS] Case 10: DetectModVariant synthetic unit tests passed\n");
     }
 
     std::printf("=== All Dynamic Multi-Frame Generation (DMFG) Unit Tests PASSED! ===\n");
