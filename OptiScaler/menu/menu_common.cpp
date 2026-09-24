@@ -3337,11 +3337,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 else
                 {
                     std::string routerStr = AmpereMfgLoader::ResolveRouter();
-                    ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s",
+                    std::string liveStr = status.LiveControlActive ? "active" : (status.LiveControlSupported ? "ready" : "n/a");
+                    ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s | Live: %s",
                                        status.DllFound ? "found" : "missing",
                                        routerStr.c_str(),
                                        status.IniWritten ? "written" : "not written",
-                                       status.DllLoaded ? "yes" : "no");
+                                       status.DllLoaded ? "yes" : "no",
+                                       liveStr.c_str());
                 }
             }
 
@@ -3461,10 +3463,18 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     config->FGDLSSGOverrideForceDMFG = dynamicMfg;
                     config->FGDLSSGForceDMFG = dynamicMfg;
                     AmpereMfgLoader::WriteCompanionIni();
+
+                    // Live programmatic control update without restarting
+                    float targetFps = config->FGDLSSGFramerateTargetDMFG.value_or_default();
+                    uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
+                    int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+                    uint32_t multiplier = (configuredFrames >= 1 && configuredFrames <= 5) ? (configuredFrames + 1) : 0;
+                    uint32_t liveMode = dynamicMfg ? 1 : ((multiplier >= 2) ? 2 : 0);
+                    AmpereMfgLoader::ApplyLiveControl(liveMode, targetInt, multiplier);
                 }
                 ShowHelpMarker("Requests dynamic multi-frame generation pacing in SilyNoMeta's dlssg_sm86.\n"
                                "Dynamically adjusts generated frames to match display refresh rate or target FPS.\n"
-                               "Automatically updates dlssg_sm86.ini.");
+                               "Applies live to running mod engine and updates companion configuration.");
 
                 if (dynamicMfg)
                 {
@@ -3473,10 +3483,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     {
                         config->FGDLSSGFramerateTargetDMFG = fpsTarget;
                         AmpereMfgLoader::WriteCompanionIni();
+
+                        // Live programmatic target FPS update
+                        uint32_t targetInt = (fpsTarget > 0.0f) ? static_cast<uint32_t>(fpsTarget + 0.5f) : 0;
+                        AmpereMfgLoader::ApplyDisplayTargetLive(targetInt);
                     }
                     ShowHelpMarker("An active limit of 0 means auto-detect the display refresh rate.\n"
                                    "Non-zero values (e.g. 120) set a fixed dynamic framerate ceiling.\n"
-                                   "Automatically updates dlssg_sm86.ini.");
+                                   "Applies live to running mod engine and updates companion configuration.");
                 }
             }
 

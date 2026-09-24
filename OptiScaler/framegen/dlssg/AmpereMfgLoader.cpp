@@ -24,12 +24,60 @@ namespace
 Status s_status;
 bool s_setupAttempted = false;
 std::recursive_mutex s_mutex;
+
+HMODULE s_hModule = nullptr;
+PFN_DLSSG_RequestControl s_pfnRequestControl = nullptr;
+PFN_DLSSG_SetDisplayTarget s_pfnSetDisplayTarget = nullptr;
+PFN_DLSSG_RequestUI s_pfnRequestUI = nullptr;
 } // namespace
 
 Status LastStatus()
 {
     std::lock_guard lock(s_mutex);
     return s_status;
+}
+
+bool ApplyLiveControl(uint32_t mode, uint32_t targetFps, uint32_t multiplier)
+{
+    std::lock_guard lock(s_mutex);
+    if (!s_pfnRequestControl)
+        return false;
+
+    DLSSG_ControlRequest req{};
+    req.version = 1;
+    req.mode = mode;
+    req.targetFPS = (targetFps > 1000) ? 1000 : targetFps;
+    req.multiplier = (multiplier >= 2 && multiplier <= 6) ? multiplier : 0;
+    req.flags = 0;
+
+    LOG_INFO("AmpereMfgLoader: Dispatching live control: mode={}, targetFPS={}, multiplier={}",
+             req.mode, req.targetFPS, req.multiplier);
+
+    bool result = s_pfnRequestControl(&req);
+    s_status.LiveControlActive = result;
+    return result;
+}
+
+bool ApplyDisplayTargetLive(uint32_t targetFps)
+{
+    std::lock_guard lock(s_mutex);
+    if (!s_pfnSetDisplayTarget)
+        return false;
+
+    uint32_t clamped = (targetFps > 1000) ? 1000 : targetFps;
+    LOG_INFO("AmpereMfgLoader: Dispatching live display target: {} FPS", clamped);
+    return s_pfnSetDisplayTarget(clamped);
+}
+
+bool ApplyUIModeLive(uint32_t uiMode)
+{
+    std::lock_guard lock(s_mutex);
+    if (!s_pfnRequestUI)
+        return false;
+
+    uint32_t validMode = (uiMode <= 2) ? uiMode : 1;
+    LOG_INFO("AmpereMfgLoader: Dispatching live UI recomposition mode: {}", validMode);
+    return s_pfnRequestUI(validMode);
 }
 
 std::string ResolveAutoKernelImage()
@@ -486,6 +534,40 @@ void TrySetup()
     s_status.DllLoaded = true;
     s_status.ErrorMessage.clear();
     LOG_INFO("AmpereMfgLoader: SM86/SM75 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+
+    // Store module handle for live programmatic control
+    s_hModule = hMod;
+
+    // Resolve SilyNoMeta v0.3.5-2 live control exports
+    s_pfnRequestControl = reinterpret_cast<PFN_DLSSG_RequestControl>(GetProcAddress(hMod, "DLSSG_RequestControl"));
+    s_pfnSetDisplayTarget = reinterpret_cast<PFN_DLSSG_SetDisplayTarget>(GetProcAddress(hMod, "DLSSG_SetDisplayTarget"));
+    s_pfnRequestUI = reinterpret_cast<PFN_DLSSG_RequestUI>(GetProcAddress(hMod, "DLSSG_RequestUI"));
+
+    if (s_pfnRequestControl != nullptr || s_pfnSetDisplayTarget != nullptr)
+    {
+        s_status.LiveControlSupported = true;
+        LOG_INFO("AmpereMfgLoader: Live programmatic control exports resolved (RequestControl: {}, SetDisplayTarget: {}, RequestUI: {})",
+                 (s_pfnRequestControl != nullptr), (s_pfnSetDisplayTarget != nullptr), (s_pfnRequestUI != nullptr));
+
+        // Initial sync of live settings if configured
+        const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+        const float targetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
+        const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
+        const int multiplier = (configuredFrames >= 1 && configuredFrames <= 5) ? (configuredFrames + 1) : 0;
+        uint32_t mode = dynamicMfg ? 1 : ((multiplier >= 2) ? 2 : 0);
+        uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
+
+        if (s_pfnRequestControl)
+        {
+            DLSSG_ControlRequest req{};
+            req.version = 1;
+            req.mode = mode;
+            req.multiplier = multiplier;
+            req.targetFPS = targetInt;
+            req.flags = 0;
+            s_status.LiveControlActive = s_pfnRequestControl(&req);
+        }
+    }
 
     // SilyNoMeta ASI compatibility: when loaded under a custom filename (such as dlssg_sm86.dll),
     // DllMain skips self-initialization to avoid conflict with standard proxy names.

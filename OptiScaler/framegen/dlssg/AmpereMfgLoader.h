@@ -20,9 +20,27 @@ struct Status
     bool SmoothMotionActive = false; // True if NVIDIA Smooth Motion DRS setting was applied/active
     bool HasDynamicMfgSupport = false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
     bool AsiInitInvoked = false;       // True if InitializeASI export was detected and invoked on the loaded module
+    bool LiveControlSupported = false; // True if DLSSG_RequestControl / DLSSG_SetDisplayTarget exports are available
+    bool LiveControlActive = false;    // True if a live control command has been dispatched to the running module
     std::wstring LoadedDllPath;     // Absolute path of loaded DLL
     std::string ErrorMessage; // Human-readable error if anything failed
 };
+
+#pragma pack(push, 1)
+/// Struct passed to DLSSG_RequestControl (version 1, size 0x14 / 20 bytes)
+struct DLSSG_ControlRequest
+{
+    uint32_t version = 1;      // ABI version (1)
+    uint32_t mode = 0;         // 0 = FollowGame, 1 = Dynamic, 2 = Fixed Multiplier, 3 = Adaptive Vulkan
+    uint32_t multiplier = 0;   // 2..6 (used when mode == 2)
+    uint32_t targetFPS = 0;    // Target FPS (0 = unconstrained/auto, 10..1000)
+    uint32_t flags = 0;        // Reserved / flags
+};
+#pragma pack(pop)
+
+using PFN_DLSSG_RequestControl = bool (*)(const DLSSG_ControlRequest* req);
+using PFN_DLSSG_SetDisplayTarget = bool (*)(uint32_t targetFps);
+using PFN_DLSSG_RequestUI = bool (*)(uint32_t mode);
 
 Status LastStatus();
 
@@ -31,6 +49,18 @@ void TrySetup();
 
 /// Regenerates and writes companion dlssg_sm86.ini (e.g. after in-game settings toggle).
 bool WriteCompanionIni();
+
+/// Dispatches live programmatic control to the running SilyNoMeta module without restarting.
+/// mode: 0 = FollowGame, 1 = Dynamic MFG, 2 = Fixed Multiplier
+/// targetFps: 0 = unconstrained/auto, 10..1000
+/// multiplier: 2..6 (when mode == 2)
+bool ApplyLiveControl(uint32_t mode, uint32_t targetFps, uint32_t multiplier);
+
+/// Dynamically updates the display target FPS in the running SilyNoMeta module.
+bool ApplyDisplayTargetLive(uint32_t targetFps);
+
+/// Dynamically updates UI recomposition mode in the running SilyNoMeta module (0 = FollowGame, 1 = Auto, 2 = Force).
+bool ApplyUIModeLive(uint32_t uiMode);
 
 /// Resolves the companion INI MaxGeneratedFrames setting.
 /// MaxFrames is clamped to [1, maxCeiling] (preserving 1 for 2X FG, up to maxCeiling).
