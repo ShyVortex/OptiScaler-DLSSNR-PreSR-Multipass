@@ -8,10 +8,19 @@
 #include "../OptiScaler/dlssnr/DlssNr_FinishedReady.h"
 
 using Microsoft::WRL::ComPtr;
-static void Check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D12 call failed"); }
-static void Expect(bool yes, const char* why) { if (!yes) throw std::runtime_error(why); }
+static void Check(HRESULT hr)
+{
+    if (FAILED(hr))
+        throw std::runtime_error("D3D12 call failed");
+}
+static void Expect(bool yes, const char* why)
+{
+    if (!yes)
+        throw std::runtime_error(why);
+}
 
-int main() try
+int main()
+try
 {
     ComPtr<IDXGIFactory4> factory;
     ComPtr<IDXGIAdapter> adapter;
@@ -41,7 +50,8 @@ int main() try
         Check(present->Signal(presentGate.Get(), frame));
         Check(inputReady->SetEventOnCompletion(frame, event));
         const auto result = WaitForSingleObject(event, 5000);
-        if (result != WAIT_OBJECT_0) presentGate->Signal(frame); // cleanup even on regression failure
+        if (result != WAIT_OBJECT_0)
+            presentGate->Signal(frame); // cleanup even on regression failure
         Expect(result == WAIT_OBJECT_0, "Present/render queues stalled");
         Expect(!crossQueueReady, "Accepted future render input on the presentation queue");
         Expect(sameQueueReady, "Rejected ordered same-queue input");
@@ -52,7 +62,12 @@ int main() try
     CloseHandle(event);
     Expect(!DlssNr::FinishedInputReady(false, UINT64_MAX, 1), "Accepted a removed device");
     Expect(!DlssNr::FinishedInputReady(true, UINT64_MAX, 1), "Same-queue bypassed device removal");
-    puts("PASS finished-picture queue readiness: native FG dependency, same-queue order, completed input, device removal");
+    puts("PASS finished-picture queue readiness: native FG dependency, same-queue order, completed input, device "
+         "removal");
     return 0;
 }
-catch (const std::exception& e) { puts(e.what()); return 1; }
+catch (const std::exception& e)
+{
+    puts(e.what());
+    return 1;
+}

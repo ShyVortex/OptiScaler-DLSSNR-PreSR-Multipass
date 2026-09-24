@@ -182,7 +182,8 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
                     if (created == NVSDK_NGX_Result_Success && state.feature != nullptr)
                         break;
 
-                    LOG_WARN("NR compatibility: candidate {} CreateFeature(18) failed (0x{:08X}); releasing runtime to attempt next candidate",
+                    LOG_WARN("NR compatibility: candidate {} CreateFeature(18) failed (0x{:08X}); releasing runtime to "
+                             "attempt next candidate",
                              candidate.string(), (unsigned) created);
                     if (state.feature)
                     {

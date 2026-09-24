@@ -10,13 +10,24 @@
 #include <stdexcept>
 #include "../OptiScaler/include/d3dx/d3dx12.h"
 
-namespace Util { bool CheckForRealObject(const char*, IUnknown*, IUnknown**) { return false; } }
+namespace Util
+{
+bool CheckForRealObject(const char*, IUnknown*, IUnknown**) { return false; }
+} // namespace Util
 #define LOG_INFO(...) ((void) 0)
 #include "../OptiScaler/shaders/dlssnr/DlssNr_GpuTime.h"
 
 using Microsoft::WRL::ComPtr;
-void check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D12 call failed"); }
-void expect(bool value, const char* why) { if (!value) throw std::runtime_error(why); }
+void check(HRESULT hr)
+{
+    if (FAILED(hr))
+        throw std::runtime_error("D3D12 call failed");
+}
+void expect(bool value, const char* why)
+{
+    if (!value)
+        throw std::runtime_error(why);
+}
 int main()
 try
 {
@@ -41,7 +52,7 @@ try
     {
         check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocators[i])));
         check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocators[i].Get(), nullptr,
-                                       IID_PPV_ARGS(&lists[i])));
+                                        IID_PPV_ARGS(&lists[i])));
         check(lists[i]->Close());
     }
     for (UINT64 round = 1; round <= 3; ++round)
@@ -91,4 +102,8 @@ try
     CloseHandle(event);
     std::puts("PASS: unfinished queries are not read; full rings skip timing; completed slots can be reused.");
 }
-catch (const std::exception& error) { std::fprintf(stderr, "FAIL: %s\n", error.what()); return 1; }
+catch (const std::exception& error)
+{
+    std::fprintf(stderr, "FAIL: %s\n", error.what());
+    return 1;
+}

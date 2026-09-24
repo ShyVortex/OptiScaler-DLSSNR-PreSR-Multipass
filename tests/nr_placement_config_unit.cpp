@@ -10,12 +10,11 @@ enum HasDefaultValue
     WithDefault,
 };
 
-template <class T, HasDefaultValue defaultState = WithDefault>
-class TestCustomOptional : public std::optional<T>
+template <class T, HasDefaultValue defaultState = WithDefault> class TestCustomOptional : public std::optional<T>
 {
     T _defaultValue {};
 
-public:
+  public:
     TestCustomOptional(T defaultValue)
     {
         _defaultValue = defaultValue;

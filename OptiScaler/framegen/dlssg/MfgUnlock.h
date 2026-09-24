@@ -51,7 +51,7 @@ struct Status
     unsigned int KernelsRewritten = 0;
     bool PatchFailed = false;    // an intended write/protection/cache operation failed
     bool RollbackFailed = false; // at least one original byte/protection/cache state could not be restored
-    std::string SnippetVersion; // file version of nvngx_dlssg.dll, empty if it could not be read
+    std::string SnippetVersion;  // file version of nvngx_dlssg.dll, empty if it could not be read
 };
 
 enum class Failure
@@ -85,4 +85,3 @@ bool PatchArchGates(HMODULE module);
 } // namespace MfgUnlock
 
 #endif
-

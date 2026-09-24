@@ -19,10 +19,7 @@ struct MockModel
     bool hasFeature = false;
     bool prepareShouldFail = false;
 
-    void RetryAfterFailure()
-    {
-        prepareShouldFail = false;
-    }
+    void RetryAfterFailure() { prepareShouldFail = false; }
 
     unsigned int Prepare(bool beforeUpscale)
     {
@@ -66,7 +63,8 @@ struct MockNrState
                     failed = true;
                     if (!beforeUpscale)
                     {
-                        reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)";
+                        reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try "
+                                 "enabling 'Generate model before upscale' or reducing Working Scale)";
                     }
                     else
                     {

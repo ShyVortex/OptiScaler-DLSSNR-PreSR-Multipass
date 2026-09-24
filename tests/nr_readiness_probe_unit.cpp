@@ -36,7 +36,7 @@ struct MockRecording
 
 class MockGpuLifetime
 {
-public:
+  public:
     std::vector<std::shared_ptr<MockRecording>> recordings;
 
     void Record(void* cmdList)
@@ -57,9 +57,7 @@ public:
         {
             if (rec->open && rec->commands == cmdList)
             {
-                return [rec]() -> bool {
-                    return rec->Finished();
-                };
+                return [rec]() -> bool { return rec->Finished(); };
             }
         }
         return []() { return false; };
@@ -87,8 +85,7 @@ struct SimulatedProxyState
 
     bool CreationReady(uint64_t epoch)
     {
-        return creationReady = creationReady || (epoch != creationEpoch) ||
-                               (creationComplete && creationComplete());
+        return creationReady = creationReady || (epoch != creationEpoch) || (creationComplete && creationComplete());
     }
 
     void Reset()

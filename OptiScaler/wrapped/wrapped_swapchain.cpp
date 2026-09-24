@@ -495,7 +495,10 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         if (auto currentFeature = State::Instance().currentFeature; currentFeature != nullptr)
             currentFeature->TickFrozenCheck();
 
-        const bool externalFgActive = State::Instance().externalFrameGeneration || State::Instance().activeFgNvngx != FGNvngxReplacement::None || State::Instance().activeFgOutput == FGOutput::DLSSG || State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().dlssgDetectedInterpolationCount > 1;
+        const bool externalFgActive =
+            State::Instance().externalFrameGeneration || State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
+            State::Instance().activeFgOutput == FGOutput::DLSSG || State::Instance().activeFgInput == FGInput::DLSSG ||
+            State::Instance().dlssgDetectedInterpolationCount > 1;
         if (!externalFgActive)
         {
             if (cq && (fg == nullptr || !fg->IsActive() || fg->IsPaused()))
@@ -926,8 +929,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
 
     State::Instance().scChanged = true;
 
-    if (!_composition && Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen &&
-        State::Instance().currentFG == nullptr && !State::Instance().externalFrameGeneration)
+    if (!_composition && Config::Instance()->OverrideVsync.value_or_default() &&
+        !State::Instance().SCExclusiveFullscreen && State::Instance().currentFG == nullptr &&
+        !State::Instance().externalFrameGeneration)
     {
         LOG_DEBUG("Overriding flags");
         SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
@@ -1066,7 +1070,8 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers(UINT BufferCount
                 if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
                 {
                     result = _real3->SetColorSpace1(hdrCS);
-                    if (SUCCEEDED(result)) DlssNr::FinishedPictureColorSpace(_real3, hdrCS);
+                    if (SUCCEEDED(result))
+                        DlssNr::FinishedPictureColorSpace(_real3, hdrCS);
 
                     if (result != S_OK)
                     {
@@ -1176,8 +1181,8 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::Present1(UINT SyncInterval, UI
 
         // When Reflex can't be used to limit, sleep in present
         if (!State::Instance().reflexLimitsFps && State::Instance().activeFgOutput == FGOutput::NoFG &&
-            !State::Instance().externalFrameGeneration &&
-            !IdentifyGpu::getPrimaryGpu().usesDxvk && !XellHooks::canLimit())
+            !State::Instance().externalFrameGeneration && !IdentifyGpu::getPrimaryGpu().usesDxvk &&
+            !XellHooks::canLimit())
             FrameLimit::sleep(false);
     }
     else
@@ -1373,8 +1378,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
 
     State::Instance().scChanged = true;
 
-    if (!_composition && Config::Instance()->OverrideVsync.value_or_default() && !State::Instance().SCExclusiveFullscreen &&
-        State::Instance().currentFG == nullptr && !State::Instance().externalFrameGeneration)
+    if (!_composition && Config::Instance()->OverrideVsync.value_or_default() &&
+        !State::Instance().SCExclusiveFullscreen && State::Instance().currentFG == nullptr &&
+        !State::Instance().externalFrameGeneration)
     {
         LOG_DEBUG("Overriding flags");
         SwapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
@@ -1533,7 +1539,8 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::ResizeBuffers1(UINT BufferCoun
                 if (DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT & css)
                 {
                     result = _real3->SetColorSpace1(hdrCS);
-                    if (SUCCEEDED(result)) DlssNr::FinishedPictureColorSpace(_real3, hdrCS);
+                    if (SUCCEEDED(result))
+                        DlssNr::FinishedPictureColorSpace(_real3, hdrCS);
 
                     if (result != S_OK)
                     {

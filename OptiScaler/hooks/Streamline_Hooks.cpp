@@ -434,8 +434,7 @@ sl::Result StreamlineHooks::hkslSetTag(const sl::ViewportHandle& viewport, const
         }
 
         // Cyberpunk hudless state fix for RDNA 2
-        if (!State::Instance().externalFrameGeneration &&
-            State::Instance().activeFgOutput == FGOutput::FSRFG &&
+        if (!State::Instance().externalFrameGeneration && State::Instance().activeFgOutput == FGOutput::FSRFG &&
             State::Instance().gameQuirks & GameQuirk::CyberpunkHudlessState &&
             tags[i].resource->state ==
                 (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) &&
@@ -907,11 +906,9 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     static std::string config;
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    bool shouldSpoofArch =
-        Config::Instance()->StreamlineSpoofing.value_or_default() &&
-        (State::Instance().activeFgInput == FGInput::NvngxFG ||
-         State::Instance().activeFgInput == FGInput::DLSSG ||
-         ampereMfgActive);
+    bool shouldSpoofArch = Config::Instance()->StreamlineSpoofing.value_or_default() &&
+                           (State::Instance().activeFgInput == FGInput::NvngxFG ||
+                            State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive);
 
     uint32_t currentArch = 0;
     if (shouldSpoofArch)
@@ -953,7 +950,8 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
             configJson["external"]["vk"]["device"]["1.3_features"].clear();
     }
 
-    if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::NvngxFG || ampereMfgActive)
+    if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::NvngxFG ||
+        ampereMfgActive)
     {
         if (configJson.contains("/vsync/supported"_json_pointer))
             configJson["vsync"]["supported"] = true; // disable eVSyncOffRequired
@@ -1238,8 +1236,8 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                                         newOptions.mode == sl::DLSSGMode::eAuto ||
                                         newOptions.mode == sl::DLSSGMode::eDynamic;
 
-    const bool canEnableDynamic = state.dlssgGameDMFGSupported ||
-                                  (state.streamlineVersion >= feature_version{ 2, 11, 0 });
+    const bool canEnableDynamic =
+        state.dlssgGameDMFGSupported || (state.streamlineVersion >= feature_version { 2, 11, 0 });
     bool enableDynamicMode = requested.values.forceDynamic && canEnableDynamic && dlssgPotentiallyActive;
 
     if (enableDynamicMode)

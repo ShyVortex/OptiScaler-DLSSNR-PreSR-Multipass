@@ -9,7 +9,8 @@ constexpr uint32_t NV_GPU_ARCHITECTURE_GA100 = 0x00000170;
 constexpr uint32_t NV_GPU_ARCHITECTURE_AD100 = 0x00000190;
 constexpr uint32_t NV_GPU_ARCHITECTURE_GB200 = 0x000001b0;
 
-struct MockArchInfo {
+struct MockArchInfo
+{
     uint32_t architecture = 0;
     uint32_t architecture_id = 0;
     uint32_t implementation = 0;
@@ -18,20 +19,21 @@ struct MockArchInfo {
     uint32_t revision_id = 0;
 };
 
-struct MockGpuInfo {
+struct MockGpuInfo
+{
     bool isNvidia = true;
     MockArchInfo nvidiaArchInfo {};
 };
 
 // Emulates the bidirectional architecture isolation logic in hkNvAPI_GPU_GetArchInfo
-void FilterArchInfoForCaller(MockArchInfo* pGpuArchInfo, const MockGpuInfo& primaryGpu, const std::string& caller, bool mfgUnlock = true)
+void FilterArchInfoForCaller(MockArchInfo* pGpuArchInfo, const MockGpuInfo& primaryGpu, const std::string& caller,
+                             bool mfgUnlock = true)
 {
     if (!pGpuArchInfo)
         return;
 
-    const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ?
-                              primaryGpu.nvidiaArchInfo.architecture_id :
-                              primaryGpu.nvidiaArchInfo.architecture;
+    const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ? primaryGpu.nvidiaArchInfo.architecture_id
+                                                                         : primaryGpu.nvidiaArchInfo.architecture;
 
     if (primaryGpu.isNvidia && realArch != 0 && realArch < NV_GPU_ARCHITECTURE_AD100)
     {
@@ -39,20 +41,16 @@ void FilterArchInfoForCaller(MockArchInfo* pGpuArchInfo, const MockGpuInfo& prim
         std::transform(callerLower.begin(), callerLower.end(), callerLower.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-        const bool isExplicitNonFgCaller = (callerLower.find("nvngx_dlss.") != std::string::npos ||
-                                            callerLower.find("nvngx_dlssd") != std::string::npos ||
-                                            callerLower.ends_with(".exe"));
+        const bool isExplicitNonFgCaller =
+            (callerLower.find("nvngx_dlss.") != std::string::npos ||
+             callerLower.find("nvngx_dlssd") != std::string::npos || callerLower.ends_with(".exe"));
 
-        const bool isFgCaller = !isExplicitNonFgCaller && (
-            callerLower.find("sl.common") != std::string::npos ||
-            callerLower.find("sl.dlss_g") != std::string::npos ||
-            callerLower.find("sl.interposer") != std::string::npos ||
-            callerLower.find("dlssg") != std::string::npos ||
-            callerLower.find("version") != std::string::npos ||
-            callerLower == "_nvngx.dll" ||
-            callerLower == "nvngx.dll" ||
-            callerLower.find("_nvngx") != std::string::npos
-        );
+        const bool isFgCaller =
+            !isExplicitNonFgCaller &&
+            (callerLower.find("sl.common") != std::string::npos || callerLower.find("sl.dlss_g") != std::string::npos ||
+             callerLower.find("sl.interposer") != std::string::npos || callerLower.find("dlssg") != std::string::npos ||
+             callerLower.find("version") != std::string::npos || callerLower == "_nvngx.dll" ||
+             callerLower == "nvngx.dll" || callerLower.find("_nvngx") != std::string::npos);
 
         if (mfgUnlock && isFgCaller)
         {
@@ -131,17 +129,20 @@ int main()
         {
             MockArchInfo arch { NV_GPU_ARCHITECTURE_GB200, NV_GPU_ARCHITECTURE_GB200, 0x202, 0x202, 0, 0 };
             FilterArchInfoForCaller(&arch, gpuAmpere, "dlssg_sm86.dll");
-            assert(arch.architecture == NV_GPU_ARCHITECTURE_GB200 && "dlssg_sm86 must preserve spoofed Blackwell arch!");
+            assert(arch.architecture == NV_GPU_ARCHITECTURE_GB200 &&
+                   "dlssg_sm86 must preserve spoofed Blackwell arch!");
         }
 
         // 1g: Caller version.dll (SilyNoMeta external mod) MUST see Blackwell (0x1b0)
         {
             MockArchInfo arch { NV_GPU_ARCHITECTURE_GB200, NV_GPU_ARCHITECTURE_GB200, 0x202, 0x202, 0, 0 };
             FilterArchInfoForCaller(&arch, gpuAmpere, "version.dll");
-            assert(arch.architecture == NV_GPU_ARCHITECTURE_GB200 && "version.dll must preserve spoofed Blackwell arch!");
+            assert(arch.architecture == NV_GPU_ARCHITECTURE_GB200 &&
+                   "version.dll must preserve spoofed Blackwell arch!");
         }
 
-        std::printf("  [PASS] Case 1: RTX 3090 Ampere arch protected for DLSS SR/RR, Blackwell preserved for Streamline FG\n");
+        std::printf(
+            "  [PASS] Case 1: RTX 3090 Ampere arch protected for DLSS SR/RR, Blackwell preserved for Streamline FG\n");
     }
 
     // Case 2: Physical RTX 3080/3090 (Ampere 0x170) without external mod spoofing (OptiScaler Ampere MFG Unlock)
@@ -196,7 +197,8 @@ int main()
         {
             MockArchInfo arch { NV_GPU_ARCHITECTURE_GA100, NV_GPU_ARCHITECTURE_GA100, 0x102, 0x102, 0xa1, 0xa1 };
             FilterArchInfoForCaller(&arch, gpuAmpere, "nvngx_dlssd.dll", true);
-            assert(arch.architecture == NV_GPU_ARCHITECTURE_GA100 && "nvngx_dlssd.dll must remain real Ampere (0x170)!");
+            assert(arch.architecture == NV_GPU_ARCHITECTURE_GA100 &&
+                   "nvngx_dlssd.dll must remain real Ampere (0x170)!");
         }
 
         // 2g: Caller Resonance.exe (Game executable) MUST NOT be spoofed (remains real Ampere 0x170)
@@ -210,14 +212,17 @@ int main()
         {
             MockArchInfo archNvngx { NV_GPU_ARCHITECTURE_GA100, NV_GPU_ARCHITECTURE_GA100, 0x102, 0x102, 0xa1, 0xa1 };
             FilterArchInfoForCaller(&archNvngx, gpuAmpere, "_nvngx.dll", false);
-            assert(archNvngx.architecture == NV_GPU_ARCHITECTURE_GA100 && "When mfgUnlock is false, _nvngx must not be spoofed!");
+            assert(archNvngx.architecture == NV_GPU_ARCHITECTURE_GA100 &&
+                   "When mfgUnlock is false, _nvngx must not be spoofed!");
 
             MockArchInfo archSl { NV_GPU_ARCHITECTURE_GA100, NV_GPU_ARCHITECTURE_GA100, 0x102, 0x102, 0xa1, 0xa1 };
             FilterArchInfoForCaller(&archSl, gpuAmpere, "sl.dlss_g.dll", false);
-            assert(archSl.architecture == NV_GPU_ARCHITECTURE_GA100 && "When mfgUnlock is false, sl.dlss_g must not be spoofed!");
+            assert(archSl.architecture == NV_GPU_ARCHITECTURE_GA100 &&
+                   "When mfgUnlock is false, sl.dlss_g must not be spoofed!");
         }
 
-        std::printf("  [PASS] Case 2: RTX 3080/3090 Ampere bidirectional spoofing: _nvngx/version/Streamline get Ada (0x190), DLSS SR/RR and game exe keep Ampere (0x170)\n");
+        std::printf("  [PASS] Case 2: RTX 3080/3090 Ampere bidirectional spoofing: _nvngx/version/Streamline get Ada "
+                    "(0x190), DLSS SR/RR and game exe keep Ampere (0x170)\n");
     }
 
     // Case 3: RTX 2080 (Turing 0x160) bidirectional spoofing
@@ -243,7 +248,8 @@ int main()
         FilterArchInfoForCaller(&archSl, gpuTuring, "sl.dlss_g.dll", true);
         assert(archSl.architecture == NV_GPU_ARCHITECTURE_AD100 && "sl.dlss_g must receive Ada arch on Turing!");
 
-        std::printf("  [PASS] Case 3: RTX 2080 Turing arch protected for DLSS SR, Ada spoofed for Streamline FG & _nvngx\n");
+        std::printf(
+            "  [PASS] Case 3: RTX 2080 Turing arch protected for DLSS SR, Ada spoofed for Streamline FG & _nvngx\n");
     }
 
     // Case 4: Native RTX 4090 (Ada 0x190)

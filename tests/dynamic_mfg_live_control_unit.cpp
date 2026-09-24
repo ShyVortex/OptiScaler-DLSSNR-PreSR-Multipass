@@ -5,7 +5,7 @@
 
 namespace
 {
-AmpereMfgLoader::DLSSG_ControlRequest s_lastRequest{};
+AmpereMfgLoader::DLSSG_ControlRequest s_lastRequest {};
 bool s_mockRequestCalled = false;
 uint32_t s_lastTargetFps = 0;
 bool s_mockTargetCalled = false;
@@ -48,7 +48,7 @@ bool ApplyLiveControl(uint32_t mode, uint32_t targetFps, uint32_t multiplier)
     if (!g_testPfnRequestControl)
         return false;
 
-    DLSSG_ControlRequest req{};
+    DLSSG_ControlRequest req {};
     req.version = 1;
     req.mode = mode;
     req.targetFPS = (targetFps > 1000) ? 1000 : targetFps;
@@ -85,10 +85,11 @@ int main()
 
     // Test 1: Validate struct layout and packing
     {
-        static_assert(sizeof(DLSSG_ControlRequest) == 0x14, "DLSSG_ControlRequest must be exactly 20 bytes (0x14) per SilyNoMeta ABI");
+        static_assert(sizeof(DLSSG_ControlRequest) == 0x14,
+                      "DLSSG_ControlRequest must be exactly 20 bytes (0x14) per SilyNoMeta ABI");
         static_assert(alignof(DLSSG_ControlRequest) == 1, "DLSSG_ControlRequest must be packed (alignof == 1)");
 
-        DLSSG_ControlRequest req{};
+        DLSSG_ControlRequest req {};
         assert(req.version == 1 && "Default ABI version must be 1");
         assert(req.mode == 0 && "Default mode must be 0 (FollowGame)");
         assert(req.multiplier == 0 && "Default multiplier must be 0");
@@ -100,7 +101,7 @@ int main()
 
     // Test 2: Status struct new fields default values
     {
-        Status st{};
+        Status st {};
         assert(!st.LiveControlSupported && "LiveControlSupported must default to false");
         assert(!st.LiveControlActive && "LiveControlActive must default to false");
 
@@ -111,7 +112,8 @@ int main()
     {
         // When not loaded, should return false gracefully without crashing
         assert(!ApplyLiveControl(1, 120, 0) && "ApplyLiveControl must return false when no module export is loaded");
-        assert(!ApplyDisplayTargetLive(144) && "ApplyDisplayTargetLive must return false when no module export is loaded");
+        assert(!ApplyDisplayTargetLive(144) &&
+               "ApplyDisplayTargetLive must return false when no module export is loaded");
         assert(!ApplyUIModeLive(1) && "ApplyUIModeLive must return false when no module export is loaded");
 
         std::printf("  [PASS] Case 3: Graceful fallback when live exports are absent verified\n");

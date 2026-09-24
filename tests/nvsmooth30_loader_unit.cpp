@@ -14,127 +14,122 @@ constexpr uint32_t NV_GPU_ARCHITECTURE_GB100 = 0x000001A0; // Blackwell (RTX 50)
 
 // DRS setting identifiers
 constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_ENABLE = 0xB0D384C0;
-constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_APIS   = 0xB0CC0875;
+constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_APIS = 0xB0CC0875;
 
 namespace fs = std::filesystem;
 
 // Mock / standalone representation of NVSmooth30 loader decision logic and path resolution
 namespace NVSmooth30Unit
 {
-    enum class Status
-    {
-        Disabled = 0,
-        NotAmpere,
-        MissingBinary,
-        LoadFailed,
-        Active
-    };
+enum class Status
+{
+    Disabled = 0,
+    NotAmpere,
+    MissingBinary,
+    LoadFailed,
+    Active
+};
 
-    inline const char* StatusToString(Status s)
+inline const char* StatusToString(Status s)
+{
+    switch (s)
     {
-        switch (s)
-        {
-        case Status::Disabled:
-            return "Disabled in config";
-        case Status::NotAmpere:
-            return "Requires NVIDIA Ampere (RTX 30) GPU";
-        case Status::MissingBinary:
-            return "OptiScaler/nvsmooth30.dll not found";
-        case Status::LoadFailed:
-            return "Failed to load nvsmooth30.dll";
-        case Status::Active:
-            return "Active (Smooth Motion unlocked on RTX 30)";
-        default:
-            return "Unknown";
-        }
+    case Status::Disabled:
+        return "Disabled in config";
+    case Status::NotAmpere:
+        return "Requires NVIDIA Ampere (RTX 30) GPU";
+    case Status::MissingBinary:
+        return "OptiScaler/nvsmooth30.dll not found";
+    case Status::LoadFailed:
+        return "Failed to load nvsmooth30.dll";
+    case Status::Active:
+        return "Active (Smooth Motion unlocked on RTX 30)";
+    default:
+        return "Unknown";
+    }
+}
+
+inline fs::path FindCandidatePath(const fs::path& basePath, const fs::path& overridePath)
+{
+    // 1. Mandatory standard location: basePath / OptiScaler / nvsmooth30.dll
+    if (!basePath.empty())
+    {
+        fs::path optiScalerSubdir = basePath / "OptiScaler" / "nvsmooth30.dll";
+        if (fs::exists(optiScalerSubdir))
+            return optiScalerSubdir;
     }
 
-    inline fs::path FindCandidatePath(const fs::path& basePath, const fs::path& overridePath)
+    // 2. Override location if specified
+    if (!overridePath.empty())
     {
-        // 1. Mandatory standard location: basePath / OptiScaler / nvsmooth30.dll
-        if (!basePath.empty())
-        {
-            fs::path optiScalerSubdir = basePath / "OptiScaler" / "nvsmooth30.dll";
-            if (fs::exists(optiScalerSubdir))
-                return optiScalerSubdir;
-        }
-
-        // 2. Override location if specified
-        if (!overridePath.empty())
-        {
-            fs::path overrideCandidate = overridePath / "nvsmooth30.dll";
-            if (fs::exists(overrideCandidate))
-                return overrideCandidate;
-        }
-
-        // 3. Root fallback for compatibility
-        if (!basePath.empty())
-        {
-            fs::path rootCandidate = basePath / "nvsmooth30.dll";
-            if (fs::exists(rootCandidate))
-                return rootCandidate;
-        }
-
-        return {};
+        fs::path overrideCandidate = overridePath / "nvsmooth30.dll";
+        if (fs::exists(overrideCandidate))
+            return overrideCandidate;
     }
 
-    struct MockLoaderState
+    // 3. Root fallback for compatibility
+    if (!basePath.empty())
     {
-        Status status = Status::Disabled;
-        std::string loadedPath;
-        bool drsProfileApplied = false;
+        fs::path rootCandidate = basePath / "nvsmooth30.dll";
+        if (fs::exists(rootCandidate))
+            return rootCandidate;
+    }
 
-        void Reset()
+    return {};
+}
+
+struct MockLoaderState
+{
+    Status status = Status::Disabled;
+    std::string loadedPath;
+    bool drsProfileApplied = false;
+
+    void Reset()
+    {
+        status = Status::Disabled;
+        loadedPath.clear();
+        drsProfileApplied = false;
+    }
+
+    bool TrySetup(bool configSmoothMotionEnabled, bool configNVSmooth30Enabled, bool isNvidia, uint32_t archId,
+                  const fs::path& basePath, const fs::path& overridePath, bool simulateLoadSuccess = true)
+    {
+        if (!configSmoothMotionEnabled || !configNVSmooth30Enabled)
         {
             status = Status::Disabled;
-            loadedPath.clear();
-            drsProfileApplied = false;
+            return false;
         }
 
-        bool TrySetup(bool configSmoothMotionEnabled,
-                      bool configNVSmooth30Enabled,
-                      bool isNvidia,
-                      uint32_t archId,
-                      const fs::path& basePath,
-                      const fs::path& overridePath,
-                      bool simulateLoadSuccess = true)
+        // Gating: Only supported on NVIDIA Ampere (RTX 30 series)
+        if (!isNvidia || archId != NV_GPU_ARCHITECTURE_GA100)
         {
-            if (!configSmoothMotionEnabled || !configNVSmooth30Enabled)
-            {
-                status = Status::Disabled;
-                return false;
-            }
-
-            // Gating: Only supported on NVIDIA Ampere (RTX 30 series)
-            if (!isNvidia || archId != NV_GPU_ARCHITECTURE_GA100)
-            {
-                status = Status::NotAmpere;
-                return false;
-            }
-
-            fs::path candidate = FindCandidatePath(basePath, overridePath);
-            if (candidate.empty())
-            {
-                status = Status::MissingBinary;
-                return false;
-            }
-
-            if (!simulateLoadSuccess)
-            {
-                status = Status::LoadFailed;
-                return false;
-            }
-
-            // Successfully resolved and simulated load
-            loadedPath = candidate.string();
-            status = Status::Active;
-
-            // Automatically apply DRS settings to driver profile
-            drsProfileApplied = true;
-            return true;
+            status = Status::NotAmpere;
+            return false;
         }
-    };
-}
+
+        fs::path candidate = FindCandidatePath(basePath, overridePath);
+        if (candidate.empty())
+        {
+            status = Status::MissingBinary;
+            return false;
+        }
+
+        if (!simulateLoadSuccess)
+        {
+            status = Status::LoadFailed;
+            return false;
+        }
+
+        // Successfully resolved and simulated load
+        loadedPath = candidate.string();
+        status = Status::Active;
+
+        // Automatically apply DRS settings to driver profile
+        drsProfileApplied = true;
+        return true;
+    }
+};
+} // namespace NVSmooth30Unit
 
 int main()
 {
@@ -149,8 +144,8 @@ int main()
     // Test 1: Candidate Path Resolution - Preference for OptiScaler/nvsmooth30.dll
     {
         const fs::path optiScalerDll = testRoot / "OptiScaler" / "nvsmooth30.dll";
-        const fs::path overrideDll   = testRoot / "override" / "nvsmooth30.dll";
-        const fs::path rootDll       = testRoot / "nvsmooth30.dll";
+        const fs::path overrideDll = testRoot / "override" / "nvsmooth30.dll";
+        const fs::path rootDll = testRoot / "nvsmooth30.dll";
 
         // Initially no files exist
         assert(NVSmooth30Unit::FindCandidatePath(testRoot, testRoot / "override").empty());

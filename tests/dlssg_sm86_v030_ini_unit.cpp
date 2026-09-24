@@ -15,11 +15,13 @@ int main()
 
         assert(ini030.find("[General]\nEnabled=1\n") != std::string::npos);
         assert(ini030.find("[FrameGeneration]\nOptimized=1\nMaxGeneratedFrames=5\n") != std::string::npos);
-        assert(ini030.find("[Compatibility]\nPreset=Auto\nRouter=Auto\nKernelImage=Auto\nHardwareBilinear=0\n") != std::string::npos);
+        assert(ini030.find("[Compatibility]\nPreset=Auto\nRouter=Auto\nKernelImage=Auto\nHardwareBilinear=0\n") !=
+               std::string::npos);
         assert(ini030.find("[Logging]\nLevel=1\nDirectory=dlssg_sm86\\logs\n") != std::string::npos);
         assert(ini030.find("[Runtime]\nMode=Bundled\nCacheDirectory=\n") != std::string::npos);
 
-        std::printf("  [PASS] Case 1: 0.3.x INI full section structure verified ([General], [FrameGeneration], [Compatibility], [Logging], [Runtime])\n");
+        std::printf("  [PASS] Case 1: 0.3.x INI full section structure verified ([General], [FrameGeneration], "
+                    "[Compatibility], [Logging], [Runtime])\n");
     }
 
     // Test 2: MaxGeneratedFrames clamping up to 5 (6X Multi-Frame Generation)
@@ -71,7 +73,8 @@ int main()
         std::string optTooLarge = FormatIniContent030(5, 4);
         assert(optTooLarge.find("Optimized=1\n") != std::string::npos);
 
-        std::printf("  [PASS] Case 3: Optimized kernels 4-tier consistency levels (0, 1, 2, 3) and clamping verified\n");
+        std::printf(
+            "  [PASS] Case 3: Optimized kernels 4-tier consistency levels (0, 1, 2, 3) and clamping verified\n");
     }
 
     // Test 4: UI Recomposition Preset validation (Auto, A, B)
@@ -121,17 +124,21 @@ int main()
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5) == false);
 
         // Setting 0x104D6667 with explicit user override 5 (6X) on Linux
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5, 5) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5, 5) ==
+               true);
         assert(val == 5);
 
         // Clamping explicit override to 0.3.0 ceiling (5)
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5, 8) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5, 8) ==
+               true);
         assert(val == 5);
 
         // Dynamic ceiling 0x10562D0F properly scales to 0.3.0 ceiling (5 frames / 6X)
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 5, true, true, val, 5) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 5, true, true, val,
+                                              5) == true);
         assert(val == 5);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 8, true, true, val, 5) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 8, true, true, val,
+                                              5) == true);
         assert(val == 5);
 
         std::printf("  [PASS] Case 6: Linux DRS override properly scales to 0.3.0 ceiling (5 frames / 6X)\n");
@@ -210,15 +217,22 @@ int main()
 
     // Test 11: dlssg_sm86 logging level configuration (0-3) and clamping
     {
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 0).find("[Logging]\nLevel=0\n") != std::string::npos);
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1).find("[Logging]\nLevel=1\n") != std::string::npos);
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 2).find("[Logging]\nLevel=2\n") != std::string::npos);
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 3).find("[Logging]\nLevel=3\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 0).find("[Logging]\nLevel=0\n") !=
+               std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1).find("[Logging]\nLevel=1\n") !=
+               std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 2).find("[Logging]\nLevel=2\n") !=
+               std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 3).find("[Logging]\nLevel=3\n") !=
+               std::string::npos);
 
         // Clamping invalid levels to default 1
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", -1).find("[Logging]\nLevel=1\n") != std::string::npos);
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 4).find("[Logging]\nLevel=1\n") != std::string::npos);
-        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 99).find("[Logging]\nLevel=1\n") != std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", -1).find("[Logging]\nLevel=1\n") !=
+               std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 4).find("[Logging]\nLevel=1\n") !=
+               std::string::npos);
+        assert(FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 99).find("[Logging]\nLevel=1\n") !=
+               std::string::npos);
 
         std::printf("  [PASS] Case 11: dlssg_sm86 logging level (0-3) and clamping verified\n");
     }
@@ -228,10 +242,12 @@ int main()
         std::string iniDefault = FormatIniContent030(3, 1);
         assert(iniDefault.find("[Runtime]\nMode=Bundled\nCacheDirectory=\n") != std::string::npos);
 
-        std::filesystem::path rootDll = std::filesystem::exists("dlssg_for_sm86/sdli1995/version.dll") ?
-            "dlssg_for_sm86/sdli1995/version.dll" : "dlssg_for_sm86/version.dll";
-        std::filesystem::path sm863101Dll = std::filesystem::exists("dlssg_for_sm86/sdli1995/310.1/version.dll") ?
-            "dlssg_for_sm86/sdli1995/310.1/version.dll" : "dlssg_for_sm86/310.1/version.dll";
+        std::filesystem::path rootDll = std::filesystem::exists("dlssg_for_sm86/sdli1995/version.dll")
+                                            ? "dlssg_for_sm86/sdli1995/version.dll"
+                                            : "dlssg_for_sm86/version.dll";
+        std::filesystem::path sm863101Dll = std::filesystem::exists("dlssg_for_sm86/sdli1995/310.1/version.dll")
+                                                ? "dlssg_for_sm86/sdli1995/310.1/version.dll"
+                                                : "dlssg_for_sm86/310.1/version.dll";
         if (std::filesystem::exists(rootDll) && std::filesystem::exists(sm863101Dll))
         {
             assert(HasSm75KernelFamily(rootDll) && "v0.3.5 root 310.9 runtime must have SM75 kernel support");
@@ -259,7 +275,8 @@ int main()
         assert(iniDynamic0.find("DynamicTargetFPS=0\n") != std::string::npos);
 
         // When dynamicMfg is false and hasDynamicMfgSupport is true (SilyNoMeta fork disabled)
-        std::string iniDynamicDisabled = FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, true);
+        std::string iniDynamicDisabled =
+            FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, true);
         assert(iniDynamicDisabled.find("DynamicMFG=0\n") != std::string::npos);
         assert(iniDynamicDisabled.find("DynamicTargetFPS=0\n") != std::string::npos);
 
@@ -268,7 +285,8 @@ int main()
         assert(iniStandard.find("DynamicMFG") == std::string::npos);
         assert(iniStandard.find("DynamicTargetFPS") == std::string::npos);
 
-        std::printf("  [PASS] Case 13: DynamicMFG and DynamicTargetFPS formatting verified (enabled, SilyNoMeta disabled, sdli1995 clean)\n");
+        std::printf("  [PASS] Case 13: DynamicMFG and DynamicTargetFPS formatting verified (enabled, SilyNoMeta "
+                    "disabled, sdli1995 clean)\n");
     }
 
     // Test 14: ReShade.ini companion section generation from scratch
@@ -277,7 +295,8 @@ int main()
         assert(newReshade.find("[DLSSG-SM86-75-COMPANION]\n") != std::string::npos);
         assert(newReshade.find("Dynamic=1\n") != std::string::npos);
         assert(newReshade.find("TargetFPS=144\n") != std::string::npos);
-        assert(newReshade.find("Multiplier=0\n") != std::string::npos); // Dynamic mode sets Multiplier=0 (FollowGame/Dynamic)
+        assert(newReshade.find("Multiplier=0\n") !=
+               std::string::npos); // Dynamic mode sets Multiplier=0 (FollowGame/Dynamic)
         assert(newReshade.find("UIRecomposition=1\n") != std::string::npos);
 
         // Fixed multiplier mode (dynamicMfg = false, maxFrames = 3 -> Multiplier = 4 (4X))
@@ -292,26 +311,26 @@ int main()
 
     // Test 15: Non-destructive merging into existing ReShade.ini
     {
-        std::string existing = 
-            "[GENERAL]\n"
-            "EffectSearchPaths=.\\reshade-shaders\\Shaders\n"
-            "PerformanceMode=1\n"
-            "\n"
-            "[DLSSG-SM86-75-COMPANION]\n"
-            "VulkanFamily=0\n"
-            "Multiplier=2\n"
-            "Dynamic=0\n"
-            "TargetFPS=60\n"
-            "DLSSRenderScale=0\n"
-            "UIRecomposition=0\n"
-            "\n"
-            "[OVERLAY]\n"
-            "ShowFPS=1\n";
+        std::string existing = "[GENERAL]\n"
+                               "EffectSearchPaths=.\\reshade-shaders\\Shaders\n"
+                               "PerformanceMode=1\n"
+                               "\n"
+                               "[DLSSG-SM86-75-COMPANION]\n"
+                               "VulkanFamily=0\n"
+                               "Multiplier=2\n"
+                               "Dynamic=0\n"
+                               "TargetFPS=60\n"
+                               "DLSSRenderScale=0\n"
+                               "UIRecomposition=0\n"
+                               "\n"
+                               "[OVERLAY]\n"
+                               "ShowFPS=1\n";
 
         std::string merged = MergeReshadeCompanionContent(existing, true, 120.0f, 5, 1);
 
         // Verify other sections are preserved verbatim
-        assert(merged.find("[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nPerformanceMode=1\n") != std::string::npos);
+        assert(merged.find("[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nPerformanceMode=1\n") !=
+               std::string::npos);
         assert(merged.find("[OVERLAY]\nShowFPS=1\n") != std::string::npos);
 
         // Verify companion section updated

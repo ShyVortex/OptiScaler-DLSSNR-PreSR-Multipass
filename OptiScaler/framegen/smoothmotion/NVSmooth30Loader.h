@@ -22,14 +22,11 @@ Status LastStatus();
 void TrySetup();
 
 /// Evaluates whether an architecture ID represents Nvidia Ampere (SM86).
-inline bool IsAmpereArch(uint32_t archId)
-{
-    return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170);
-}
+inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }
 
 /// Evaluates candidate paths for nvsmooth30.dll, strictly prioritizing the OptiScaler directory.
 inline std::filesystem::path ResolveCandidatePath(const std::filesystem::path& basePath,
-                                                 const std::filesystem::path& mainOverride = {})
+                                                  const std::filesystem::path& mainOverride = {})
 {
     // 1. mainOverride / "nvsmooth30.dll"
     if (!mainOverride.empty())

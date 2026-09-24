@@ -12,8 +12,16 @@
 #include <Util.h>
 #include "../OptiScaler/dlssnr/DlssNr_GpuLifetime.h"
 using Microsoft::WRL::ComPtr;
-static void check(HRESULT hr) { if (FAILED(hr)) throw std::runtime_error("D3D12 call failed"); }
-static void expect(bool yes, const char* why) { if (!yes) throw std::runtime_error(why); }
+static void check(HRESULT hr)
+{
+    if (FAILED(hr))
+        throw std::runtime_error("D3D12 call failed");
+}
+static void expect(bool yes, const char* why)
+{
+    if (!yes)
+        throw std::runtime_error(why);
+}
 int main()
 try
 {
@@ -29,7 +37,8 @@ try
     ComPtr<ID3D12CommandAllocator> allocator;
     ComPtr<ID3D12GraphicsCommandList> commands;
     check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
-    check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commands)));
+    check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr,
+                                    IID_PPV_ARGS(&commands)));
     check(commands->Close());
     ID3D12CommandList* lists[] { commands.Get() };
     ComPtr<ID3D12Fence> gate, drain;
@@ -51,7 +60,8 @@ try
         DlssNr::GpuLifetime life;
         life.Record(commands.Get());
         life.Retire([&] { ++released; });
-        for (int epoch = 0; epoch < 100; ++epoch) life.Collect();
+        for (int epoch = 0; epoch < 100; ++epoch)
+            life.Collect();
         expect(released == 0 && !life.Idle(), "unsubmitted work released by CPU progress");
         life.ResetRecording(commands.Get());
         expect(released == 1 && life.Idle(), "discarded recording not released");
@@ -188,15 +198,17 @@ try
     {
         DlssNr::GpuLifetime life;
         unsigned outer = 0, nested = 0;
-        life.Retire([&]
-        {
-            expect(++outer == 1, "retirement callback re-entered itself");
-            // NGX feature destruction can re-enter queue/reset hooks and retire more resources.
-            // Force the retired vector to grow while the original destruction callback is active.
-            for (unsigned i = 0; i < 64; ++i) life.Retire([&] { ++nested; });
-            life.Collect();
-            expect(!life.Idle(), "collector reported idle inside a destruction callback");
-        });
+        life.Retire(
+            [&]
+            {
+                expect(++outer == 1, "retirement callback re-entered itself");
+                // NGX feature destruction can re-enter queue/reset hooks and retire more resources.
+                // Force the retired vector to grow while the original destruction callback is active.
+                for (unsigned i = 0; i < 64; ++i)
+                    life.Retire([&] { ++nested; });
+                life.Collect();
+                expect(!life.Idle(), "collector reported idle inside a destruction callback");
+            });
         expect(outer == 1 && nested == 64 && life.Idle(), "reentrant retirement did not drain exactly once");
     }
     {
@@ -211,17 +223,25 @@ try
         check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, localAllocator.Get(), nullptr,
                                         IID_PPV_ARGS(&work)));
         check(work->Close());
-        common.Record(unrelated.Get()); common.Record(work.Get()); privateDlss.Record(work.Get());
+        common.Record(unrelated.Get());
+        common.Record(work.Get());
+        privateDlss.Record(work.Get());
         bool commonReleased = false, privateReleased = false;
         common.Retire([&] { commonReleased = true; });
         privateDlss.Retire([&] { privateReleased = true; });
         ID3D12CommandList* submitted[] { work.Get() };
         queue->ExecuteCommandLists(1, submitted);
-        common.Submitted(queue.Get(), 1, submitted); privateDlss.Submitted(queue.Get(), 1, submitted);
-        wait(); work.Reset(); common.Collect(); privateDlss.Collect();
+        common.Submitted(queue.Get(), 1, submitted);
+        privateDlss.Submitted(queue.Get(), 1, submitted);
+        wait();
+        work.Reset();
+        common.Collect();
+        privateDlss.Collect();
         expect(privateReleased && privateDlss.Idle() && !commonReleased && !common.Idle(),
                "private DLSS retirement depends on unrelated NR recordings");
-        unrelated.Reset(); common.Collect(); expect(commonReleased, "unrelated recording did not retire");
+        unrelated.Reset();
+        common.Collect();
+        expect(commonReleased, "unrelated recording did not retire");
     }
     {
         // Starfield resets lists on worker threads while the NR render path records/collects.
@@ -239,17 +259,18 @@ try
         std::atomic_uint callbacks { 0 }, finished { 0 };
         std::vector<std::jthread> threads;
         for (unsigned worker = 0; worker < workers; ++worker)
-            threads.emplace_back([&, worker]
-            {
-                start.arrive_and_wait();
-                for (unsigned cycle = 0; cycle < cycles; ++cycle)
+            threads.emplace_back(
+                [&, worker]
                 {
-                    life.Record(work[worker].Get());
-                    life.Retire([&] { ++callbacks; });
-                    life.ResetRecording(work[worker].Get());
-                }
-                ++finished;
-            });
+                    start.arrive_and_wait();
+                    for (unsigned cycle = 0; cycle < cycles; ++cycle)
+                    {
+                        life.Record(work[worker].Get());
+                        life.Retire([&] { ++callbacks; });
+                        life.ResetRecording(work[worker].Get());
+                    }
+                    ++finished;
+                });
         start.arrive_and_wait();
         while (finished != workers)
         {
@@ -264,4 +285,8 @@ try
     std::puts("NR GPU lifetime smoke passed (including concurrent record/reset/collection)");
     return 0;
 }
-catch (const std::exception& e) { std::fprintf(stderr, "%s\n", e.what()); return 1; }
+catch (const std::exception& e)
+{
+    std::fprintf(stderr, "%s\n", e.what());
+    return 1;
+}

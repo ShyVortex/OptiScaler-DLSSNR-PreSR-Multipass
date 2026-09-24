@@ -133,10 +133,12 @@ try
     const auto accumulated = result;
     DlssNrConstants compose {};
     compose.Mode = DlssNrResidualMode_Apply;
-    compose.Width = 2; compose.Height = 1; compose.TransferStrength = 1;
+    compose.Width = 2;
+    compose.Height = 1;
+    compose.TransferStrength = 1;
     result = run(compose, base, accumulated, history, motion);
-    expect(closeFloat(result[0].r, 11.25f) && closeFloat(result[0].g, 11) &&
-           closeFloat(result[0].b, 12.5f) && result[0].a == base[0].a,
+    expect(closeFloat(result[0].r, 11.25f) && closeFloat(result[0].g, 11) && closeFloat(result[0].b, 12.5f) &&
+               result[0].a == base[0].a,
            "Accumulated edit was not preserved for private DLSS encoding");
     c.ResidualHistoryValid = 0;
     c.ResidualBlend = .08f;
@@ -163,7 +165,8 @@ try
     result = run(c, base, model, history, motion);
     for (unsigned i = 0; i < 4; ++i)
         expect(result[i].r == base[i].r && result[i].a == base[i].a, "Zero strength changed output");
-    std::puts("PASS: residual seams, cold/warm/reset history, motion reprojection, input-resolution composition, alpha");
+    std::puts(
+        "PASS: residual seams, cold/warm/reset history, motion reprojection, input-resolution composition, alpha");
     return 0;
 }
 catch (const std::exception& e)

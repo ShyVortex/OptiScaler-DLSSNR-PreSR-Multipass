@@ -323,7 +323,8 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("horizonforbiddenwest.exe", GameQuirk::DisableDxgiSpoofing),
     QUIRK_ENTRY("ghostoftsushima.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::DisableHudfix),
     QUIRK_ENTRY("tlou-ii.exe", GameQuirk::AllowedFrameAhead2, GameQuirk::DisableDxgiSpoofing, GameQuirk::DisableHudfix),
-    QUIRK_ENTRY("tlou-ii-l.exe", GameQuirk::AllowedFrameAhead2, GameQuirk::DisableDxgiSpoofing, GameQuirk::DisableHudfix),
+    QUIRK_ENTRY("tlou-ii-l.exe", GameQuirk::AllowedFrameAhead2, GameQuirk::DisableDxgiSpoofing,
+                GameQuirk::DisableHudfix),
 
     // Dead Space Remake
     // Override Vsync required to avoid crash on boot

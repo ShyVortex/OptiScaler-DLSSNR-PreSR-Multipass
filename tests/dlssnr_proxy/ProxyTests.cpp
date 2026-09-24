@@ -9,37 +9,51 @@ namespace DlssNr::NgxDiagnostics
 Scope::Scope() {}
 Scope::~Scope() {}
 void RuntimeReport(ID3D12GraphicsCommandList*, ID3D12Device*, const char*) {}
-}
+} // namespace DlssNr::NgxDiagnostics
 
 // Routing seam: hardware tests separately exercise the real compatibility loader.
-namespace CompatibilityMock {
-bool available=false;
-unsigned opens=0,creates=0,evaluates=0,releases=0,destroyed=0;
-NVSDK_NGX_Result createResult=NVSDK_NGX_Result_Success;
+namespace CompatibilityMock
+{
+bool available = false;
+unsigned opens = 0, creates = 0, evaluates = 0, releases = 0, destroyed = 0;
+NVSDK_NGX_Result createResult = NVSDK_NGX_Result_Success;
 std::vector<std::filesystem::path> candidates;
-}
-namespace DlssNr {
+} // namespace CompatibilityMock
+namespace DlssNr
+{
 std::vector<std::filesystem::path> CompatibilityRuntime::CandidatePaths() { return CompatibilityMock::candidates; }
-std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(const std::filesystem::path&, ID3D12Device* d) {
+std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(const std::filesystem::path&, ID3D12Device* d)
+{
     return CompatibilityRuntime::TryOpen(d);
 }
-std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device*) {
+std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device*)
+{
     ++CompatibilityMock::opens;
     return CompatibilityMock::available ? std::shared_ptr<CompatibilityRuntime>(new CompatibilityRuntime()) : nullptr;
 }
 CompatibilityRuntime::~CompatibilityRuntime() { ++CompatibilityMock::destroyed; }
-NVSDK_NGX_Result CompatibilityRuntime::Create(ID3D12GraphicsCommandList* c,NVSDK_NGX_Parameter* p,NVSDK_NGX_Handle** h) {
+NVSDK_NGX_Result CompatibilityRuntime::Create(ID3D12GraphicsCommandList* c, NVSDK_NGX_Parameter* p,
+                                              NVSDK_NGX_Handle** h)
+{
     ++CompatibilityMock::creates;
-    const auto saved=Mock::createResult;Mock::createResult=CompatibilityMock::createResult;
-    const auto result=Mock::Create(c,(NVSDK_NGX_Feature)18,p,h);Mock::createResult=saved;return result;
+    const auto saved = Mock::createResult;
+    Mock::createResult = CompatibilityMock::createResult;
+    const auto result = Mock::Create(c, (NVSDK_NGX_Feature) 18, p, h);
+    Mock::createResult = saved;
+    return result;
 }
-NVSDK_NGX_Result CompatibilityRuntime::Evaluate(ID3D12GraphicsCommandList* c,const NVSDK_NGX_Handle* h,NVSDK_NGX_Parameter* p) {
-    ++CompatibilityMock::evaluates;return Mock::Evaluate(c,h,p,nullptr);
+NVSDK_NGX_Result CompatibilityRuntime::Evaluate(ID3D12GraphicsCommandList* c, const NVSDK_NGX_Handle* h,
+                                                NVSDK_NGX_Parameter* p)
+{
+    ++CompatibilityMock::evaluates;
+    return Mock::Evaluate(c, h, p, nullptr);
 }
-NVSDK_NGX_Result CompatibilityRuntime::Release(NVSDK_NGX_Handle* h) {
-    ++CompatibilityMock::releases;return Mock::Release(h);
+NVSDK_NGX_Result CompatibilityRuntime::Release(NVSDK_NGX_Handle* h)
+{
+    ++CompatibilityMock::releases;
+    return Mock::Release(h);
 }
-}
+} // namespace DlssNr
 
 // NGX tests substitute completion only; nr_gpu_lifetime_smoke exercises real D3D12 fences.
 struct DlssNr::GpuLifetime::Impl
@@ -51,7 +65,11 @@ DlssNr::GpuLifetime::GpuLifetime() : impl(std::make_unique<Impl>()) {}
 DlssNr::GpuLifetime::~GpuLifetime() { Collect(); }
 void DlssNr::GpuLifetime::Record(ID3D12GraphicsCommandList*) { impl->pending = true; }
 void DlssNr::GpuLifetime::Submitted(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*) {}
-void DlssNr::GpuLifetime::ResetRecording(ID3D12CommandList*) { impl->pending = false; Collect(); }
+void DlssNr::GpuLifetime::ResetRecording(ID3D12CommandList*)
+{
+    impl->pending = false;
+    Collect();
+}
 void DlssNr::GpuLifetime::Retire(std::function<void()> destroy)
 {
     impl->retired.push_back(std::move(destroy));
@@ -59,8 +77,10 @@ void DlssNr::GpuLifetime::Retire(std::function<void()> destroy)
 }
 void DlssNr::GpuLifetime::Collect()
 {
-    if (impl->pending) return;
-    for (auto& destroy : impl->retired) destroy();
+    if (impl->pending)
+        return;
+    for (auto& destroy : impl->retired)
+        destroy();
     impl->retired.clear();
 }
 bool DlssNr::GpuLifetime::Idle() { return !impl->pending; }
@@ -200,7 +220,8 @@ int main()
     assert(run() == NVSDK_NGX_Result_Success && !evaluated);
     proxy.Release();
     assert(Mock::handles.size() == 1);
-    for (int frame = 0; frame < 100; ++frame) proxy.AdvanceEpoch(++epoch);
+    for (int frame = 0; frame < 100; ++frame)
+        proxy.AdvanceEpoch(++epoch);
     assert(Mock::handles.size() == 1);
     proxy.ResetRecording(&commands);
     assert(Mock::handles.empty() && Mock::allocations == Mock::destructions);
@@ -317,8 +338,8 @@ int main()
     assert(GetUpscalerResource_Dx12(&bridgeParameters, NVSDK_NGX_Parameter_Color) == &color);
     assert(GetUpscalerResource_Dx12(&bridgeParameters, NVSDK_NGX_Parameter_Output) == &output);
 
-    for (NVSDK_NGX_Parameter* table : { static_cast<NVSDK_NGX_Parameter*>(&parameters),
-                                       static_cast<NVSDK_NGX_Parameter*>(&bridgeParameters) })
+    for (NVSDK_NGX_Parameter* table :
+         { static_cast<NVSDK_NGX_Parameter*>(&parameters), static_cast<NVSDK_NGX_Parameter*>(&bridgeParameters) })
     {
         NrHoldParameters_Dx12 held;
         table->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, 0.25f);

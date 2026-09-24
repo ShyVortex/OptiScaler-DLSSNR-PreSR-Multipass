@@ -40,10 +40,10 @@ std::vector<std::filesystem::path> CompatibilityRuntime::CandidatePaths()
     return candidates;
 }
 
-std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(const std::filesystem::path& candidate, ID3D12Device* device)
+std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(const std::filesystem::path& candidate,
+                                                                    ID3D12Device* device)
 {
-    return Open(candidate, device,
-                NVNGXProxy::D3D12_GetCapabilityParameters(), NVNGXProxy::D3D12_DestroyParameters(),
+    return Open(candidate, device, NVNGXProxy::D3D12_GetCapabilityParameters(), NVNGXProxy::D3D12_DestroyParameters(),
                 State::Instance().NVNGX_ApplicationDataPath);
 }
 
@@ -57,4 +57,4 @@ std::shared_ptr<CompatibilityRuntime> CompatibilityRuntime::TryOpen(ID3D12Device
     LOG_INFO("NR compatibility: no supported direct runtime available; preserving driver failure");
     return {};
 }
-}
+} // namespace DlssNr

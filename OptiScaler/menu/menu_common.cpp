@@ -1445,8 +1445,8 @@ void MenuCommon::UpdateRenderTiming(RenderMenuContext& ctx)
     }
     else
     {
-        if (state.activeFgInput == FGInput::NoFG || state.activeFgOutput == FGOutput::NoFG ||
-            state.isRunningOnLinux || state.menuOverlayIsVulkan || IdentifyGpu::getPrimaryGpu().usesDxvk)
+        if (state.activeFgInput == FGInput::NoFG || state.activeFgOutput == FGOutput::NoFG || state.isRunningOnLinux ||
+            state.menuOverlayIsVulkan || IdentifyGpu::getPrimaryGpu().usesDxvk)
         {
             MenuCommon::Present();
         }
@@ -1609,12 +1609,11 @@ void MenuCommon::UpdateVersionAndStartupNotifications(RenderMenuContext& ctx)
             {
                 ImGuiToast updateNotification { ImGuiToastType::Error, updateNoticeTime };
                 updateNotification.setTitle("OptiScaler Update available");
-                updateNotification.setContent(
-                    "Press %s for more info",
-                    Keybind::ShortcutLabel(config->ShortcutKey.value_or_default(),
-                                           config->ShortcutKeyRequireCtrl.value_or_default(),
-                                           config->ShortcutKeyRequireAlt.value_or_default())
-                        .c_str());
+                updateNotification.setContent("Press %s for more info",
+                                              Keybind::ShortcutLabel(config->ShortcutKey.value_or_default(),
+                                                                     config->ShortcutKeyRequireCtrl.value_or_default(),
+                                                                     config->ShortcutKeyRequireAlt.value_or_default())
+                                                  .c_str());
                 ImGui::InsertNotification(updateNotification);
                 return true;
             };
@@ -1849,7 +1848,6 @@ void MenuCommon::UpdateFrameTimeAverages(RenderMenuContext& ctx)
 void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
 {
     DlssNr::RenderNrCompareTags();
-
 
     auto& state = ctx.state;
     auto config = ctx.config;
@@ -3193,8 +3191,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
     const std::string fallbackSetting = config->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
-    const bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
-    const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive, fallbackSetting, dynamicMfg);
+    const bool dynamicMfg =
+        config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
+    const bool ampereFallbackToFsrFg =
+        AmpereMfgLoader::ShouldFallbackToFsrFg(configuredFrames, onLinux, ampereActive, fallbackSetting, dynamicMfg);
 
     if (ampereActive)
     {
@@ -3273,7 +3273,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied with Blackwell kernels (%u containers).",
                                    status.SnippetVersion.c_str(), status.KernelsRewritten);
             else
-                ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).", status.SnippetVersion.c_str());
+                ImGui::TextWrapped("DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
+                                   status.SnippetVersion.c_str());
         }
         else
             ImGui::TextWrapped("DLSSG %s: unlock unavailable for this runtime.", status.SnippetVersion.c_str());
@@ -3318,32 +3319,36 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             const auto& status = AmpereMfgLoader::LastStatus();
             const bool hasDynamicSupport = status.HasDynamicMfgSupport;
-            bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
+            bool dynamicMfg =
+                config->FGDLSSGOverrideForceDMFG.value_or_default() || config->FGDLSSGForceDMFG.value_or_default();
             const bool dmfgActive = hasDynamicSupport && dynamicMfg;
 
             if (ampereFallbackToFsrFg)
             {
-                const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+                const std::string fallbackType =
+                    AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
                 const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
-                ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "Linux FG Fallback ON (%s)", fallbackTypeName);
-                ShowHelpMarker("On Linux/Proton, native dlssg_sm86 driver hooks are replaced by OptiScaler's\n"
-                               "internal FG pipeline (DLSSG -> FSR FG / XeFG) for crash-free, flicker-free presentation.\n"
-                               "Use the settings below to adjust fallback behavior or pipeline target.");
+                ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "Linux FG Fallback ON (%s)",
+                                   fallbackTypeName);
+                ShowHelpMarker(
+                    "On Linux/Proton, native dlssg_sm86 driver hooks are replaced by OptiScaler's\n"
+                    "internal FG pipeline (DLSSG -> FSR FG / XeFG) for crash-free, flicker-free presentation.\n"
+                    "Use the settings below to adjust fallback behavior or pipeline target.");
             }
             else
             {
                 // Status display
                 if (!status.ErrorMessage.empty())
-                    ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s", status.ErrorMessage.c_str());
+                    ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s",
+                                       status.ErrorMessage.c_str());
                 else
                 {
                     std::string routerStr = AmpereMfgLoader::ResolveRouter();
-                    std::string liveStr = status.LiveControlActive ? "active" : (status.LiveControlSupported ? "ready" : "n/a");
+                    std::string liveStr =
+                        status.LiveControlActive ? "active" : (status.LiveControlSupported ? "ready" : "n/a");
                     ImGui::TextWrapped("DLL: %s | Router: %s | INI: %s | Loaded: %s | Live: %s",
-                                       status.DllFound ? "found" : "missing",
-                                       routerStr.c_str(),
-                                       status.IniWritten ? "written" : "not written",
-                                       status.DllLoaded ? "yes" : "no",
+                                       status.DllFound ? "found" : "missing", routerStr.c_str(),
+                                       status.IniWritten ? "written" : "not written", status.DllLoaded ? "yes" : "no",
                                        liveStr.c_str());
                 }
             }
@@ -3354,7 +3359,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
             const char* frameLabels[] = { "Factory default (4X)", "1 (2X)", "2 (3X)", "3 (4X)", "4 (5X)", "5 (6X)" };
-            const char* currentLabel = dmfgActive ? "Dynamic (Up to 6X)" : ((maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Factory default (4X)");
+            const char* currentLabel =
+                dmfgActive ? "Dynamic (Up to 6X)"
+                           : ((maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Factory default (4X)");
             if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 5, currentLabel))
                 config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
 
@@ -3367,35 +3374,39 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             else
             {
                 ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X, 4=5X, 5=6X). The game chooses the actual count.\n"
-                               "0 = Factory default limit (4X / 3 generated frames). Up to 6X (5 generated frames) can be selected.\n"
+                               "0 = Factory default limit (4X / 3 generated frames). Up to 6X (5 generated frames) can "
+                               "be selected.\n"
                                "Save Settings and restart to apply.");
             }
 
             // Optimized Kernels combo (0.3.2)
-            const char* optimizedTiers[] = {
-                "0 - Stock (Original numerics, no acceleration)",
-                "1 - Bit-identical (Recommended default, 19-32% faster)",
-                "2 - Fast lossy (310.9 only, >50 dB PSNR)",
-                "3 - Fastest lossy (Maximum performance)"
-            };
+            const char* optimizedTiers[] = { "0 - Stock (Original numerics, no acceleration)",
+                                             "1 - Bit-identical (Recommended default, 19-32% faster)",
+                                             "2 - Fast lossy (310.9 only, >50 dB PSNR)",
+                                             "3 - Fastest lossy (Maximum performance)" };
             int optimized = config->FGDLSSGAmpereMfgOptimized.value_or(1);
             if (optimized < 0 || optimized > 3)
                 optimized = 1;
 
             if (ImGui::Combo("Optimized Kernels##sm86", &optimized, optimizedTiers, 4))
                 config->FGDLSSGAmpereMfgOptimized = optimized;
-            ShowHelpMarker("Optimization consistency tier for generated frames:\n"
-                           "0 - Stock: Original stock numerics, no kernel acceleration (conservative).\n"
-                           "1 - Bit-identical: Recommended default. Fastest kernel pipeline with 0 dB deviation (~19-32% GPU latency reduction).\n"
-                           "2 - Fast lossy: Faster image-processing kernels with PSNR > 50 dB against stock output (310.9 runtime only).\n"
-                           "3 - Fastest lossy: All lossy accelerations enabled, including texture-unit bilinear sampling.\n"
-                           "Save Settings and restart to apply.");
+            ShowHelpMarker(
+                "Optimization consistency tier for generated frames:\n"
+                "0 - Stock: Original stock numerics, no kernel acceleration (conservative).\n"
+                "1 - Bit-identical: Recommended default. Fastest kernel pipeline with 0 dB deviation (~19-32% GPU "
+                "latency reduction).\n"
+                "2 - Fast lossy: Faster image-processing kernels with PSNR > 50 dB against stock output (310.9 runtime "
+                "only).\n"
+                "3 - Fastest lossy: All lossy accelerations enabled, including texture-unit bilinear sampling.\n"
+                "Save Settings and restart to apply.");
 
             // UI Recomposition Preset combo (0.3.0)
-            const char* presetOptions[] = { "Auto (Game / Profile default)", "Preset A (Force UI recomposition off)", "Preset B (Force UI recomposition on)" };
+            const char* presetOptions[] = { "Auto (Game / Profile default)", "Preset A (Force UI recomposition off)",
+                                            "Preset B (Force UI recomposition on)" };
             std::string currentPreset = config->FGDLSSGAmpereMfgPreset.value_or("Auto");
-            int presetIdx = (currentPreset == "A" || currentPreset == "a") ? 1 :
-                            (currentPreset == "B" || currentPreset == "b") ? 2 : 0;
+            int presetIdx = (currentPreset == "A" || currentPreset == "a")   ? 1
+                            : (currentPreset == "B" || currentPreset == "b") ? 2
+                                                                             : 0;
             if (ImGui::Combo("UI Recomposition Preset##sm86", &presetIdx, presetOptions, 3))
             {
                 const char* storedPresetOptions[] = { "Auto", "A", "B" };
@@ -3404,7 +3415,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("Preset for UI / HUD recomposition on 310.9 runtime:\n"
                            "Auto: Let the game or driver profile decide (default).\n"
                            "A: Force UI recomposition off.\n"
-                           "B: Force UI recomposition on for cleaner HUD inside generated frames (only takes effect if game provides HUD-less plane).\n"
+                           "B: Force UI recomposition on for cleaner HUD inside generated frames (only takes effect if "
+                           "game provides HUD-less plane).\n"
                            "Save Settings and restart to apply.");
 
             // KernelImage combo
@@ -3418,13 +3430,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 const char* storedOptions[] = { "Auto", "PTX", "Cubin" };
                 config->FGDLSSGAmpereMfgKernelImage = std::string(storedOptions[kernelIdx]);
             }
-            ShowHelpMarker("Auto: resolves to optimal format (PTX on Linux/Proton, RTX 3080 Ti, or Turing).\n"
-                           "PTX: JIT-compiled driver path, recommended for Linux/Proton, RTX 3080 Ti, and RTX 20 series.\n"
-                           "Cubin: precompiled binary, requires exact physical SM match on Windows.\n"
-                           "Save Settings and restart to apply.");
+            ShowHelpMarker(
+                "Auto: resolves to optimal format (PTX on Linux/Proton, RTX 3080 Ti, or Turing).\n"
+                "PTX: JIT-compiled driver path, recommended for Linux/Proton, RTX 3080 Ti, and RTX 20 series.\n"
+                "Cubin: precompiled binary, requires exact physical SM match on Windows.\n"
+                "Save Settings and restart to apply.");
 
             // Router Architecture combo
-            std::string resolvedAutoRouter = AmpereMfgLoader::ResolveRouter(static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id), primaryGpu.name, "Auto");
+            std::string resolvedAutoRouter = AmpereMfgLoader::ResolveRouter(
+                static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id), primaryGpu.name, "Auto");
             std::string autoRouterLabel = "Auto (" + resolvedAutoRouter + " on this GPU)";
             const char* routerOptions[] = { autoRouterLabel.c_str(), "SM86 (RTX 30 series)", "SM75 (RTX 20 / GTX 16)" };
             std::string currentRouter = config->FGDLSSGAmpereMfgRouter.value_or("Auto");
@@ -3454,8 +3468,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 bool disabledVal = false;
                 ImGui::Checkbox("Dynamic Multi-Frame Generation##sm86", &disabledVal);
                 ImGui::EndDisabled();
-                ShowHelpMarker("Disabled: requires SilyNoMeta's fork of dlssg_sm86 (or a build supporting DynamicMFG).\n"
-                               "Upstream sdli1995 does not support dynamic mode yet.");
+                ShowHelpMarker(
+                    "Disabled: requires SilyNoMeta's fork of dlssg_sm86 (or a build supporting DynamicMFG).\n"
+                    "Upstream sdli1995 does not support dynamic mode yet.");
             }
             else
             {
@@ -3496,33 +3511,29 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
 
             // Game Architecture Spoofing combo (0.3.3)
-            const char* spoofArchOptions[] = {
-                "Auto (Spoof RTX 50 on Turing/Ampere)",
-                "Enabled (Force SpoofArchToGame=1)",
-                "Disabled (Keep real GPU arch, SpoofArchToGame=0)"
-            };
+            const char* spoofArchOptions[] = { "Auto (Spoof RTX 50 on Turing/Ampere)",
+                                               "Enabled (Force SpoofArchToGame=1)",
+                                               "Disabled (Keep real GPU arch, SpoofArchToGame=0)" };
             std::string currentSpoofArch = config->FGDLSSGAmpereMfgSpoofArchToGame.value_or("auto");
-            int spoofArchIdx = (currentSpoofArch == "1" || currentSpoofArch == "true") ? 1 :
-                               (currentSpoofArch == "0" || currentSpoofArch == "false") ? 2 : 0;
+            int spoofArchIdx = (currentSpoofArch == "1" || currentSpoofArch == "true")    ? 1
+                               : (currentSpoofArch == "0" || currentSpoofArch == "false") ? 2
+                                                                                          : 0;
             if (ImGui::Combo("Game Arch Spoofing##sm86", &spoofArchIdx, spoofArchOptions, 3))
             {
                 const char* storedSpoofOptions[] = { "auto", "1", "0" };
                 config->FGDLSSGAmpereMfgSpoofArchToGame = std::string(storedSpoofOptions[spoofArchIdx]);
             }
-            ShowHelpMarker("Controls architecture reporting to the game and Streamline 2.8+ at startup:\n"
-                           "Auto: Installs an early NVAPI trampoline so Turing (RTX 20) and Ampere (RTX 30) report\n"
-                           "      Blackwell (RTX 50, 0x1b0), preventing games like FF7 Rebirth from dropping the DLSS-G plugin.\n"
-                           "Enabled: Explicitly forces early Blackwell architecture spoofing across all GPUs.\n"
-                           "Disabled: Keeps the real GPU architecture (SpoofArchToGame=0).\n"
-                           "Save Settings and restart to apply.");
+            ShowHelpMarker(
+                "Controls architecture reporting to the game and Streamline 2.8+ at startup:\n"
+                "Auto: Installs an early NVAPI trampoline so Turing (RTX 20) and Ampere (RTX 30) report\n"
+                "      Blackwell (RTX 50, 0x1b0), preventing games like FF7 Rebirth from dropping the DLSS-G plugin.\n"
+                "Enabled: Explicitly forces early Blackwell architecture spoofing across all GPUs.\n"
+                "Disabled: Keeps the real GPU architecture (SpoofArchToGame=0).\n"
+                "Save Settings and restart to apply.");
 
             // Mod Logging Level combo
-            const char* logLevelOptions[] = {
-                "0 - Off",
-                "1 - Default (Info / Errors)",
-                "2 - Debug",
-                "3 - Trace / Verbose (Kernel & Evaluate Telemetry)"
-            };
+            const char* logLevelOptions[] = { "0 - Off", "1 - Default (Info / Errors)", "2 - Debug",
+                                              "3 - Trace / Verbose (Kernel & Evaluate Telemetry)" };
             int currentLogLevel = config->FGDLSSGAmpereMfgLogLevel.value_or(1);
             if (currentLogLevel < 0 || currentLogLevel > 3)
                 currentLogLevel = 1;
@@ -3530,21 +3541,19 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             {
                 config->FGDLSSGAmpereMfgLogLevel = currentLogLevel;
             }
-            ShowHelpMarker("Controls sdli1995's dlssg_sm86 logging level written to dlssg_sm86.ini [Logging] Level:\n"
-                           "0: Off (minimal logging)\n"
-                           "1: Default (info and error logging)\n"
-                           "2: Debug\n"
-                           "3: Trace / Verbose (detailed per-frame kernel execution and evaluate logs for troubleshooting)\n"
-                           "Save Settings and restart to apply.");
+            ShowHelpMarker(
+                "Controls sdli1995's dlssg_sm86 logging level written to dlssg_sm86.ini [Logging] Level:\n"
+                "0: Off (minimal logging)\n"
+                "1: Default (info and error logging)\n"
+                "2: Debug\n"
+                "3: Trace / Verbose (detailed per-frame kernel execution and evaluate logs for troubleshooting)\n"
+                "Save Settings and restart to apply.");
 
             // Linux Fallback settings (Linux only)
             if (onLinux)
             {
-                const char* fallbackModes[] = {
-                    "Auto (Fallback on 2X only)",
-                    "Force Enabled (Recommended on Proton)",
-                    "Force Disabled (Real SM86 mod)"
-                };
+                const char* fallbackModes[] = { "Auto (Fallback on 2X only)", "Force Enabled (Recommended on Proton)",
+                                                "Force Disabled (Real SM86 mod)" };
                 std::string currentModeStr = config->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
                 int currentMode = 0;
                 if (currentModeStr == "true" || currentModeStr == "1" || currentModeStr == "on")
@@ -3561,16 +3570,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     else
                         config->FGDLSSGAmpereMfgLinuxFsrFallback = "auto";
                 }
-                ShowHelpMarker("Control fallback to OptiScaler's internal FG pipeline on Linux/Proton:\n"
-                               "Auto: Falls back to internal FG only when configured for 2X FG (MaxFrames=1).\n"
-                               "Force Enabled: Always uses internal FG, bypassing native dlssg_sm86 for smooth pacing.\n"
-                               "Force Disabled: Always uses external dlssg_sm86 mod.\n"
-                               "Save Settings and restart to apply.");
+                ShowHelpMarker(
+                    "Control fallback to OptiScaler's internal FG pipeline on Linux/Proton:\n"
+                    "Auto: Falls back to internal FG only when configured for 2X FG (MaxFrames=1).\n"
+                    "Force Enabled: Always uses internal FG, bypassing native dlssg_sm86 for smooth pacing.\n"
+                    "Force Disabled: Always uses external dlssg_sm86 mod.\n"
+                    "Save Settings and restart to apply.");
 
-                const char* fallbackPipelines[] = {
-                    "FSR FG (Fast, stable, built-in)",
-                    "XeFG (Intel XeSS FG, requires libxess_fg.dll)"
-                };
+                const char* fallbackPipelines[] = { "FSR FG (Fast, stable, built-in)",
+                                                    "XeFG (Intel XeSS FG, requires libxess_fg.dll)" };
                 std::string currentPipeStr = config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg");
                 int currentPipe = (currentPipeStr == "xefg") ? 1 : 0;
                 if (ImGui::Combo("Fallback Pipeline##sm86", &currentPipe, fallbackPipelines, 2))
@@ -3602,7 +3610,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         if (onLinux)
         {
             ShowHelpMarker("Disabled because the active OS is not Windows (10/11).\n"
-                           "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver 571.86+ on Windows).");
+                           "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver "
+                           "571.86+ on Windows).");
         }
         else if (!isNvidia)
         {
@@ -3611,9 +3620,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         }
         else
         {
-            ShowHelpMarker("Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or Blackwell (RTX 50).\n"
-                           "NVIDIA driver-level Smooth Motion requires driver 571.86+ on Windows with RTX 40/50 natively, or RTX 30 via NVSmooth30.\n"
-                           "Turing (RTX 20 / GTX 16) and older architectures lack hardware support for driver-level frame generation.");
+            ShowHelpMarker("Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or "
+                           "Blackwell (RTX 50).\n"
+                           "NVIDIA driver-level Smooth Motion requires driver 571.86+ on Windows with RTX 40/50 "
+                           "natively, or RTX 30 via NVSmooth30.\n"
+                           "Turing (RTX 20 / GTX 16) and older architectures lack hardware support for driver-level "
+                           "frame generation.");
         }
     }
     else
@@ -3630,19 +3642,21 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         if (isAmpere)
         {
-            ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
-                           "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
-                           "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                           "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
-                           "Can be toggled dynamically on the fly.");
+            ShowHelpMarker(
+                "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
+                "Can be toggled dynamically on the fly.");
         }
         else
         {
-            ShowHelpMarker("NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
-                           "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
-                           "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                           "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
-                           "Can be toggled dynamically on the fly.");
+            ShowHelpMarker(
+                "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
+                "Can be toggled dynamically on the fly.");
         }
 
         const auto& ampereStatus = AmpereMfgLoader::LastStatus();
@@ -3711,9 +3725,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
         else if (ampereFallbackToFsrFg)
         {
-            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            const std::string fallbackType =
+                AmpereMfgLoader::ResolveFallbackFgType(config->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
             const char* fallbackTypeName = (fallbackType == "xefg") ? "XeFG" : "FSR FG";
-            ImGui::TextWrapped("Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames above or in-game settings.", fallbackTypeName);
+            ImGui::TextWrapped("Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames "
+                               "above or in-game settings.",
+                               fallbackTypeName);
         }
         return;
     }
@@ -3802,15 +3819,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto constexpr dlssgOutputIndex = (uint32_t) FGOutput::DLSSG;
     const uint32_t archId = static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id);
     const bool isAdaOrNewer = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
-    const bool isTuringOrAmpere = isNvidia && (
-        AmpereMfgLoader::IsTuringArch(archId) ||
-        AmpereMfgLoader::IsAmpereArch(archId) ||
-        primaryGpu.name.find("RTX 20") != std::string::npos ||
-        primaryGpu.name.find("GTX 16") != std::string::npos ||
-        primaryGpu.name.find("RTX 30") != std::string::npos ||
-        primaryGpu.name.find("TITAN RTX") != std::string::npos ||
-        primaryGpu.name.find("Turing") != std::string::npos ||
-        primaryGpu.name.find("Ampere") != std::string::npos);
+    const bool isTuringOrAmpere =
+        isNvidia &&
+        (AmpereMfgLoader::IsTuringArch(archId) || AmpereMfgLoader::IsAmpereArch(archId) ||
+         primaryGpu.name.find("RTX 20") != std::string::npos || primaryGpu.name.find("GTX 16") != std::string::npos ||
+         primaryGpu.name.find("RTX 30") != std::string::npos ||
+         primaryGpu.name.find("TITAN RTX") != std::string::npos ||
+         primaryGpu.name.find("Turing") != std::string::npos || primaryGpu.name.find("Ampere") != std::string::npos);
 
     const bool supportsDlssg = isAdaOrNewer || isTuringOrAmpere || ampereActive;
     const bool hasDlssgReplacement =
@@ -4072,8 +4087,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             ImGui::SameLine(0.0f, 16.0f);
 
-            const bool canEnableNativeDMFG = state.dlssgGameDMFGSupported ||
-                                             (state.streamlineVersion >= feature_version{ 2, 11, 0 });
+            const bool canEnableNativeDMFG =
+                state.dlssgGameDMFGSupported || (state.streamlineVersion >= feature_version { 2, 11, 0 });
             bool dynamicMFG = config->FGDLSSGOverrideForceDMFG.value_or_default();
 
             if (!canEnableNativeDMFG)

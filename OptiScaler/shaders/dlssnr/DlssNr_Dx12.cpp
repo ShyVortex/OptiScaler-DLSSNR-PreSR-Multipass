@@ -409,11 +409,12 @@ bool DlssNr_Dx12::CreateBufferResource(ID3D12Device* device, ID3D12Resource* sou
     }
     else
     {
-        heapFlags &= ~(D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_BUFFERS);
+        heapFlags &= ~(D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES |
+                       D3D12_HEAP_FLAG_DENY_BUFFERS);
     }
 
-    HRESULT hr = device->CreateCommittedResource(&heapProps, heapFlags, &desc, state, nullptr,
-                                                 IID_PPV_ARGS(&_state->buffer));
+    HRESULT hr =
+        device->CreateCommittedResource(&heapProps, heapFlags, &desc, state, nullptr, IID_PPV_ARGS(&_state->buffer));
     if (FAILED(hr))
     {
         if (heapProps.Type != D3D12_HEAP_TYPE_DEFAULT || heapFlags != D3D12_HEAP_FLAG_NONE)
@@ -428,11 +429,11 @@ bool DlssNr_Dx12::CreateBufferResource(ID3D12Device* device, ID3D12Resource* sou
     if (FAILED(hr))
     {
         LOG_ERROR("DlssNr_Dx12::CreateBufferResource failed! HRESULT: {:X}, Width: {}, Height: {}, Format: {}",
-                  (UINT64)hr, desc.Width, desc.Height, static_cast<uint32_t>(desc.Format));
+                  (UINT64) hr, desc.Width, desc.Height, static_cast<uint32_t>(desc.Format));
         return false;
     }
-    LOG_DEBUG("DlssNr_Dx12::CreateBufferResource succeeded: Width: {}, Height: {}, Format: {}",
-              desc.Width, desc.Height, static_cast<uint32_t>(desc.Format));
+    LOG_DEBUG("DlssNr_Dx12::CreateBufferResource succeeded: Width: {}, Height: {}, Format: {}", desc.Width, desc.Height,
+              static_cast<uint32_t>(desc.Format));
     _state->bufferState = state;
     return true;
 }
@@ -691,8 +692,7 @@ void DlssNr_Dx12::ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* que
 {
     std::lock_guard lock(_state->mutex);
     if (!Config::Instance()->DlssNrFinishedPicture.value_or_default() ||
-        !Config::Instance()->DlssNrEnabled.value_or_default() ||
-        ::State::Instance().externalFrameGeneration ||
+        !Config::Instance()->DlssNrEnabled.value_or_default() || ::State::Instance().externalFrameGeneration ||
         ::State::Instance().activeFgOutput == FGOutput::DLSSG)
         _state->late.Cancel();
     else if (picture && queue)
@@ -756,8 +756,8 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
     Microsoft::WRL::ComPtr<ID3D12Resource> picture;
     auto space = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     const auto& config = *Config::Instance();
-    const bool externalFgActive = ::State::Instance().externalFrameGeneration ||
-                                  ::State::Instance().activeFgOutput == FGOutput::DLSSG;
+    const bool externalFgActive =
+        ::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG;
     // Swapchain calls must precede NR locks: FG Present can submit commands while holding its own lock.
     if (swapchain && queue && config.DlssNrEnabled.value_or_default() &&
         config.DlssNrFinishedPicture.value_or_default() && !externalFgActive)
@@ -786,8 +786,8 @@ void ApplyToFinishedPictureDx11(IDXGISwapChain* swapchain)
 {
     if (::State::Instance().isShuttingDown)
         return;
-    const bool externalFgActive = ::State::Instance().externalFrameGeneration ||
-                                  ::State::Instance().activeFgOutput == FGOutput::DLSSG;
+    const bool externalFgActive =
+        ::State::Instance().externalFrameGeneration || ::State::Instance().activeFgOutput == FGOutput::DLSSG;
     if (externalFgActive)
         return;
     std::lock_guard lock(nrOwnersMutex);

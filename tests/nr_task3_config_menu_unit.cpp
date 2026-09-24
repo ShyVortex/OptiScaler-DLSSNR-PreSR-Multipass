@@ -11,12 +11,11 @@ enum HasDefaultValue
     WithDefault,
 };
 
-template <class T, HasDefaultValue defaultState = WithDefault>
-class CustomOptional : public std::optional<T>
+template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptional : public std::optional<T>
 {
     T _defaultValue {};
 
-public:
+  public:
     CustomOptional(T defaultValue)
     {
         _defaultValue = defaultValue;
@@ -138,8 +137,10 @@ int main()
     std::cout << "  [PASS] Test 3: Exposure, white point, and detail replacement configs initialized\n";
 
     // 4. Verify Pass Overrides array count (29 overrides)
-    static_assert(sizeof(cfg.DlssNrPassOverrides) / sizeof(cfg.DlssNrPassOverrides[0]) == 29, "Expected 29 pass overrides");
-    for (int i = 0; i < 29; ++i) {
+    static_assert(sizeof(cfg.DlssNrPassOverrides) / sizeof(cfg.DlssNrPassOverrides[0]) == 29,
+                  "Expected 29 pass overrides");
+    for (int i = 0; i < 29; ++i)
+    {
         assert(!cfg.DlssNrPassOverrides[i].OverrideModel.has_value());
         assert(!cfg.DlssNrPassOverrides[i].Weight.has_value());
         assert(!cfg.DlssNrPassOverrides[i].Transfer.has_value());
@@ -174,7 +175,8 @@ int main()
 
     // 8. Verify Display Resolution error detection and Quick Action button switch
     {
-        std::string reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)";
+        std::string reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try "
+                             "enabling 'Generate model before upscale' or reducing Working Scale)";
         bool hasDisplayResolutionError = reason.find("display resolution") != std::string::npos;
         assert(hasDisplayResolutionError);
 

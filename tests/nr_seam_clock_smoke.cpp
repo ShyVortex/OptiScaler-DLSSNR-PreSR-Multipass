@@ -7,16 +7,15 @@
 int main()
 {
     // One deferred option selects private SR regardless of whether the game uses RR.
-    struct Case { bool before, deferred, legacy, finished, wantsBefore, wantsDeferred; };
+    struct Case
+    {
+        bool before, deferred, legacy, finished, wantsBefore, wantsDeferred;
+    };
     const Case cases[] = {
-        { false, false, false, false, false, false },
-        { true, false, false, false, true, false },
-        { false, true, false, false, true, true },
-        { false, true, false, true, true, true },
-        { false, false, false, true, false, false },
-        { true, false, false, true, true, true },
-        { true, false, true, false, true, true },
-        { true, false, true, true, true, true },
+        { false, false, false, false, false, false }, { true, false, false, false, true, false },
+        { false, true, false, false, true, true },    { false, true, false, true, true, true },
+        { false, false, false, true, false, false },  { true, false, false, true, true, true },
+        { true, false, true, false, true, true },     { true, false, true, true, true, true },
         { false, false, true, false, false, false },
     };
     for (const auto& c : cases)

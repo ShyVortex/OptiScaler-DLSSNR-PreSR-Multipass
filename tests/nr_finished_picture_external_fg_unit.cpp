@@ -4,14 +4,19 @@
 #include <string>
 
 // Test GUID definition matching FinishedColorSpaceKey
-struct TestGUID {
+struct TestGUID
+{
     uint32_t Data1;
     uint16_t Data2;
     uint16_t Data3;
-    uint8_t  Data4[8];
-    bool operator==(const TestGUID& o) const {
-        if (Data1 != o.Data1 || Data2 != o.Data2 || Data3 != o.Data3) return false;
-        for (int i = 0; i < 8; ++i) if (Data4[i] != o.Data4[i]) return false;
+    uint8_t Data4[8];
+    bool operator==(const TestGUID& o) const
+    {
+        if (Data1 != o.Data1 || Data2 != o.Data2 || Data3 != o.Data3)
+            return false;
+        for (int i = 0; i < 8; ++i)
+            if (Data4[i] != o.Data4[i])
+                return false;
         return true;
     }
 };
@@ -20,26 +25,30 @@ static constexpr TestGUID ExpectedFinishedColorSpaceKey = {
     0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 }
 };
 
-enum class FGOutput {
+enum class FGOutput
+{
     NoFG,
     FSRFG,
     XeFG,
     DLSSG
 };
 
-struct MockState {
+struct MockState
+{
     bool externalFrameGeneration = false;
     FGOutput activeFgOutput = FGOutput::NoFG;
     bool isShuttingDown = false;
 };
 
-struct MockConfig {
+struct MockConfig
+{
     bool dlssNrEnabled = true;
     bool dlssNrFinishedPicture = true;
 };
 
 // Simulate presentation check in ApplyFinished / ApplyToFinishedPicture
-bool ShouldApplyFinishedPicture(const MockConfig& cfg, const MockState& state) {
+bool ShouldApplyFinishedPicture(const MockConfig& cfg, const MockState& state)
+{
     if (state.isShuttingDown)
         return false;
     const bool externalFgActive = state.externalFrameGeneration || state.activeFgOutput == FGOutput::DLSSG;
@@ -53,18 +62,19 @@ inline uint32_t DlssNrSpatialTransfer(uint32_t mode)
 {
     switch (mode)
     {
-    case 2: return 1; // DLSS enlargement -> matched residual
-    case 4: return 3; // Private DLSS enlargement -> relative lighting & colour
-    default: return mode;
+    case 2:
+        return 1; // DLSS enlargement -> matched residual
+    case 4:
+        return 3; // Private DLSS enlargement -> relative lighting & colour
+    default:
+        return mode;
     }
 }
 
-inline bool DlssNrUsesDlssEnlargement(uint32_t mode)
-{
-    return mode == 2 || mode == 4;
-}
+inline bool DlssNrUsesDlssEnlargement(uint32_t mode) { return mode == 2 || mode == 4; }
 
-int main() {
+int main()
+{
     std::puts("Running DLSS-NR Finished Picture & External FG Mutual Exclusion Unit Tests...");
 
     // Test 1: FinishedColorSpaceKey GUID verified

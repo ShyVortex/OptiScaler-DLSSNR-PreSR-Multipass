@@ -36,7 +36,7 @@ inline bool FormatCanHoldLinearHdr(DXGI_FORMAT format)
         return false;
     }
 }
-}
+} // namespace DlssNr
 
 int main()
 {

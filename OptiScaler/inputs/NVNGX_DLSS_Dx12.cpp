@@ -250,7 +250,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Init_Ext(unsigned long long InApp
                 DlssNr::NgxDiagnostics::Install(localFeatureInfo.LoggingInfo);
             DlssNr::NgxDiagnostics::Scope nrInitTrace;
             LOG_INFO("NR diagnostic driver init: identity={} sdk=0x{:X} device={}", InApplicationId,
-                     (unsigned)InSDKVersion, (void*)InDevice);
+                     (unsigned) InSDKVersion, (void*) InDevice);
 
             auto result = NVNGXProxy::D3D12_Init_Ext()(InApplicationId, InApplicationDataPath, InDevice, InSDKVersion,
                                                        &localFeatureInfo);
@@ -324,7 +324,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Init(unsigned long long InApplica
                 DlssNr::NgxDiagnostics::Install(localFeatureInfo.LoggingInfo);
             DlssNr::NgxDiagnostics::Scope nrInitTrace;
             LOG_INFO("NR diagnostic driver init: identity={} sdk=0x{:X} device={}", InApplicationId,
-                     (unsigned)InSDKVersion, (void*)InDevice);
+                     (unsigned) InSDKVersion, (void*) InDevice);
 
             auto result = NVNGXProxy::D3D12_Init()(InApplicationId, InApplicationDataPath, InDevice, &localFeatureInfo,
                                                    InSDKVersion);
@@ -387,7 +387,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_Init_ProjectID(const char* InProj
                 DlssNr::NgxDiagnostics::Install(localFeatureInfo.LoggingInfo);
             DlssNr::NgxDiagnostics::Scope nrInitTrace;
             LOG_INFO("NR diagnostic driver init: identity={} sdk=0x{:X} device={}", InProjectId,
-                     (unsigned)InSDKVersion, (void*)InDevice);
+                     (unsigned) InSDKVersion, (void*) InDevice);
 
             auto result =
                 NVNGXProxy::D3D12_Init_ProjectID()(InProjectId, InEngineType, InEngineVersion, InApplicationDataPath,
@@ -1000,7 +1000,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_GetFeatureRequirements(
     const bool isUpscaling = FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling;
     const bool isFG = FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_FrameGeneration;
     const bool dlssgAdjacent = Nvngx_FG::isDx12Available() || State::Instance().activeFgInput == FGInput::DLSSG ||
-                               State::Instance().externalFrameGeneration || Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+                               State::Instance().externalFrameGeneration ||
+                               Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
 
     if (isUpscaling || (isFG && dlssgAdjacent))
     {

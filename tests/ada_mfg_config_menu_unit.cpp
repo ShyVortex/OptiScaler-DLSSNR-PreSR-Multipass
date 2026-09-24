@@ -20,12 +20,11 @@ enum class VendorId
 };
 
 // Minimal CustomOptional matching Config.h behavior
-template <class T>
-class TestCustomOptional : public std::optional<T>
+template <class T> class TestCustomOptional : public std::optional<T>
 {
     T _defaultValue {};
 
-public:
+  public:
     TestCustomOptional(T defaultValue)
     {
         _defaultValue = defaultValue;
@@ -85,7 +84,8 @@ struct MockState
 struct MockGpu
 {
     VendorId vendorId = VendorId::Nvidia;
-    struct {
+    struct
+    {
         uint32_t architecture_id = NV_GPU_ARCHITECTURE_AD100;
     } nvidiaArchInfo;
     std::string name = "NVIDIA GeForce RTX 4070";
@@ -101,9 +101,7 @@ struct MockMfgUnlockStatus
 };
 
 // Helper to simulate Config::LoadConfig mutual exclusion
-void SimulateConfigLoad(MockConfig& cfg,
-                        std::optional<bool> iniAdaUnlock,
-                        std::optional<bool> iniAdaBlackwell,
+void SimulateConfigLoad(MockConfig& cfg, std::optional<bool> iniAdaUnlock, std::optional<bool> iniAdaBlackwell,
                         std::optional<bool> iniAmpereUnlock)
 {
     cfg.FGDLSSGAdaMfgUnlock.set_from_config(iniAdaUnlock);
@@ -118,10 +116,7 @@ void SimulateConfigLoad(MockConfig& cfg,
 }
 
 // Helper to simulate Config::SaveConfig mutual exclusion
-void SimulateConfigSave(const MockConfig& cfg,
-                        bool& outAdaUnlock,
-                        bool& outAdaBlackwell,
-                        bool& outAmpereUnlock,
+void SimulateConfigSave(const MockConfig& cfg, bool& outAdaUnlock, bool& outAdaBlackwell, bool& outAmpereUnlock,
                         bool& outExternalFG)
 {
     bool ampereUnlock = cfg.FGDLSSGAmpereMfgUnlock.value_for_config_or(false);
@@ -136,9 +131,7 @@ void SimulateConfigSave(const MockConfig& cfg,
 }
 
 // Helper to evaluate menu UI status string formatting in menu_common.cpp
-std::string EvaluateMenuStatusText(bool adaUnlock,
-                                  bool adaEnabledForSession,
-                                  const MockMfgUnlockStatus& status)
+std::string EvaluateMenuStatusText(bool adaUnlock, bool adaEnabledForSession, const MockMfgUnlockStatus& status)
 {
     char buffer[256];
     if (adaUnlock != adaEnabledForSession)
@@ -160,16 +153,14 @@ std::string EvaluateMenuStatusText(bool adaUnlock,
         }
         else
         {
-            snprintf(buffer, sizeof(buffer),
-                     "DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
+            snprintf(buffer, sizeof(buffer), "DLSSG %s: RTX 40 MFG unlock applied (stock Ada kernels).",
                      status.SnippetVersion.c_str());
             return std::string(buffer);
         }
     }
     else
     {
-        snprintf(buffer, sizeof(buffer),
-                 "DLSSG %s: unlock unavailable for this runtime.",
+        snprintf(buffer, sizeof(buffer), "DLSSG %s: unlock unavailable for this runtime.",
                  status.SnippetVersion.c_str());
         return std::string(buffer);
     }
@@ -315,8 +306,7 @@ int main()
             status.KernelsRewritten = 2;
 
             std::string text = EvaluateMenuStatusText(/*adaUnlock=*/true,
-                                                      /*adaEnabledForSession=*/false,
-                                                      status);
+                                                      /*adaEnabledForSession=*/false, status);
             assert(text == "Save Settings and restart to apply this change.");
             printf("  [PASS] 3.1 Pending restart detected when adaUnlock != adaEnabledForSession\n");
         }
@@ -327,8 +317,7 @@ int main()
             status.ModuleFound = false;
 
             std::string text = EvaluateMenuStatusText(/*adaUnlock=*/true,
-                                                      /*adaEnabledForSession=*/true,
-                                                      status);
+                                                      /*adaEnabledForSession=*/true, status);
             assert(text == "Waiting for DLSSG to load.");
             printf("  [PASS] 3.2 Waiting message shown when DLSSG module not yet loaded\n");
         }
@@ -343,8 +332,7 @@ int main()
             status.SnippetVersion = "310.9";
 
             std::string text = EvaluateMenuStatusText(/*adaUnlock=*/true,
-                                                      /*adaEnabledForSession=*/true,
-                                                      status);
+                                                      /*adaEnabledForSession=*/true, status);
             assert(text == "DLSSG 310.9: RTX 40 MFG unlock applied with Blackwell kernels (2 containers).");
             assert(text.find("with Blackwell kernels") != std::string::npos);
             printf("  [PASS] 3.3 Menu correctly formats status with Blackwell kernels and container count\n");
@@ -360,8 +348,7 @@ int main()
             status.SnippetVersion = "310.9";
 
             std::string text = EvaluateMenuStatusText(/*adaUnlock=*/true,
-                                                      /*adaEnabledForSession=*/true,
-                                                      status);
+                                                      /*adaEnabledForSession=*/true, status);
             assert(text == "DLSSG 310.9: RTX 40 MFG unlock applied (stock Ada kernels).");
             assert(text.find("stock Ada kernels") != std::string::npos);
             printf("  [PASS] 3.4 Menu correctly formats status with stock Ada kernels when KernelsRewritten == 0\n");
@@ -376,8 +363,7 @@ int main()
             status.SnippetVersion = "310.1";
 
             std::string text = EvaluateMenuStatusText(/*adaUnlock=*/true,
-                                                      /*adaEnabledForSession=*/true,
-                                                      status);
+                                                      /*adaEnabledForSession=*/true, status);
             assert(text == "DLSSG 310.1: unlock unavailable for this runtime.");
             assert(text.find("unlock unavailable") != std::string::npos);
             printf("  [PASS] 3.5 Menu correctly reports unlock unavailable for unsupported runtimes\n");

@@ -137,8 +137,10 @@ struct MockD3D12Resource
     {
         if (getHeapPropertiesFails)
             return -1; // E_FAIL
-        if (pProps) *pProps = heapProperties;
-        if (pFlags) *pFlags = heapFlags;
+        if (pProps)
+            *pProps = heapProperties;
+        if (pFlags)
+            *pFlags = heapFlags;
         return 0; // S_OK
     }
 };
@@ -152,16 +154,14 @@ struct MockD3D12Device
     D3D12_HEAP_PROPERTIES lastCreatedHeapProps {};
     D3D12_HEAP_FLAGS lastCreatedHeapFlags {};
 
-    int32_t CreateCommittedResource(const D3D12_HEAP_PROPERTIES* pHeapProperties,
-                                   D3D12_HEAP_FLAGS HeapFlags,
-                                   const D3D12_RESOURCE_DESC* pDesc,
-                                   uint32_t InitialResourceState,
-                                   const void* pOptimizedClearValue,
-                                   void** ppvResource)
+    int32_t CreateCommittedResource(const D3D12_HEAP_PROPERTIES* pHeapProperties, D3D12_HEAP_FLAGS HeapFlags,
+                                    const D3D12_RESOURCE_DESC* pDesc, uint32_t InitialResourceState,
+                                    const void* pOptimizedClearValue, void** ppvResource)
     {
         createCommittedCallCount++;
-        if (pHeapProperties && (pHeapProperties->Type == D3D12_HEAP_TYPE_CUSTOM ||
-                               (HeapFlags & (D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES))))
+        if (pHeapProperties &&
+            (pHeapProperties->Type == D3D12_HEAP_TYPE_CUSTOM ||
+             (HeapFlags & (D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES))))
         {
             if (failCustomHeap)
                 return -2147024809; // E_INVALIDARG
@@ -171,7 +171,8 @@ struct MockD3D12Device
         lastCreatedHeapProps = *pHeapProperties;
         lastCreatedHeapFlags = HeapFlags;
         static int dummyRes = 42;
-        if (ppvResource) *ppvResource = &dummyRes;
+        if (ppvResource)
+            *ppvResource = &dummyRes;
         return 0; // S_OK
     }
 };
@@ -207,8 +208,9 @@ bool SimulateCreateBufferResource(MockD3D12Device* device, MockD3D12Resource* so
     }
     else
     {
-        heapFlags = static_cast<D3D12_HEAP_FLAGS>(
-            heapFlags & ~(D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES | D3D12_HEAP_FLAG_DENY_BUFFERS));
+        heapFlags = static_cast<D3D12_HEAP_FLAGS>(heapFlags & ~(D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES |
+                                                                D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES |
+                                                                D3D12_HEAP_FLAG_DENY_BUFFERS));
     }
 
     int32_t hr = device->CreateCommittedResource(&heapProps, heapFlags, &desc, 0, nullptr, outBuffer);

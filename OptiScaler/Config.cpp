@@ -1093,23 +1093,37 @@ bool Config::SaveIni(std::filesystem::path destination)
             adaUnlock = false;
 
         ini.SetValue("FrameGen", "Enabled", GetBoolValue(Instance()->FGEnabled.value_for_config()).c_str());
-        ini.SetValue("FrameGen", "External", GetBoolValue(Instance()->ExternalFrameGeneration.value_for_config_or(false) || ampereUnlock).c_str());
+        ini.SetValue(
+            "FrameGen", "External",
+            GetBoolValue(Instance()->ExternalFrameGeneration.value_for_config_or(false) || ampereUnlock).c_str());
         ini.SetValue("DLSSG", "AdaMfgUnlock", GetBoolValue(adaUnlock).c_str());
-        ini.SetValue("DLSSG", "AdaBlackwellKernels", GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AdaBlackwellKernels",
+                     GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgUnlock", GetBoolValue(ampereUnlock).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgMaxFrames", GetIntValue(Instance()->FGDLSSGAmpereMfgMaxFrames.value_for_config()).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgKernelImage", Instance()->FGDLSSGAmpereMfgKernelImage.value_for_config_or("auto").c_str());
-        ini.SetValue("DLSSG", "AmpereMfgRouter", Instance()->FGDLSSGAmpereMfgRouter.value_for_config_or("auto").c_str());
-        ini.SetValue("DLSSG", "AmpereMfgHardwareBilinear", GetBoolValue(Instance()->FGDLSSGAmpereMfgHardwareBilinear.value_for_config()).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgOptimized", GetIntValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgPreset", Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
-        ini.SetValue("DLSSG", "AmpereMfgSpoofArchToGame", Instance()->FGDLSSGAmpereMfgSpoofArchToGame.value_for_config_or("auto").c_str());
-        ini.SetValue("DLSSG", "AmpereMfgLogLevel", GetIntValue(Instance()->FGDLSSGAmpereMfgLogLevel.value_for_config()).c_str());
-        ini.SetValue("DLSSG", "AmpereMfgLinuxFsrFallback", Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
-        ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType", Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgMaxFrames",
+                     GetIntValue(Instance()->FGDLSSGAmpereMfgMaxFrames.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgKernelImage",
+                     Instance()->FGDLSSGAmpereMfgKernelImage.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgRouter",
+                     Instance()->FGDLSSGAmpereMfgRouter.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgHardwareBilinear",
+                     GetBoolValue(Instance()->FGDLSSGAmpereMfgHardwareBilinear.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgOptimized",
+                     GetIntValue(Instance()->FGDLSSGAmpereMfgOptimized.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgPreset",
+                     Instance()->FGDLSSGAmpereMfgPreset.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgSpoofArchToGame",
+                     Instance()->FGDLSSGAmpereMfgSpoofArchToGame.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgLogLevel",
+                     GetIntValue(Instance()->FGDLSSGAmpereMfgLogLevel.value_for_config()).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgLinuxFsrFallback",
+                     Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_for_config_or("auto").c_str());
+        ini.SetValue("DLSSG", "AmpereMfgLinuxFallbackType",
+                     Instance()->FGDLSSGAmpereMfgLinuxFallbackType.value_for_config_or("fsrfg").c_str());
         ini.SetValue("DLSSG", "SmoothMotion", GetBoolValue(Instance()->FGDLSSGSmoothMotion.value_for_config()).c_str());
         ini.Delete("DLSSG", "AmpereMfgSmoothMotion");
-        ini.SetValue("SmoothMotion", "EnableNVSmooth30", GetBoolValue(Instance()->SmoothMotionNVSmooth30.value_for_config()).c_str());
+        ini.SetValue("SmoothMotion", "EnableNVSmooth30",
+                     GetBoolValue(Instance()->SmoothMotionNVSmooth30.value_for_config()).c_str());
         ini.SetValue("FrameGen", "DebugView", GetBoolValue(Instance()->FGDebugView.value_for_config()).c_str());
         std::string FGInputString = "auto";
         if (auto FGInputHeld = Instance()->FGInput.value_for_config(); FGInputHeld.has_value())
@@ -1375,36 +1389,35 @@ bool Config::SaveIni(std::filesystem::path destination)
     {
         ini.SetValue("DLSS", "Enabled", GetBoolValue(Instance()->DLSSEnabled.value_for_config()).c_str());
 
-    // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
-    ini.SetValue("DlssNr", "Enabled", GetBoolValue(Instance()->DlssNrEnabled.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "FinishedPicture", GetBoolValue(Instance()->DlssNrFinishedPicture.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "HdrTransfer", GetBoolValue(Instance()->DlssNrHdrTransfer.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "RunBeforeSR",
-                 GetBoolValue(Instance()->DlssNrRunBeforeSr.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "DeferredDLSS",
-                 GetBoolValue(Instance()->DlssNrDeferredDlss.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "PrivateUpscaler",
-                 GetIntValue(Instance()->DlssNrPrivateUpscaler.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "ResidualAcrossRR",
-                 GetBoolValue(Instance()->DlssNrResidualAcrossRr.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "ResidualAcrossRRBlend",
-                 GetFloatValue(Instance()->DlssNrResidualAcrossRrBlend.value_for_config()).c_str());
-    ini.Delete("DlssNr", "ResidualFG");
-    ini.Delete("DlssNr", "ResidualFGApproxCamera");
-    ini.Delete("DlssNr", "UseProxy");
-    ini.Delete("DlssNr", "ProxyProbe");
-    ini.Delete("DlssNr", "ProbeD3D11");
-    ini.Delete("DlssNr", "Precision"); // Remove the obsolete backend selector from saved configurations.
-    {
-        auto toggle = Instance()->DlssNrToggleKey.value_for_config();
-        ini.SetValue("DlssNr", "ToggleKey", GetIntValue(toggle, toggle > 0).c_str());
-    }
-    ini.SetValue("DlssNr", "TransferStrength",
-                 GetFloatValue(Instance()->DlssNrTransferStrength.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "ColourStrength",
-                 GetFloatValue(Instance()->DlssNrColourStrength.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "MaxRatio", GetFloatValue(Instance()->DlssNrMaxRatio.value_for_config()).c_str());
-    ini.SetValue("DlssNr", "Transfer", GetIntValue(Instance()->DlssNrTransfer.value_for_config()).c_str());
+        // --- DLSS 5 Neural Rendering (OptiScaler/dlssnr) ---
+        ini.SetValue("DlssNr", "Enabled", GetBoolValue(Instance()->DlssNrEnabled.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "FinishedPicture",
+                     GetBoolValue(Instance()->DlssNrFinishedPicture.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "HdrTransfer", GetBoolValue(Instance()->DlssNrHdrTransfer.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "RunBeforeSR", GetBoolValue(Instance()->DlssNrRunBeforeSr.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DeferredDLSS", GetBoolValue(Instance()->DlssNrDeferredDlss.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "PrivateUpscaler",
+                     GetIntValue(Instance()->DlssNrPrivateUpscaler.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "ResidualAcrossRR",
+                     GetBoolValue(Instance()->DlssNrResidualAcrossRr.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "ResidualAcrossRRBlend",
+                     GetFloatValue(Instance()->DlssNrResidualAcrossRrBlend.value_for_config()).c_str());
+        ini.Delete("DlssNr", "ResidualFG");
+        ini.Delete("DlssNr", "ResidualFGApproxCamera");
+        ini.Delete("DlssNr", "UseProxy");
+        ini.Delete("DlssNr", "ProxyProbe");
+        ini.Delete("DlssNr", "ProbeD3D11");
+        ini.Delete("DlssNr", "Precision"); // Remove the obsolete backend selector from saved configurations.
+        {
+            auto toggle = Instance()->DlssNrToggleKey.value_for_config();
+            ini.SetValue("DlssNr", "ToggleKey", GetIntValue(toggle, toggle > 0).c_str());
+        }
+        ini.SetValue("DlssNr", "TransferStrength",
+                     GetFloatValue(Instance()->DlssNrTransferStrength.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "ColourStrength",
+                     GetFloatValue(Instance()->DlssNrColourStrength.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "MaxRatio", GetFloatValue(Instance()->DlssNrMaxRatio.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "Transfer", GetIntValue(Instance()->DlssNrTransfer.value_for_config()).c_str());
 
         for (const char* key :
              { "ScanExposure", "ScanMeter", "ScanTrim", "ScanAnchorValue", "ScanAnchorWhitePoint", "ScanAnchors",
@@ -2245,4 +2258,3 @@ std::vector<std::string> Config::ListProfiles()
     std::sort(names.begin(), names.end());
     return names;
 }
-

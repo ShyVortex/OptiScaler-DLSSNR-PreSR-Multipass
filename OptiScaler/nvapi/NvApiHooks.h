@@ -23,9 +23,9 @@ class NvApiHooks
 
     // NVIDIA Smooth Motion DRS setting constants
     static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_ENABLE = 0xB0D384C0;
-    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_APIS   = 0xB0CC0875;
-    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_DEBUG  = 0xB01B8B02;
-    static constexpr NvU32 MIN_SMOOTH_MOTION_DRIVER_VERSION   = 57186;
+    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_APIS = 0xB0CC0875;
+    static constexpr NvU32 NVDRS_SETTING_SMOOTH_MOTION_DEBUG = 0xB01B8B02;
+    static constexpr NvU32 MIN_SMOOTH_MOTION_DRIVER_VERSION = 57186;
 
     static bool ApplySmoothMotionDrs(bool enable);
     static void Hook(HMODULE nvapiModule);

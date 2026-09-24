@@ -79,7 +79,7 @@ description: Architecture, frame generation, and safety rules for OptiScaler
 5. **Permanent Workflow Branches & Integration Lifecycle**:
    - **`merge-upstream` (Permanent Branch)**:
      - Dedicated strictly to pulling and integrating upstream commits from `wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass`.
-     - Must always maintain both the SM75–SM86 mod and the Ada MFG unlocker, configs, and Linux fallbacks without regression.
+     - Must always maintain the SM75–SM86 mod, the Ada MFG unlocker, the NVSmooth30 unlocker, configs, and Linux fallbacks without regression.
    - **`dlssg-sm86` (Permanent Branch)**:
      - Dedicated to inspecting newer versions of the `dlssg_for_sm86` mod (by sdli1995), analyzing binary/INI differences, and updating OptiScaler loader/hooking integration.
    - **Standard 2-Step Workflow Sequence**:
@@ -110,3 +110,25 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp`: Contextual error message when post-upscale creation fails at display resolution: `"the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)"`.
        - `OptiScaler/dlssnr/DlssNr_MenuPlacement.cpp`: One-click button `"Switch to Pre-SR (Generate model before upscale)"` under the failure text to instantly switch and retry.
        - Associated test: `tests/nr_status_reporting_unit.cpp`.
+
+7. **Preservation of NVSmooth30 (RTX 30 Smooth Motion Unlocker) Integration Across Upstream Merges**:
+   - Upstream author (`wilsjo2`) does not maintain the NVSmooth30 proxy integration.
+   - When merging changes from upstream `wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass`, NVSmooth30 components and all related work must **NEVER** be removed, overwritten, disabled, or regressed:
+     - **Core Loader & Lifecycle**:
+       - `OptiScaler/framegen/smoothmotion/NVSmooth30Loader.h` and `NVSmooth30Loader.cpp`.
+       - Automatic DRS profile synchronization via `NvApiHooks::ApplySmoothMotionDrs(true)` upon setup.
+       - Candidate path resolution strictly prioritizing `basePath / L"OptiScaler" / L"nvsmooth30.dll"`.
+       - Post-attach initialization hook in `OptiScaler/dllmain.cpp` (`NVSmooth30Loader::TrySetup()`).
+     - **Configuration Backend**:
+       - `Config.h`: `SmoothMotionNVSmooth30` setting.
+       - `Config.cpp`: Parsing and saving `EnableNVSmooth30` under `[SmoothMotion]`.
+     - **In-Game Menu UI (`OptiScaler/menu/menu_common.cpp`)**:
+       - Enable interactive Smooth Motion controls on NVIDIA Ampere (RTX 30, `0x170` / `GA100`) alongside Ada and Blackwell.
+       - Ampere NVSmooth30 subsection with "Enable NVSmooth30 Unlocker (RTX 30)" checkbox and dynamic status display.
+       - Status indicator reflecting `NVSmooth30Loader::GetStatus()`.
+     - **Packaging & CI Workflow Integration**:
+       - `package_release.ps1`: `[switch]$IncludeNVSmooth30` parameter, staging binary strictly to `OptiScaler/nvsmooth30.dll`, staging license, and dynamic cloning/building from `https://github.com/ItsAdeline/NVSmooth30.git` if local source/binary is absent.
+       - `.github/workflows/package_release.yml`: `include_nvsmooth30` workflow_dispatch input, `Ensure NVSmooth30 files are present` step (cloning and building with CMake if missing), and parameter hashtable splatting.
+     - **Associated Automated Unit Tests**:
+       - `tests/nvsmooth30_loader_unit.cpp`
+       - `tests/ampere_smooth_motion_unit.cpp`

@@ -146,7 +146,8 @@ void VerifyKernelRetarget(const PeImage& image)
 }
 } // namespace
 
-int main(int argc, char** argv) try
+int main(int argc, char** argv)
+try
 {
     Expect(argc == 2, "pass exactly one CPU test case");
     const std::string mode = argv[1];

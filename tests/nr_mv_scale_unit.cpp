@@ -37,7 +37,8 @@ struct MockGPU
 };
 
 // Logical reproduction of GetUpscalerBackend(bool allowOverride)
-inline Upscaler MockGetUpscalerBackend(const MockGPU& gpu, bool dx12Inited, std::optional<Upscaler> userOverride, bool allowOverride = true)
+inline Upscaler MockGetUpscalerBackend(const MockGPU& gpu, bool dx12Inited, std::optional<Upscaler> userOverride,
+                                       bool allowOverride = true)
 {
     Upscaler upscaler = Upscaler::XeSS;
 
@@ -54,10 +55,8 @@ inline Upscaler MockGetUpscalerBackend(const MockGPU& gpu, bool dx12Inited, std:
 }
 
 // Logical reproduction of feature creation fallback in TryCreateOptiFeature
-inline Upscaler ResolveFeatureCreationFallback(Upscaler upscalerBackend,
-                                               NVSDK_NGX_Feature featureId,
-                                               const MockGPU& gpu,
-                                               bool dx12Inited,
+inline Upscaler ResolveFeatureCreationFallback(Upscaler upscalerBackend, NVSDK_NGX_Feature featureId,
+                                               const MockGPU& gpu, bool dx12Inited,
                                                std::optional<Upscaler> userOverride)
 {
     if (upscalerBackend == Upscaler::DLSSD && featureId == NVSDK_NGX_Feature::SuperSampling)
@@ -119,8 +118,8 @@ int main()
     // Test 4: DLSSD fallback on SuperSampling when hardware is DLSS-capable resolves to DLSS
     {
         MockGPU nvidiaGpu { true, false };
-        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling,
-                                                       nvidiaGpu, true, std::nullopt);
+        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling, nvidiaGpu,
+                                                       true, std::nullopt);
         assert(fallback == Upscaler::DLSS);
     }
 
@@ -128,29 +127,29 @@ int main()
     {
         MockGPU nvidiaGpu { true, false };
         // User explicitly set Dx12Upscaler = DLSSD, but DLSSD feature creation failed
-        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling,
-                                                       nvidiaGpu, true, Upscaler::DLSSD);
+        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling, nvidiaGpu,
+                                                       true, Upscaler::DLSSD);
         assert(fallback == Upscaler::DLSS);
     }
 
     // Test 6: DLSSD fallback on AMD/Intel hardware resolves to XeSS/FFX instead of FSR21
     {
         MockGPU amdGpu { false, true };
-        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling,
-                                                       amdGpu, true, std::nullopt);
+        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling, amdGpu, true,
+                                                       std::nullopt);
         assert(fallback == Upscaler::FFX);
 
         MockGPU intelGpu { false, false };
-        auto fallbackIntel = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling,
-                                                            intelGpu, true, std::nullopt);
+        auto fallbackIntel = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::SuperSampling, intelGpu,
+                                                            true, std::nullopt);
         assert(fallbackIntel == Upscaler::XeSS);
     }
 
     // Test 7: Non-DLSSD upscaler initialization failure still safely falls back to FSR21
     {
         MockGPU nvidiaGpu { true, false };
-        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSS, NVSDK_NGX_Feature::SuperSampling,
-                                                       nvidiaGpu, true, std::nullopt);
+        auto fallback = ResolveFeatureCreationFallback(Upscaler::DLSS, NVSDK_NGX_Feature::SuperSampling, nvidiaGpu,
+                                                       true, std::nullopt);
         assert(fallback == Upscaler::FSR21);
 
         auto fallbackRR = ResolveFeatureCreationFallback(Upscaler::DLSSD, NVSDK_NGX_Feature::RayReconstruction,

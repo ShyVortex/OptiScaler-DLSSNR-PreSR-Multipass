@@ -2,27 +2,33 @@
 #include <cstdio>
 #include <string>
 
-struct Version {
+struct Version
+{
     int major = 0;
     int minor = 0;
     int patch = 0;
 
-    bool operator>=(const Version& other) const {
-        if (major != other.major) return major > other.major;
-        if (minor != other.minor) return minor > other.minor;
+    bool operator>=(const Version& other) const
+    {
+        if (major != other.major)
+            return major > other.major;
+        if (minor != other.minor)
+            return minor > other.minor;
         return patch >= other.patch;
     }
 };
 
-struct MenuDmfgState {
+struct MenuDmfgState
+{
     bool isExternalAmpere = false;
     bool hasDynamicMfgSupport = false;
     bool dlssgGameDMFGSupported = false;
-    Version streamlineVersion{ 2, 4, 0 };
+    Version streamlineVersion { 2, 4, 0 };
     bool dynamicMfgChecked = false;
 };
 
-struct MenuDmfgResult {
+struct MenuDmfgResult
+{
     bool checkboxEnabled = false;
     std::string helpMessage;
     bool sliderVisible = false;
@@ -30,18 +36,22 @@ struct MenuDmfgResult {
     std::string maxFramesCurrentLabel;
 };
 
-MenuDmfgResult EvaluateSm86MenuDmfg(const MenuDmfgState& state) {
+MenuDmfgResult EvaluateSm86MenuDmfg(const MenuDmfgState& state)
+{
     MenuDmfgResult res;
     const bool dmfgActive = state.hasDynamicMfgSupport && state.dynamicMfgChecked;
     res.maxFramesSliderDisabled = dmfgActive;
     res.maxFramesCurrentLabel = dmfgActive ? "Dynamic (Up to 6X)" : "Factory default (4X)";
 
-    if (!state.hasDynamicMfgSupport) {
+    if (!state.hasDynamicMfgSupport)
+    {
         res.checkboxEnabled = false;
         res.helpMessage = "Disabled: requires SilyNoMeta's fork of dlssg_sm86 (or a build supporting DynamicMFG).\n"
                           "Upstream sdli1995 does not support dynamic mode yet.";
         res.sliderVisible = false;
-    } else {
+    }
+    else
+    {
         res.checkboxEnabled = true;
         res.helpMessage = "Requests dynamic multi-frame generation pacing in SilyNoMeta's dlssg_sm86.";
         res.sliderVisible = state.dynamicMfgChecked;
@@ -49,14 +59,18 @@ MenuDmfgResult EvaluateSm86MenuDmfg(const MenuDmfgState& state) {
     return res;
 }
 
-MenuDmfgResult EvaluateNativeStreamlineMenuDmfg(const MenuDmfgState& state) {
+MenuDmfgResult EvaluateNativeStreamlineMenuDmfg(const MenuDmfgState& state)
+{
     MenuDmfgResult res;
-    const bool canEnable = state.dlssgGameDMFGSupported || (state.streamlineVersion >= Version{ 2, 11, 0 });
-    if (!canEnable) {
+    const bool canEnable = state.dlssgGameDMFGSupported || (state.streamlineVersion >= Version { 2, 11, 0 });
+    if (!canEnable)
+    {
         res.checkboxEnabled = false;
         res.helpMessage = "Disabled: requires Streamline 2.11+ (sl.dlss_g.dll) and supporting driver runtime.";
         res.sliderVisible = false;
-    } else {
+    }
+    else
+    {
         res.checkboxEnabled = true;
         res.helpMessage = "Forces Dynamic MFG in Streamline DLSSG";
         res.sliderVisible = state.dynamicMfgChecked;
@@ -64,7 +78,8 @@ MenuDmfgResult EvaluateNativeStreamlineMenuDmfg(const MenuDmfgState& state) {
     return res;
 }
 
-int main() {
+int main()
+{
     std::printf("=== Running Dynamic MFG Menu Logic & UI State Unit Tests ===\n");
 
     // Case 1: External Ampere mod with upstream sdli1995 (no DynamicMFG support)
@@ -78,7 +93,8 @@ int main() {
         assert(res.helpMessage.find("requires SilyNoMeta's fork") != std::string::npos);
         assert(!res.sliderVisible && "Slider must not be visible when disabled");
         assert(!res.maxFramesSliderDisabled && "MaxFrames slider must be enabled when DMFG is inactive");
-        std::printf("  [PASS] Case 1: External mod with sdli1995 renders disabled checkbox with SilyNoMeta requirement\n");
+        std::printf(
+            "  [PASS] Case 1: External mod with sdli1995 renders disabled checkbox with SilyNoMeta requirement\n");
     }
 
     // Case 2: External Ampere mod with SilyNoMeta fork (DynamicMFG supported), unchecked
@@ -93,7 +109,8 @@ int main() {
         assert(!res.sliderVisible && "Slider must remain hidden when checkbox is unchecked");
         assert(!res.maxFramesSliderDisabled && "MaxFrames slider must be enabled when DMFG is unchecked");
         assert(res.maxFramesCurrentLabel == "Factory default (4X)");
-        std::printf("  [PASS] Case 2: SilyNoMeta fork allows enabling, slider hidden when unchecked, MaxFrames active\n");
+        std::printf(
+            "  [PASS] Case 2: SilyNoMeta fork allows enabling, slider hidden when unchecked, MaxFrames active\n");
     }
 
     // Case 3: External Ampere mod with SilyNoMeta fork, checked
@@ -108,7 +125,8 @@ int main() {
         assert(res.sliderVisible && "Slider must be revealed when checkbox is checked");
         assert(res.maxFramesSliderDisabled && "MaxFrames slider must be disabled/locked when DMFG is active");
         assert(res.maxFramesCurrentLabel == "Dynamic (Up to 6X)");
-        std::printf("  [PASS] Case 3: SilyNoMeta fork reveals target FPS slider and locks MaxFrames to Dynamic (Up to 6X)\n");
+        std::printf(
+            "  [PASS] Case 3: SilyNoMeta fork reveals target FPS slider and locks MaxFrames to Dynamic (Up to 6X)\n");
     }
 
     // Case 4: Native Streamline with older Streamline (Cyberpunk 2077 default: 2.4.0)
@@ -121,7 +139,8 @@ int main() {
         assert(!res.checkboxEnabled && "Checkbox must be disabled on older Streamline");
         assert(res.helpMessage.find("requires Streamline 2.11+") != std::string::npos);
         assert(!res.sliderVisible && "Slider must not be visible");
-        std::printf("  [PASS] Case 4: Cyberpunk 2077 (Streamline 2.4) renders disabled checkbox with Streamline 2.11+ requirement\n");
+        std::printf("  [PASS] Case 4: Cyberpunk 2077 (Streamline 2.4) renders disabled checkbox with Streamline 2.11+ "
+                    "requirement\n");
     }
 
     // Case 5: Native Streamline upgraded to 2.11+ or Blackwell/patched Ada

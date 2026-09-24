@@ -32,10 +32,7 @@ struct MockParams
 {
     std::map<std::string, int> intParams;
 
-    void Set(const char* key, int val)
-    {
-        intParams[key] = val;
-    }
+    void Set(const char* key, int val) { intParams[key] = val; }
 
     int Get(const char* key, int defaultVal = 0) const
     {
@@ -45,31 +42,20 @@ struct MockParams
         return defaultVal;
     }
 
-    bool Has(const char* key) const
-    {
-        return intParams.find(key) != intParams.end();
-    }
+    bool Has(const char* key) const { return intParams.find(key) != intParams.end(); }
 };
 
-void SimulateInitNGXParameters(
-    MockParams& params,
-    API api,
-    FGInput activeFgInput,
-    FGNvngxReplacement activeFgNvngx,
-    bool ampereMfgActive,
-    int ampereMaxFrames,
-    bool isUnrealEngine = false,
-    bool adaMfgActive = false,
-    bool is3101Runtime = false)
+void SimulateInitNGXParameters(MockParams& params, API api, FGInput activeFgInput, FGNvngxReplacement activeFgNvngx,
+                               bool ampereMfgActive, int ampereMaxFrames, bool isUnrealEngine = false,
+                               bool adaMfgActive = false, bool is3101Runtime = false)
 {
     // Mutual exclusion: Ada unlock is disabled if Ampere unlock is enabled
     if (ampereMfgActive)
         adaMfgActive = false;
 
     if ((api == API::DX12 || api == API::Vulkan) &&
-        (activeFgInput == FGInput::DLSSG ||
-         activeFgNvngx != FGNvngxReplacement::None ||
-         ampereMfgActive || adaMfgActive))
+        (activeFgInput == FGInput::DLSSG || activeFgNvngx != FGNvngxReplacement::None || ampereMfgActive ||
+         adaMfgActive))
     {
         params.Set("FrameGeneration.Available", 1);
         params.Set("FrameGeneration.NeedsUpdatedDriver", 0);
@@ -119,13 +105,9 @@ int main()
     // Even though activeFgInput == NoFG and activeFgNvngx == None, capability must be advertised!
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/1); // 2X FG
+        SimulateInitNGXParameters(params, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/1); // 2X FG
 
         assert(params.Get("FrameGeneration.Available") == 1);
         assert(params.Get("FrameInterpolation.Available") == 1);
@@ -139,47 +121,36 @@ int main()
     // Case 2: External FG with default capability (ampereMaxFrames = 0 -> ceiling: 5 on 310.9, 3 on 310.1)
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/0,
-            /*isUnrealEngine=*/false,
-            /*adaMfgActive=*/false,
-            /*is3101Runtime=*/true); // 310.1 runtime default -> 3
+        SimulateInitNGXParameters(params, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/0,
+                                  /*isUnrealEngine=*/false,
+                                  /*adaMfgActive=*/false,
+                                  /*is3101Runtime=*/true); // 310.1 runtime default -> 3
 
         assert(params.Get("FrameGeneration.Available") == 1);
         assert(params.Get("DLSSG.Available") == 1);
         assert(params.Get("DLSSG.MultiFrameCountMax") == 3);
 
         MockParams params3109;
-        SimulateInitNGXParameters(
-            params3109,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/0,
-            /*isUnrealEngine=*/false,
-            /*adaMfgActive=*/false,
-            /*is3101Runtime=*/false); // 310.9 runtime default -> 5
+        SimulateInitNGXParameters(params3109, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/0,
+                                  /*isUnrealEngine=*/false,
+                                  /*adaMfgActive=*/false,
+                                  /*is3101Runtime=*/false); // 310.9 runtime default -> 5
 
         assert(params3109.Get("DLSSG.MultiFrameCountMax") == 5);
-        printf("  [PASS] Case 2: External FG with default capability limit advertises runtime ceiling (3 on 310.1, 5 on 310.9)\n");
+        printf("  [PASS] Case 2: External FG with default capability limit advertises runtime ceiling (3 on 310.1, 5 "
+               "on 310.9)\n");
     }
 
     // Case 3: Standard OptiScaler without FG enabled (clean baseline)
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/false,
-            /*ampereMaxFrames=*/3);
+        SimulateInitNGXParameters(params, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/false,
+                                  /*ampereMaxFrames=*/3);
 
         assert(!params.Has("FrameGeneration.Available"));
         assert(!params.Has("FrameInterpolation.Available"));
@@ -190,13 +161,9 @@ int main()
     // Case 4: DX11 API should not advertise DX12 DLSSG
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX11,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/1);
+        SimulateInitNGXParameters(params, API::DX11, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/1);
 
         assert(!params.Has("FrameGeneration.Available"));
         assert(!params.Has("DLSSG.Available"));
@@ -206,14 +173,10 @@ int main()
     // Case 5: Unreal Engine driver minimum version override
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/2,
-            /*isUnrealEngine=*/true);
+        SimulateInitNGXParameters(params, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/2,
+                                  /*isUnrealEngine=*/true);
 
         assert(params.Get("FrameGeneration.MinDriverVersionMajor") == 10);
         assert(params.Get("FrameInterpolation.MinDriverVersionMajor") == 10);
@@ -223,15 +186,11 @@ int main()
     // Case 6: Ada MFG Unlock active on DX12 (advertises max 5 frames for up to 6X MFG)
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX12,
-            FGInput::DLSSG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/false,
-            /*ampereMaxFrames=*/0,
-            /*isUnrealEngine=*/false,
-            /*adaMfgActive=*/true);
+        SimulateInitNGXParameters(params, API::DX12, FGInput::DLSSG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/false,
+                                  /*ampereMaxFrames=*/0,
+                                  /*isUnrealEngine=*/false,
+                                  /*adaMfgActive=*/true);
 
         assert(params.Get("FrameGeneration.Available") == 1);
         assert(params.Get("FrameInterpolation.Available") == 1);
@@ -245,15 +204,11 @@ int main()
     // Case 7: Mutual Exclusion - When AmpereMfgUnlock is active, Ada MFG is suppressed
     {
         MockParams params;
-        SimulateInitNGXParameters(
-            params,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/2,
-            /*isUnrealEngine=*/false,
-            /*adaMfgActive=*/true); // Config might have both, but mutual exclusion suppresses Ada
+        SimulateInitNGXParameters(params, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/2,
+                                  /*isUnrealEngine=*/false,
+                                  /*adaMfgActive=*/true); // Config might have both, but mutual exclusion suppresses Ada
 
         assert(params.Get("DLSSG.Available") == 1);
         // Must use Ampere max frames (2), NOT Ada max frames (5)
@@ -264,29 +219,21 @@ int main()
     // Case 8: Runtime Model Ceiling - 310.9 supports up to 5 (6X), 310.1 clamps to 3 (4X)
     {
         MockParams params3109;
-        SimulateInitNGXParameters(
-            params3109,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/5,
-            /*isUnrealEngine=*/false,
-            /*adaMfgActive=*/false,
-            /*is3101Runtime=*/false);
+        SimulateInitNGXParameters(params3109, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/5,
+                                  /*isUnrealEngine=*/false,
+                                  /*adaMfgActive=*/false,
+                                  /*is3101Runtime=*/false);
         assert(params3109.Get("DLSSG.MultiFrameCountMax") == 5);
 
         MockParams params3101;
-        SimulateInitNGXParameters(
-            params3101,
-            API::DX12,
-            FGInput::NoFG,
-            FGNvngxReplacement::None,
-            /*ampereMfgActive=*/true,
-            /*ampereMaxFrames=*/5,
-            /*isUnrealEngine=*/false,
-            /*adaMfgActive=*/false,
-            /*is3101Runtime=*/true);
+        SimulateInitNGXParameters(params3101, API::DX12, FGInput::NoFG, FGNvngxReplacement::None,
+                                  /*ampereMfgActive=*/true,
+                                  /*ampereMaxFrames=*/5,
+                                  /*isUnrealEngine=*/false,
+                                  /*adaMfgActive=*/false,
+                                  /*is3101Runtime=*/true);
         assert(params3101.Get("DLSSG.MultiFrameCountMax") == 3);
         printf("  [PASS] Case 8: Runtime Model ceiling respected (5 on 310.9, 3 on 310.1)\n");
     }

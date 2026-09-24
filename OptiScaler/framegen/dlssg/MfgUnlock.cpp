@@ -420,8 +420,9 @@ void MfgUnlock::TryApply(HMODULE requestedModule)
     {
         if (g_attemptOutcome != AttemptOutcome::Succeeded || module == g_attemptedModule || module == g_retainedModule)
             return;
-        
-        LOG_INFO("MFG unlock: new DLSSG OTA module detected, updating patch target to {}", reinterpret_cast<void*>(module));
+
+        LOG_INFO("MFG unlock: new DLSSG OTA module detected, updating patch target to {}",
+                 reinterpret_cast<void*>(module));
         ReleaseModuleReference(g_retainedModule);
         g_status = Status();
         g_attemptOutcome = AttemptOutcome::WaitingForModule;

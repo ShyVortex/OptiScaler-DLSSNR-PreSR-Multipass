@@ -106,7 +106,8 @@ int main()
         std::filesystem::path realSily = "dlssg_for_sm86/SilyNoMeta/version.dll";
         if (std::filesystem::exists(realSily))
         {
-            assert(HasAsiInitExport(realSily) && "Real SilyNoMeta binary must contain InitializeASI or DLSSG_UniversalProxy export");
+            assert(HasAsiInitExport(realSily) &&
+                   "Real SilyNoMeta binary must contain InitializeASI or DLSSG_UniversalProxy export");
             assert(HasDynamicMfgSupport(realSily) && "Real SilyNoMeta binary must contain DynamicMFG support");
             std::printf("  [PASS] Case 6a: Real SilyNoMeta release binary verified (has proxy export & DynamicMFG)\n");
         }

@@ -100,8 +100,7 @@ struct MockNrState
 };
 
 // Simulation of DlssNr_Dx12::Dispatch check
-bool TestDlssNrDispatch(MockResource* colour, MockResource* output,
-                        MockResource* depth, MockResource* motion,
+bool TestDlssNrDispatch(MockResource* colour, MockResource* output, MockResource* depth, MockResource* motion,
                         void* exposureTexture, MockNrState& state)
 {
     if (!colour || !depth || !motion || !output)
@@ -158,8 +157,8 @@ struct TestSrvTable
 };
 
 // Simulation of ResolveWhitePoint with null exposure texture
-float TestResolveWhitePoint(int whitePointSource, float paperWhite,
-                            void* exposureTexture, float gamePreExposure, float gameExposure)
+float TestResolveWhitePoint(int whitePointSource, float paperWhite, void* exposureTexture, float gamePreExposure,
+                            float gameExposure)
 {
     // Mode 1: Game exposure texture
     if (whitePointSource == 1 && exposureTexture != nullptr && gameExposure > 1e-6f)
@@ -198,7 +197,8 @@ int main()
         assert(state.successfulDispatches == 1);
         assert(!state.exposureOfferedNow);
         assert(state.reason.empty());
-        std::cout << "[PASS] Test 1: Typeless R16G16B16A16 source matches typed FLOAT buffer with null exposure" << std::endl;
+        std::cout << "[PASS] Test 1: Typeless R16G16B16A16 source matches typed FLOAT buffer with null exposure"
+                  << std::endl;
     }
 
     // Test 2: Other typeless formats (R32G32B32A32, R8G8B8A8, R10G10B10A2) match typed buffers
@@ -223,7 +223,8 @@ int main()
         assert(TestDlssNrDispatch(&c10, &b10, &depth, &motion, nullptr, state));
 
         assert(state.successfulDispatches == 3);
-        std::cout << "[PASS] Test 2: R32G32B32A32, R8G8B8A8, and R10G10B10A2 typeless normalization succeeds" << std::endl;
+        std::cout << "[PASS] Test 2: R32G32B32A32, R8G8B8A8, and R10G10B10A2 typeless normalization succeeds"
+                  << std::endl;
     }
 
     // Test 3: Genuine format mismatch is rejected and reports skip reason
@@ -270,7 +271,8 @@ int main()
         assert(restore.trackedResources.size() == 2);
         assert(restore.trackedResources[0] == &dummyDepth);
         assert(restore.trackedResources[1] == &dummyMotion);
-        std::cout << "[PASS] Test 5: RestoreInputs ignores null exposure resource without registering barrier" << std::endl;
+        std::cout << "[PASS] Test 5: RestoreInputs ignores null exposure resource without registering barrier"
+                  << std::endl;
     }
 
     // Test 6: DispatchPass srvs descriptor table substitutes InSource when prevEdit/exposureTex is null
@@ -288,7 +290,8 @@ int main()
         assert(srvTable.srvs[2] == &dummyOriginal);
         assert(srvTable.srvs[3] == &dummyMotion);
         assert(srvTable.srvs[4] == &dummySource); // Falls back to InSource
-        std::cout << "[PASS] Test 6: SrvTable substitutes InSource for slot 4 when exposure texture is null" << std::endl;
+        std::cout << "[PASS] Test 6: SrvTable substitutes InSource for slot 4 when exposure texture is null"
+                  << std::endl;
     }
 
     // Test 7: White point fallback when game exposure texture is null
@@ -308,7 +311,8 @@ int main()
         float wpWithExposure = TestResolveWhitePoint(1, defaultPaperWhite, &validExposure, 1.0f, 0.01f);
         assert(std::abs(wpWithExposure - 100.0f) < 1e-4f);
 
-        std::cout << "[PASS] Test 7: White point safely falls back to paper white when exposure texture is null" << std::endl;
+        std::cout << "[PASS] Test 7: White point safely falls back to paper white when exposure texture is null"
+                  << std::endl;
     }
 
     // Test 8: PrepareDlssNrInput reports pipeline skip reason on dispatch failure
@@ -317,7 +321,8 @@ int main()
         bool ok = TestPrepareDlssNrInput(false, state);
         assert(!ok);
         assert(state.PublishedReason() == "pre-SR input dispatch failed in pipeline");
-        std::cout << "[PASS] Test 8: PrepareDlssNrInput publishes non-empty skip reason on pipeline dispatch failure" << std::endl;
+        std::cout << "[PASS] Test 8: PrepareDlssNrInput publishes non-empty skip reason on pipeline dispatch failure"
+                  << std::endl;
     }
 
     std::cout << "\nALL 8 UNIT TESTS PASSED SUCCESSFULLY!" << std::endl;

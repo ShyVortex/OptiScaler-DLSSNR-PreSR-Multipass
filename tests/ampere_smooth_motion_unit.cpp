@@ -14,27 +14,25 @@ constexpr uint32_t NV_GPU_ARCHITECTURE_GB100 = 0x000001A0;
 
 // Setting IDs matching NVIDIA DRS constants
 constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_ENABLE = 0xB0D384C0;
-constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_APIS   = 0xB0CC0875;
-constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_DEBUG  = 0xB01B8B02;
+constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_APIS = 0xB0CC0875;
+constexpr uint32_t NVDRS_SETTING_SMOOTH_MOTION_DEBUG = 0xB01B8B02;
 
 // Minimum supported NVIDIA driver version (571.86 -> 57186)
-constexpr uint32_t MIN_SMOOTH_MOTION_DRIVER_VERSION   = 57186;
+constexpr uint32_t MIN_SMOOTH_MOTION_DRIVER_VERSION = 57186;
 
 // Bitmask for enabled APIs
-constexpr uint32_t SMOOTH_MOTION_API_DX12             = 0x1;
-constexpr uint32_t SMOOTH_MOTION_API_DX11             = 0x2;
-constexpr uint32_t SMOOTH_MOTION_API_VULKAN           = 0x4;
-constexpr uint32_t SMOOTH_MOTION_API_ALL              = (SMOOTH_MOTION_API_DX12 | SMOOTH_MOTION_API_DX11 | SMOOTH_MOTION_API_VULKAN);
+constexpr uint32_t SMOOTH_MOTION_API_DX12 = 0x1;
+constexpr uint32_t SMOOTH_MOTION_API_DX11 = 0x2;
+constexpr uint32_t SMOOTH_MOTION_API_VULKAN = 0x4;
+constexpr uint32_t SMOOTH_MOTION_API_ALL = (SMOOTH_MOTION_API_DX12 | SMOOTH_MOTION_API_DX11 | SMOOTH_MOTION_API_VULKAN);
 
 // Pure validation helper simulating the OptiScaler decision logic
 struct SmoothMotionPolicy
 {
-    static bool IsDriverSupported(uint32_t driverVersion)
-    {
-        return driverVersion >= MIN_SMOOTH_MOTION_DRIVER_VERSION;
-    }
+    static bool IsDriverSupported(uint32_t driverVersion) { return driverVersion >= MIN_SMOOTH_MOTION_DRIVER_VERSION; }
 
-    static bool ShouldEngage(std::optional<bool> userConfig, bool isNvidia, uint32_t archId, bool isWindows, uint32_t driverVersion)
+    static bool ShouldEngage(std::optional<bool> userConfig, bool isNvidia, uint32_t archId, bool isWindows,
+                             uint32_t driverVersion)
     {
         // Strictly opt-in: default is false
         const bool optIn = userConfig.value_or(false);
@@ -56,9 +54,12 @@ struct SmoothMotionPolicy
     static uint32_t ResolveApiMask(bool enableDx12 = true, bool enableDx11 = true, bool enableVulkan = true)
     {
         uint32_t mask = 0;
-        if (enableDx12) mask |= SMOOTH_MOTION_API_DX12;
-        if (enableDx11) mask |= SMOOTH_MOTION_API_DX11;
-        if (enableVulkan) mask |= SMOOTH_MOTION_API_VULKAN;
+        if (enableDx12)
+            mask |= SMOOTH_MOTION_API_DX12;
+        if (enableDx11)
+            mask |= SMOOTH_MOTION_API_DX11;
+        if (enableVulkan)
+            mask |= SMOOTH_MOTION_API_VULKAN;
         return mask;
     }
 };
@@ -70,8 +71,8 @@ int main()
     // Test 1: DRS Setting Identifiers match NVIDIA Profile Inspector / DRS standards
     {
         assert(NVDRS_SETTING_SMOOTH_MOTION_ENABLE == 0xB0D384C0);
-        assert(NVDRS_SETTING_SMOOTH_MOTION_APIS   == 0xB0CC0875);
-        assert(NVDRS_SETTING_SMOOTH_MOTION_DEBUG  == 0xB01B8B02);
+        assert(NVDRS_SETTING_SMOOTH_MOTION_APIS == 0xB0CC0875);
+        assert(NVDRS_SETTING_SMOOTH_MOTION_DEBUG == 0xB01B8B02);
         std::printf("  [PASS] Case 1: DRS setting IDs verified (Enable=0xB0D384C0, APIs=0xB0CC0875)\n");
     }
 
@@ -101,10 +102,10 @@ int main()
         assert(!SmoothMotionPolicy::IsDriverSupported(57185)); // 571.85 (boundary check)
 
         // Drivers at or above 571.86 are supported
-        assert(SmoothMotionPolicy::IsDriverSupported(57186));  // 571.86 (boundary check)
-        assert(SmoothMotionPolicy::IsDriverSupported(57216));  // 572.16
-        assert(SmoothMotionPolicy::IsDriverSupported(58108));  // 581.08
-        assert(SmoothMotionPolicy::IsDriverSupported(61047));  // Future branch
+        assert(SmoothMotionPolicy::IsDriverSupported(57186)); // 571.86 (boundary check)
+        assert(SmoothMotionPolicy::IsDriverSupported(57216)); // 572.16
+        assert(SmoothMotionPolicy::IsDriverSupported(58108)); // 581.08
+        assert(SmoothMotionPolicy::IsDriverSupported(61047)); // Future branch
 
         // With explicit user opt-in, old driver is safely blocked
         assert(!SmoothMotionPolicy::ShouldEngage(true, true, NV_GPU_ARCHITECTURE_AD100, true, 56070));
@@ -147,13 +148,17 @@ int main()
 
     // Test 6: In-Memory DRS GetSetting Interception Behavior
     {
-        auto simulateGetSetting = [](uint32_t settingId, bool configEnabled, uint32_t& outVal) -> bool {
-            if (settingId == NVDRS_SETTING_SMOOTH_MOTION_ENABLE) {
+        auto simulateGetSetting = [](uint32_t settingId, bool configEnabled, uint32_t& outVal) -> bool
+        {
+            if (settingId == NVDRS_SETTING_SMOOTH_MOTION_ENABLE)
+            {
                 outVal = configEnabled ? 1 : 0;
                 return true;
             }
-            if (settingId == NVDRS_SETTING_SMOOTH_MOTION_APIS) {
-                if (configEnabled) {
+            if (settingId == NVDRS_SETTING_SMOOTH_MOTION_APIS)
+            {
+                if (configEnabled)
+                {
                     outVal = 7;
                     return true;
                 }
@@ -192,7 +197,8 @@ int main()
             std::string helpMarker;
         };
 
-        auto evaluateUiState = [](bool onLinux, bool isNvidia, uint32_t archId) -> SmoothMotionUiState {
+        auto evaluateUiState = [](bool onLinux, bool isNvidia, uint32_t archId) -> SmoothMotionUiState
+        {
             const bool isAdaOrBlackwell = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
             const bool isAmpere = isNvidia && (archId == NV_GPU_ARCHITECTURE_GA100);
             const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere);
@@ -200,39 +206,44 @@ int main()
             {
                 if (onLinux)
                 {
-                    return { true,
-                             "Disabled because the active OS is not Windows (10/11).\n"
-                             "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver 571.86+ on Windows)." };
+                    return { true, "Disabled because the active OS is not Windows (10/11).\n"
+                                   "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires "
+                                   "driver 571.86+ on Windows)." };
                 }
                 else if (!isNvidia)
                 {
-                    return { true,
-                             "Disabled because the active GPU is not NVIDIA.\n"
-                             "NVIDIA Smooth Motion requires an NVIDIA GPU and driver 571.86+ on Windows." };
+                    return { true, "Disabled because the active GPU is not NVIDIA.\n"
+                                   "NVIDIA Smooth Motion requires an NVIDIA GPU and driver 571.86+ on Windows." };
                 }
                 else
                 {
-                    return { true,
-                             "Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or Blackwell (RTX 50).\n"
-                             "NVIDIA driver-level Smooth Motion requires driver 571.86+ on Windows with RTX 40/50 natively, or RTX 30 via NVSmooth30.\n"
-                             "Turing (RTX 20 / GTX 16) and older architectures lack hardware support for driver-level frame generation." };
+                    return { true, "Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX "
+                                   "40), or Blackwell (RTX 50).\n"
+                                   "NVIDIA driver-level Smooth Motion requires driver 571.86+ on Windows with RTX "
+                                   "40/50 natively, or RTX 30 via NVSmooth30.\n"
+                                   "Turing (RTX 20 / GTX 16) and older architectures lack hardware support for "
+                                   "driver-level frame generation." };
                 }
             }
             if (isAmpere)
             {
-                return { false,
-                         "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
-                         "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
-                         "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                         "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
-                         "Can be toggled dynamically on the fly." };
+                return {
+                    false,
+                    "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                    "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                    "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                    "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
+                    "Can be toggled dynamically on the fly."
+                };
             }
-            return { false,
-                     "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
-                     "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
-                     "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
-                     "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
-                     "Can be toggled dynamically on the fly." };
+            return {
+                false,
+                "NVIDIA Driver-Level Smooth Motion (requires driver 571.86+ on Windows):\n"
+                "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
+                "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
+                "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
+                "Can be toggled dynamically on the fly."
+            };
         };
 
         // Case 8a: Windows + Ada GPU (AD100 / RTX 40) -> Enabled, standard help marker
@@ -240,7 +251,8 @@ int main()
             auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_AD100);
             assert(!ui.disabled);
             assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
-            assert(ui.helpMarker.find("Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell)") != std::string::npos);
+            assert(ui.helpMarker.find("Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell)") !=
+                   std::string::npos);
             assert(ui.helpMarker.find("Disabled because") == std::string::npos);
             std::printf("  [PASS] Case 8a: Windows + Ada GPU evaluates to interactive checkbox\n");
         }
@@ -261,14 +273,16 @@ int main()
             assert(ui.helpMarker.find("requires driver 571.86+ on Windows") != std::string::npos);
             assert(ui.helpMarker.find("unlocked via OptiScaler/nvsmooth30.dll") != std::string::npos);
             assert(ui.helpMarker.find("Disabled because") == std::string::npos);
-            std::printf("  [PASS] Case 8c: Windows + Ampere GPU evaluates to interactive checkbox (unlocked via NVSmooth30)\n");
+            std::printf(
+                "  [PASS] Case 8c: Windows + Ampere GPU evaluates to interactive checkbox (unlocked via NVSmooth30)\n");
         }
 
         // Case 8d: Windows + Turing GPU (TU100 / RTX 20) -> Disabled with architecture explanation
         {
             auto ui = evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_TU100);
             assert(ui.disabled);
-            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace (RTX 40), or Blackwell (RTX 50)") != std::string::npos);
+            assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA Ampere (RTX 30), Ada Lovelace "
+                                      "(RTX 40), or Blackwell (RTX 50)") != std::string::npos);
             std::printf("  [PASS] Case 8d: Windows + Turing GPU evaluates to disabled with architecture explanation\n");
         }
 
@@ -289,19 +303,24 @@ int main()
             std::printf("  [PASS] Case 8f: Windows + non-NVIDIA GPU evaluates to disabled with GPU explanation\n");
         }
 
-        std::printf("  [PASS] Case 8: Menu UI disable logic and contextual help markers verified across all architectures\n");
+        std::printf(
+            "  [PASS] Case 8: Menu UI disable logic and contextual help markers verified across all architectures\n");
     }
 
     // Test 9: INI Configuration Key Priority & Migration (SmoothMotion vs AmpereMfgSmoothMotion)
     {
-        auto resolveConfig = [](std::optional<bool> dlssgSmoothMotion,
-                                std::optional<bool> frameGenSmoothMotion,
+        auto resolveConfig = [](std::optional<bool> dlssgSmoothMotion, std::optional<bool> frameGenSmoothMotion,
                                 std::optional<bool> dlssgAmpereMfgSmoothMotion,
-                                std::optional<bool> frameGenAmpereMfgSmoothMotion) -> bool {
-            if (dlssgSmoothMotion.has_value()) return dlssgSmoothMotion.value();
-            if (frameGenSmoothMotion.has_value()) return frameGenSmoothMotion.value();
-            if (dlssgAmpereMfgSmoothMotion.has_value()) return dlssgAmpereMfgSmoothMotion.value();
-            if (frameGenAmpereMfgSmoothMotion.has_value()) return frameGenAmpereMfgSmoothMotion.value();
+                                std::optional<bool> frameGenAmpereMfgSmoothMotion) -> bool
+        {
+            if (dlssgSmoothMotion.has_value())
+                return dlssgSmoothMotion.value();
+            if (frameGenSmoothMotion.has_value())
+                return frameGenSmoothMotion.value();
+            if (dlssgAmpereMfgSmoothMotion.has_value())
+                return dlssgAmpereMfgSmoothMotion.value();
+            if (frameGenAmpereMfgSmoothMotion.has_value())
+                return frameGenAmpereMfgSmoothMotion.value();
             return false;
         };
 
@@ -337,5 +356,3 @@ int main()
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");
     return 0;
 }
-
-

@@ -43,15 +43,15 @@ bool ApplyLiveControl(uint32_t mode, uint32_t targetFps, uint32_t multiplier)
     if (!s_pfnRequestControl)
         return false;
 
-    DLSSG_ControlRequest req{};
+    DLSSG_ControlRequest req {};
     req.version = 1;
     req.mode = mode;
     req.targetFPS = (targetFps > 1000) ? 1000 : targetFps;
     req.multiplier = (multiplier >= 2 && multiplier <= 6) ? multiplier : 0;
     req.flags = 0;
 
-    LOG_INFO("AmpereMfgLoader: Dispatching live control: mode={}, targetFPS={}, multiplier={}",
-             req.mode, req.targetFPS, req.multiplier);
+    LOG_INFO("AmpereMfgLoader: Dispatching live control: mode={}, targetFPS={}, multiplier={}", req.mode, req.targetFPS,
+             req.multiplier);
 
     bool result = s_pfnRequestControl(&req);
     s_status.LiveControlActive = result;
@@ -97,7 +97,8 @@ std::string ResolveRouter()
         std::lock_guard lock(s_mutex);
         hasSm75Support = s_status.HasSm75Support;
     }
-    return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
+    return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter,
+                         hasSm75Support);
 }
 
 std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool hasDynamicMfgSupport)
@@ -113,7 +114,8 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
 
     if (onLinux && configuredFrames == 1 && !dynamicMfg)
     {
-        LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1); SetFlipConfig is stubbed in NvApiHooks to enable clean native 2X FG");
+        LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1); SetFlipConfig is stubbed in "
+                 "NvApiHooks to enable clean native 2X FG");
     }
 
     std::string kernelImg = cfg->FGDLSSGAmpereMfgKernelImage.value_or("Auto");
@@ -125,15 +127,16 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
         std::string resolved = ResolveAutoKernelImage();
         if (resolved != "Auto")
         {
-            LOG_INFO("AmpereMfgLoader: Auto kernel image resolved to {} for GPU: {}",
-                     resolved, IdentifyGpu::getPrimaryGpu().name);
+            LOG_INFO("AmpereMfgLoader: Auto kernel image resolved to {} for GPU: {}", resolved,
+                     IdentifyGpu::getPrimaryGpu().name);
             kernelImg = resolved;
         }
     }
 
     int hwBilinear = cfg->FGDLSSGAmpereMfgHardwareBilinear.value_or_default() ? 1 : 0;
     const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
-    std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter, hasSm75Support);
+    std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name,
+                                       configuredRouter, hasSm75Support);
     const int optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(1);
     const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
     const std::string spoofArch = cfg->FGDLSSGAmpereMfgSpoofArchToGame.value_or("Auto");
@@ -143,10 +146,14 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
 
     const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
 
-    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {}, LogLevel: {}, DynamicMFG: {}, TargetFPS: {} (hasSm75Support: {}, is3101Runtime: {}, hasDynamicMfgSupport: {}) for GPU: {}",
-             maxFrames, optimized, preset, router, spoofArch, logLevel, dynamicMfg, dynamicTargetFps, hasSm75Support, is3101Runtime, hasDynamicMfgSupport, IdentifyGpu::getPrimaryGpu().name);
+    LOG_INFO("AmpereMfgLoader: 0.3.x INI: MaxFrames: {}, Optimized: {}, Preset: {}, Router: {}, SpoofArch: {}, "
+             "LogLevel: {}, DynamicMFG: {}, TargetFPS: {} (hasSm75Support: {}, is3101Runtime: {}, "
+             "hasDynamicMfgSupport: {}) for GPU: {}",
+             maxFrames, optimized, preset, router, spoofArch, logLevel, dynamicMfg, dynamicTargetFps, hasSm75Support,
+             is3101Runtime, hasDynamicMfgSupport, IdentifyGpu::getPrimaryGpu().name);
 
-    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch, dynamicMfg, dynamicTargetFps, hasDynamicMfgSupport);
+    return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch,
+                               dynamicMfg, dynamicTargetFps, hasDynamicMfgSupport);
 }
 
 std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
@@ -159,10 +166,7 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
     return GenerateIniContent(hasSm75Support, is3101Runtime, hasDynamicMfgSupport);
 }
 
-std::string GenerateIniContent(bool hasSm75Support)
-{
-    return GenerateIniContent(hasSm75Support, false);
-}
+std::string GenerateIniContent(bool hasSm75Support) { return GenerateIniContent(hasSm75Support, false); }
 
 std::string GenerateIniContent()
 {
@@ -226,24 +230,28 @@ bool WriteCompanionIni()
             }
 
             auto* cfg = Config::Instance();
-            const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+            const bool dynamicMfg =
+                cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
             const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
             const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
             const int maxCeiling = is3101 ? 3 : 5;
             const int effectiveFrames = dynamicMfg ? maxCeiling : configuredFrames;
             const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, false, maxCeiling);
 
-            std::string updatedReshade = MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
+            std::string updatedReshade =
+                MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
             std::ofstream reshadeOut(reshadeIniPath, std::ios::out | std::ios::trunc);
             if (reshadeOut.is_open())
             {
                 reshadeOut << updatedReshade;
                 reshadeOut.close();
-                LOG_INFO("AmpereMfgLoader: Successfully synchronized companion section in {}", wstring_to_string(reshadeIniPath.wstring()));
+                LOG_INFO("AmpereMfgLoader: Successfully synchronized companion section in {}",
+                         wstring_to_string(reshadeIniPath.wstring()));
             }
             else
             {
-                LOG_WARN("AmpereMfgLoader: Could not open {} to synchronize companion section", wstring_to_string(reshadeIniPath.wstring()));
+                LOG_WARN("AmpereMfgLoader: Could not open {} to synchronize companion section",
+                         wstring_to_string(reshadeIniPath.wstring()));
             }
         }
 
@@ -307,25 +315,22 @@ void TrySetup()
     }
 
     const uint32_t archId = static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id);
-    const bool isAmpere = IsAmpereArch(archId) ||
-                          (gpu.name.find("RTX 30") != std::string::npos ||
-                           gpu.name.find("Ampere") != std::string::npos ||
-                           gpu.name.find("GA10") != std::string::npos ||
-                           gpu.name.find("RTX A") != std::string::npos);
+    const bool isAmpere =
+        IsAmpereArch(archId) ||
+        (gpu.name.find("RTX 30") != std::string::npos || gpu.name.find("Ampere") != std::string::npos ||
+         gpu.name.find("GA10") != std::string::npos || gpu.name.find("RTX A") != std::string::npos);
 
-    const bool isTuring = IsTuringArch(archId) ||
-                          (gpu.name.find("RTX 20") != std::string::npos ||
-                           gpu.name.find("GTX 16") != std::string::npos ||
-                           gpu.name.find("TITAN RTX") != std::string::npos ||
-                           gpu.name.find("Turing") != std::string::npos ||
-                           gpu.name.find("TU10") != std::string::npos ||
-                           gpu.name.find("TU11") != std::string::npos);
+    const bool isTuring =
+        IsTuringArch(archId) ||
+        (gpu.name.find("RTX 20") != std::string::npos || gpu.name.find("GTX 16") != std::string::npos ||
+         gpu.name.find("TITAN RTX") != std::string::npos || gpu.name.find("Turing") != std::string::npos ||
+         gpu.name.find("TU10") != std::string::npos || gpu.name.find("TU11") != std::string::npos);
 
     if (!isAmpere && !isTuring)
     {
-        s_status.ErrorMessage = std::format(
-            "SM86/SM75 MFG requires an RTX 20 series (Turing) or RTX 30 series (Ampere) GPU. Detected arch 0x{:x} ({}).",
-            archId, gpu.name);
+        s_status.ErrorMessage = std::format("SM86/SM75 MFG requires an RTX 20 series (Turing) or RTX 30 series "
+                                            "(Ampere) GPU. Detected arch 0x{:x} ({}).",
+                                            archId, gpu.name);
         LOG_ERROR("AmpereMfgLoader: {}", s_status.ErrorMessage);
         return;
     }
@@ -335,11 +340,11 @@ void TrySetup()
     std::filesystem::path dllPath;
     std::error_code fileError;
 
-    auto probePath = [&](const std::filesystem::path& candidate) -> bool {
-        return !candidate.empty() && candidate != Util::DllPath() && std::filesystem::exists(candidate, fileError);
-    };
+    auto probePath = [&](const std::filesystem::path& candidate) -> bool
+    { return !candidate.empty() && candidate != Util::DllPath() && std::filesystem::exists(candidate, fileError); };
 
-    auto mainOverride = cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
+    auto mainOverride =
+        cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
 
     // Standard candidates for root runtime (310.9)
     std::filesystem::path rootCandidates[] = {
@@ -394,7 +399,8 @@ void TrySetup()
                 if (probePath(candidate))
                 {
                     dllPath = candidate;
-                    LOG_INFO("AmpereMfgLoader: Turing GPU detected; root runtime lacks SM75 kernels, falling back to 310.1 runtime at {}",
+                    LOG_INFO("AmpereMfgLoader: Turing GPU detected; root runtime lacks SM75 kernels, falling back to "
+                             "310.1 runtime at {}",
                              wstring_to_string(dllPath.wstring()));
                     break;
                 }
@@ -442,7 +448,8 @@ void TrySetup()
     s_status.HasDynamicMfgSupport = HasDynamicMfgSupport(dllPath);
 
     LOG_INFO("AmpereMfgLoader: Located binary at {}, HasSm75Support: {}, Is3101Runtime: {}, HasDynamicMfgSupport: {}",
-             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
+             wstring_to_string(dllPath.wstring()), s_status.HasSm75Support, s_status.Is3101Runtime,
+             s_status.HasDynamicMfgSupport);
 
     // Generate and write companion dlssg_sm86.ini beside the DLL
     auto iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
@@ -476,23 +483,27 @@ void TrySetup()
                 existingFile.close();
             }
 
-            const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+            const bool dynamicMfg =
+                cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
             const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
             const int maxCeiling = s_status.Is3101Runtime ? 3 : 5;
             const int effectiveFrames = dynamicMfg ? maxCeiling : configuredFrames;
             const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, false, maxCeiling);
 
-            std::string updatedReshade = MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
+            std::string updatedReshade =
+                MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
             std::ofstream reshadeOut(reshadeIniPath, std::ios::out | std::ios::trunc);
             if (reshadeOut.is_open())
             {
                 reshadeOut << updatedReshade;
                 reshadeOut.close();
-                LOG_INFO("AmpereMfgLoader: Successfully synchronized companion section in {}", wstring_to_string(reshadeIniPath.wstring()));
+                LOG_INFO("AmpereMfgLoader: Successfully synchronized companion section in {}",
+                         wstring_to_string(reshadeIniPath.wstring()));
             }
             else
             {
-                LOG_WARN("AmpereMfgLoader: Could not open {} to synchronize companion section", wstring_to_string(reshadeIniPath.wstring()));
+                LOG_WARN("AmpereMfgLoader: Could not open {} to synchronize companion section",
+                         wstring_to_string(reshadeIniPath.wstring()));
             }
         }
     }
@@ -504,13 +515,15 @@ void TrySetup()
         return;
     }
 
-    const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or_default() || cfg->FGDLSSGForceDMFG.value_or_default();
+    const bool dynamicMfg =
+        cfg->FGDLSSGOverrideForceDMFG.value_or_default() || cfg->FGDLSSGForceDMFG.value_or_default();
     const bool shouldFallback = ShouldFallbackToFsrFg(configuredFrames, onLinux, true, fallbackSetting, dynamicMfg);
     s_status.FsrFallbackActive = shouldFallback;
     if (shouldFallback)
     {
         s_status.ErrorMessage.clear();
-        LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of sideloading dlssg_sm86",
+        LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of "
+                 "sideloading dlssg_sm86",
                  fallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"));
         return;
     }
@@ -540,13 +553,15 @@ void TrySetup()
 
     // Resolve SilyNoMeta v0.3.5-2 live control exports
     s_pfnRequestControl = reinterpret_cast<PFN_DLSSG_RequestControl>(GetProcAddress(hMod, "DLSSG_RequestControl"));
-    s_pfnSetDisplayTarget = reinterpret_cast<PFN_DLSSG_SetDisplayTarget>(GetProcAddress(hMod, "DLSSG_SetDisplayTarget"));
+    s_pfnSetDisplayTarget =
+        reinterpret_cast<PFN_DLSSG_SetDisplayTarget>(GetProcAddress(hMod, "DLSSG_SetDisplayTarget"));
     s_pfnRequestUI = reinterpret_cast<PFN_DLSSG_RequestUI>(GetProcAddress(hMod, "DLSSG_RequestUI"));
 
     if (s_pfnRequestControl != nullptr || s_pfnSetDisplayTarget != nullptr)
     {
         s_status.LiveControlSupported = true;
-        LOG_INFO("AmpereMfgLoader: Live programmatic control exports resolved (RequestControl: {}, SetDisplayTarget: {}, RequestUI: {})",
+        LOG_INFO("AmpereMfgLoader: Live programmatic control exports resolved (RequestControl: {}, SetDisplayTarget: "
+                 "{}, RequestUI: {})",
                  (s_pfnRequestControl != nullptr), (s_pfnSetDisplayTarget != nullptr), (s_pfnRequestUI != nullptr));
 
         // Initial sync of live settings if configured
@@ -559,7 +574,7 @@ void TrySetup()
 
         if (s_pfnRequestControl)
         {
-            DLSSG_ControlRequest req{};
+            DLSSG_ControlRequest req {};
             req.version = 1;
             req.mode = mode;
             req.multiplier = multiplier;

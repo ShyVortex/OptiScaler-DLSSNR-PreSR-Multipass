@@ -157,16 +157,15 @@ int main()
         assert(fg2x.find("HardwareBilinear=0\n") != std::string::npos);
         assert(fg2x.find("Level=1\n") != std::string::npos);
 
-        std::string expected2x =
-            "; Native 0.2.4. Restart the game after changing this file.\n"
-            "[Compatibility]\n"
-            "Router=SM86\n"
-            "KernelImage=PTX\n"
-            "HardwareBilinear=0\n\n"
-            "[FrameGeneration]\n"
-            "MaxGeneratedFrames=1\n\n"
-            "[Logging]\n"
-            "Level=1\n";
+        std::string expected2x = "; Native 0.2.4. Restart the game after changing this file.\n"
+                                 "[Compatibility]\n"
+                                 "Router=SM86\n"
+                                 "KernelImage=PTX\n"
+                                 "HardwareBilinear=0\n\n"
+                                 "[FrameGeneration]\n"
+                                 "MaxGeneratedFrames=1\n\n"
+                                 "[Logging]\n"
+                                 "Level=1\n";
         assert(fg2x == expected2x);
     }
 
@@ -213,25 +212,32 @@ int main()
 
         // 3. When an explicit user override is configured (e.g. FGDLSSGOverrideInterpolationCount = 2 for 3X FG),
         //    MUST override 0x104D6667 to the requested count
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 2) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 2) ==
+               true);
         assert(val == 2);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 3) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 3) ==
+               true);
         assert(val == 3);
 
         // Explicit override clamping to maxCeiling
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 5) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 3, true, true, val, 3, 5) ==
+               true);
         assert(val == 3);
 
         // Setting 0x10562D0F (Override maximum DLSSG dynamic multi frame count, dynamic ceiling):
         // When configured for 1, must NOT override so Dynamic MFG is not falsely declared unsupported
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, true, val) == false);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 2, true, true, val) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, true,
+                                              val) == false);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 2, true, true,
+                                              val) == true);
         assert(val == 2);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 3, true, true, val) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 3, true, true,
+                                              val) == true);
         assert(val == 3);
 
         // Dynamic ceiling clamping on out-of-range configured frames
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 4, true, true, val, 3) == true);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 4, true, true, val,
+                                              3) == true);
         assert(val == 3);
 
         // Unrelated setting IDs must NOT be intercepted
@@ -240,11 +246,13 @@ int main()
 
         // On Windows (onLinux = false), DRS settings must NEVER be intercepted
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 1, false, true, val) == false);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, false, true, val) == false);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, false, true,
+                                              val) == false);
 
         // When Ampere MFG unlock is disabled, DRS settings must NOT be intercepted
         assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_DLSSG_MULTI_FRAME_COUNT_ID, 1, true, false, val) == false);
-        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, false, val) == false);
+        assert(TryResolveDrsMultiFrameSetting(DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID, 1, true, false,
+                                              val) == false);
     }
 
     // 12. ShouldFallbackToFsrFg: Linux FG fallback to OptiScaler internal FG (FSR FG / XeFG)
@@ -292,9 +300,7 @@ int main()
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3060", false) == "Auto");
     assert(ResolveAutoKernelImage(0x170, "NVIDIA GeForce RTX 3070 Laptop GPU", false) == "PTX");
     assert(ResolveAutoKernelImage(0x160, "NVIDIA GeForce RTX 2080", false) == "PTX");
-    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture, environment routing, Linux 2X elevation, DRS override, configurable FSR/XeFG fallback)");
+    std::puts("PASS: dlssg_sm86_ini_smoke (INI, architecture, environment routing, Linux 2X elevation, DRS override, "
+              "configurable FSR/XeFG fallback)");
     return 0;
 }
-
-
-

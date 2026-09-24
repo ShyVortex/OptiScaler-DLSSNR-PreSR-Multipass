@@ -7,18 +7,22 @@
 #include <chrono>
 
 // Mock OwnedMutex implementation matching OptiScaler/OwnedMutex.h
-class MockOwnedMutex {
-private:
+class MockOwnedMutex
+{
+  private:
     std::shared_mutex mtx;
-    std::atomic<uint32_t> owner{0};
+    std::atomic<uint32_t> owner { 0 };
 
-public:
-    bool try_lock_for(uint32_t _owner, std::chrono::milliseconds timeout) {
+  public:
+    bool try_lock_for(uint32_t _owner, std::chrono::milliseconds timeout)
+    {
         // Test helper: verify if lock can be acquired without blocking
         // For shared_mutex, if current thread already holds exclusive lock, try_lock returns false (deadlock risk)
         auto start = std::chrono::steady_clock::now();
-        while (!mtx.try_lock()) {
-            if (std::chrono::steady_clock::now() - start > timeout) {
+        while (!mtx.try_lock())
+        {
+            if (std::chrono::steady_clock::now() - start > timeout)
+            {
                 return false; // Deadlock or contended!
             }
             std::this_thread::yield();
@@ -27,22 +31,23 @@ public:
         return true;
     }
 
-    void lock(uint32_t _owner) {
+    void lock(uint32_t _owner)
+    {
         mtx.lock();
         owner.store(_owner, std::memory_order_release);
     }
 
-    void unlock(uint32_t _owner) {
+    void unlock(uint32_t _owner)
+    {
         owner.store(0, std::memory_order_release);
         mtx.unlock();
     }
 
-    uint32_t getOwner() const {
-        return owner.load(std::memory_order_seq_cst);
-    }
+    uint32_t getOwner() const { return owner.load(std::memory_order_seq_cst); }
 };
 
-struct MockState {
+struct MockState
+{
     bool externalFrameGeneration = false;
     int activeFgNvngx = 0;
     int activeFgOutput = 0;
@@ -50,7 +55,8 @@ struct MockState {
     int dlssgDetectedInterpolationCount = 0;
 };
 
-struct MockConfig {
+struct MockConfig
+{
     bool FGDLSSGAmpereMfgUnlock = false;
     bool FGDLSSGAdaMfgUnlock = false;
 };
@@ -60,26 +66,25 @@ bool SimulateResizeBuffers(MockOwnedMutex& localMutex, const MockState& state, c
 {
     const uint32_t currentOwner = localMutex.getOwner();
     const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
-    const bool isDlssgMod = state.externalFrameGeneration ||
-                            state.activeFgNvngx != 0 ||
-                            state.activeFgOutput == 1 || // DLSSG
-                            state.activeFgInput == 1 ||  // DLSSG
-                            config.FGDLSSGAmpereMfgUnlock ||
-                            config.FGDLSSGAdaMfgUnlock ||
-                            state.dlssgDetectedInterpolationCount > 0;
+    const bool isDlssgMod =
+        state.externalFrameGeneration || state.activeFgNvngx != 0 || state.activeFgOutput == 1 || // DLSSG
+        state.activeFgInput == 1 ||                                                               // DLSSG
+        config.FGDLSSGAmpereMfgUnlock || config.FGDLSSGAdaMfgUnlock || state.dlssgDetectedInterpolationCount > 0;
 
     bool lockAcquired = false;
     if (!presentOwnsLock && !isDlssgMod)
     {
         // Try acquiring lock with a short 20ms timeout to detect deadlock immediately
-        if (!localMutex.try_lock_for(siteId, std::chrono::milliseconds(20))) {
+        if (!localMutex.try_lock_for(siteId, std::chrono::milliseconds(20)))
+        {
             return false; // DEADLOCK DETECTED!
         }
         lockAcquired = true;
     }
 
     // Perform buffer resize work...
-    if (lockAcquired) {
+    if (lockAcquired)
+    {
         localMutex.unlock(siteId);
     }
 
@@ -117,7 +122,8 @@ int main()
         assert(localMutex.getOwner() == 4 && "Present must still hold owner 4");
 
         localMutex.unlock(4); // Present finishes
-        printf("  [PASS] Test 2: Re-entrant ResizeBuffers during Present with Ada MFG bypasses lock safely (No Deadlock)\n");
+        printf("  [PASS] Test 2: Re-entrant ResizeBuffers during Present with Ada MFG bypasses lock safely (No "
+               "Deadlock)\n");
     }
 
     // ------------------------------------------------------------------------
@@ -127,14 +133,15 @@ int main()
     {
         config.FGDLSSGAdaMfgUnlock = false;
         state.dlssgDetectedInterpolationCount = 2; // 3X MFG active
-        localMutex.lock(5); // Present1() owns lock
+        localMutex.lock(5);                        // Present1() owns lock
 
         bool ok = SimulateResizeBuffers(localMutex, state, config, 2);
         assert(ok && "Re-entrant call from Present1 with dlssgDetectedInterpolationCount > 0 must NOT deadlock!");
         assert(localMutex.getOwner() == 5 && "Present1 must still hold owner 5");
 
         localMutex.unlock(5); // Present1 finishes
-        printf("  [PASS] Test 3: Re-entrant ResizeBuffers1 during Present1 with active DLSSG ratio bypasses lock safely\n");
+        printf("  [PASS] Test 3: Re-entrant ResizeBuffers1 during Present1 with active DLSSG ratio bypasses lock "
+               "safely\n");
     }
 
     // ------------------------------------------------------------------------
@@ -143,8 +150,8 @@ int main()
     // When isDlssgMod was false on Ada, it attempted localMutex.lock() during Present, causing deadlock!
     // ------------------------------------------------------------------------
     {
-        state = MockState{}; // reset
-        config = MockConfig{}; // reset
+        state = MockState {};   // reset
+        config = MockConfig {}; // reset
         // Even if all mod flags are false, if presentOwnsLock == true, we MUST NOT attempt lock!
         localMutex.lock(4);
 

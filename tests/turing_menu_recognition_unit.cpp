@@ -10,21 +10,24 @@ constexpr uint32_t NV_GPU_ARCHITECTURE_TU100 = 0x00000160;
 constexpr uint32_t NV_GPU_ARCHITECTURE_GA100 = 0x00000170;
 constexpr uint32_t NV_GPU_ARCHITECTURE_AD100 = 0x00000190;
 
-enum class VendorId {
+enum class VendorId
+{
     Unknown,
     Nvidia,
     Amd,
     Intel
 };
 
-enum class FGOutput {
+enum class FGOutput
+{
     NoFG,
     FSRFG,
     DLSSG,
     XeFG
 };
 
-enum class FGNvngxReplacement {
+enum class FGNvngxReplacement
+{
     None,
     Nukems,
     Arturs,
@@ -32,19 +35,16 @@ enum class FGNvngxReplacement {
     Combo
 };
 
-struct MockGpu {
+struct MockGpu
+{
     VendorId vendorId = VendorId::Nvidia;
     uint32_t archId = NV_GPU_ARCHITECTURE_TU100;
     std::string name = "NVIDIA GeForce RTX 2070 SUPER";
 };
 
-inline bool IsTuringArch(uint32_t archId) {
-    return (archId == 0x00000160) || ((archId & 0xFFF0) == 0x0160);
-}
+inline bool IsTuringArch(uint32_t archId) { return (archId == 0x00000160) || ((archId & 0xFFF0) == 0x0160); }
 
-inline bool IsAmpereArch(uint32_t archId) {
-    return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170);
-}
+inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }
 
 // Simulates the exact supportsDlssg logic in menu_common.cpp
 bool EvaluateSupportsDlssg(const MockGpu& primaryGpu, bool ampereActive)
@@ -52,15 +52,12 @@ bool EvaluateSupportsDlssg(const MockGpu& primaryGpu, bool ampereActive)
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const uint32_t archId = primaryGpu.archId;
     const bool isAdaOrNewer = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
-    const bool isTuringOrAmpere = isNvidia && (
-        IsTuringArch(archId) ||
-        IsAmpereArch(archId) ||
-        primaryGpu.name.find("RTX 20") != std::string::npos ||
-        primaryGpu.name.find("GTX 16") != std::string::npos ||
-        primaryGpu.name.find("RTX 30") != std::string::npos ||
-        primaryGpu.name.find("TITAN RTX") != std::string::npos ||
-        primaryGpu.name.find("Turing") != std::string::npos ||
-        primaryGpu.name.find("Ampere") != std::string::npos);
+    const bool isTuringOrAmpere =
+        isNvidia &&
+        (IsTuringArch(archId) || IsAmpereArch(archId) || primaryGpu.name.find("RTX 20") != std::string::npos ||
+         primaryGpu.name.find("GTX 16") != std::string::npos || primaryGpu.name.find("RTX 30") != std::string::npos ||
+         primaryGpu.name.find("TITAN RTX") != std::string::npos ||
+         primaryGpu.name.find("Turing") != std::string::npos || primaryGpu.name.find("Ampere") != std::string::npos);
 
     return isAdaOrNewer || isTuringOrAmpere || ampereActive;
 }

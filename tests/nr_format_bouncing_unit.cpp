@@ -34,10 +34,7 @@ struct MockModelContext
         retries++;
     }
 
-    void Prepare()
-    {
-        hasFeature = true;
-    }
+    void Prepare() { hasFeature = true; }
 };
 
 // Mock ModelState structure mirroring ModelStateDx12
@@ -93,7 +90,8 @@ struct MockModelState
 
     void ParkNrResource(MockResource*& res)
     {
-        if (res == nullptr) return;
+        if (res == nullptr)
+            return;
         retiredPool.push_back(res);
         parkedCount++;
         res = nullptr;
@@ -107,8 +105,7 @@ struct MockModelState
         const auto currentFormat = output->format;
 
         // Check if we have cached surfaces matching the requested format and current dimensions
-        if (altSurfaces.format == needed &&
-            altSurfaces.width == width && altSurfaces.height == height &&
+        if (altSurfaces.format == needed && altSurfaces.width == width && altSurfaces.height == height &&
             altSurfaces.workWidth == workWidth && altSurfaces.workHeight == workHeight)
         {
             std::swap(output, altSurfaces.output);
@@ -295,7 +292,8 @@ int main()
     assert(state.allocationsCount == allocsBeforePingPong);
     assert(state.models[0].retries == 0);
     assert(state.swapsCount == 101);
-    std::cout << "Test 4: 100 camera cut ping-pong cycles verified with 0 allocations and 0 model retries." << std::endl;
+    std::cout << "Test 4: 100 camera cut ping-pong cycles verified with 0 allocations and 0 model retries."
+              << std::endl;
 
     // Test 5: Resolution change invalidates both active and cached pools
     state.width = 2560;

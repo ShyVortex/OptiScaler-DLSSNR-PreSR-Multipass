@@ -10,31 +10,34 @@ namespace AmpereMfgLoader
 {
 struct Status
 {
-    bool Enabled = false;     // Config says to use it
-    bool DllFound = false;    // dlssg_sm86.dll found in OptiScaler/dlssg_sm86/
-    bool IniWritten = false;  // dlssg_sm86.ini generated and written
-    bool DllLoaded = false;   // LoadLibrary succeeded
+    bool Enabled = false;           // Config says to use it
+    bool DllFound = false;          // dlssg_sm86.dll found in OptiScaler/dlssg_sm86/
+    bool IniWritten = false;        // dlssg_sm86.ini generated and written
+    bool DllLoaded = false;         // LoadLibrary succeeded
     bool FsrFallbackActive = false; // 2X FG on Linux: internal FSR FG active
-    bool HasSm75Support = false;    // Loaded runtime binary contains dedicated SM75 kernel family (310.1 or unified 310.9 0.3.1+)
-    bool Is3101Runtime = false;     // True if 310.1 runtime (max ceiling 3 / 4X), false if 310.9 runtime (max ceiling 5 / 6X)
+    bool HasSm75Support =
+        false; // Loaded runtime binary contains dedicated SM75 kernel family (310.1 or unified 310.9 0.3.1+)
+    bool Is3101Runtime =
+        false; // True if 310.1 runtime (max ceiling 3 / 4X), false if 310.9 runtime (max ceiling 5 / 6X)
     bool SmoothMotionActive = false; // True if NVIDIA Smooth Motion DRS setting was applied/active
-    bool HasDynamicMfgSupport = false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
+    bool HasDynamicMfgSupport =
+        false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
     bool AsiInitInvoked = false;       // True if InitializeASI export was detected and invoked on the loaded module
     bool LiveControlSupported = false; // True if DLSSG_RequestControl / DLSSG_SetDisplayTarget exports are available
     bool LiveControlActive = false;    // True if a live control command has been dispatched to the running module
-    std::wstring LoadedDllPath;     // Absolute path of loaded DLL
-    std::string ErrorMessage; // Human-readable error if anything failed
+    std::wstring LoadedDllPath;        // Absolute path of loaded DLL
+    std::string ErrorMessage;          // Human-readable error if anything failed
 };
 
 #pragma pack(push, 1)
 /// Struct passed to DLSSG_RequestControl (version 1, size 0x14 / 20 bytes)
 struct DLSSG_ControlRequest
 {
-    uint32_t version = 1;      // ABI version (1)
-    uint32_t mode = 0;         // 0 = FollowGame, 1 = Dynamic, 2 = Fixed Multiplier, 3 = Adaptive Vulkan
-    uint32_t multiplier = 0;   // 2..6 (used when mode == 2)
-    uint32_t targetFPS = 0;    // Target FPS (0 = unconstrained/auto, 10..1000)
-    uint32_t flags = 0;        // Reserved / flags
+    uint32_t version = 1;    // ABI version (1)
+    uint32_t mode = 0;       // 0 = FollowGame, 1 = Dynamic, 2 = Fixed Multiplier, 3 = Adaptive Vulkan
+    uint32_t multiplier = 0; // 2..6 (used when mode == 2)
+    uint32_t targetFPS = 0;  // Target FPS (0 = unconstrained/auto, 10..1000)
+    uint32_t flags = 0;      // Reserved / flags
 };
 #pragma pack(pop)
 
@@ -76,8 +79,10 @@ inline int ResolveMaxGeneratedFrames(int configuredMaxFrames, bool /*onLinux*/ =
 
 /// Returns true if Linux FG should fall back to OptiScaler's internal FG pipeline (DLSSG input -> FSRFG/XeFG output)
 /// instead of sideloading dlssg_sm86.
-/// Mode: "auto" (default, falls back when configuredMaxFrames <= 1 and dynamicMfg is off), "true"/"on"/"1" (force fallback), "false"/"off"/"0" (force external dlssg_sm86).
-inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled, const std::string& fallbackSetting = "auto", bool dynamicMfg = false)
+/// Mode: "auto" (default, falls back when configuredMaxFrames <= 1 and dynamicMfg is off), "true"/"on"/"1" (force
+/// fallback), "false"/"off"/"0" (force external dlssg_sm86).
+inline bool ShouldFallbackToFsrFg(int configuredMaxFrames, bool onLinux, bool mfgUnlockEnabled,
+                                  const std::string& fallbackSetting = "auto", bool dynamicMfg = false)
 {
     if (!onLinux || !mfgUnlockEnabled)
         return false;
@@ -110,8 +115,8 @@ constexpr uint32_t DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID = 0x10562
 /// Evaluates whether a DRS query matches a DLSSG multi-frame setting and resolves
 /// the overridden value when running on Linux with Ampere MFG unlock enabled.
 inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMaxFrames, bool onLinux,
-                                          bool mfgUnlockEnabled, uint32_t& outValue, int maxCeiling = 3,
-                                          int explicitOverrideCount = 0, bool dynamicMfg = false)
+                                           bool mfgUnlockEnabled, uint32_t& outValue, int maxCeiling = 3,
+                                           int explicitOverrideCount = 0, bool dynamicMfg = false)
 {
     if (!onLinux || !mfgUnlockEnabled)
         return false;
@@ -121,7 +126,8 @@ inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMax
     // We only override it when:
     // 1. An explicit user override is configured (FGDLSSGOverrideInterpolationCount > 0), OR
     // 2. The user configured single-frame generation (configuredMaxFrames == 1) WITHOUT Dynamic MFG,
-    //    where the Linux 2X elevation workaround in dlssg_sm86.ini requires setting DRS to 1 to force single-frame 2X FG.
+    //    where the Linux 2X elevation workaround in dlssg_sm86.ini requires setting DRS to 1 to force single-frame 2X
+    //    FG.
     // When Dynamic MFG is active, we do not force static 1 because dynamic pacing controls the multiplier.
     // If configuredMaxFrames > 1 (e.g. 3 or 5) and no explicit override is set, we do NOT intercept 0x104D6667,
     // allowing the game's in-engine FG setting (e.g. Cyberpunk 2077 2X FG) to control the multiplier without
@@ -146,7 +152,8 @@ inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMax
     // 0x10562D0F sets the maximum generated frame ceiling that Streamline can dynamically select.
     // When Dynamic MFG is enabled, always advertise maxCeiling (e.g. 5 on 310.9) so Streamline exposes Dynamic MFG
     // even if configuredMaxFrames is 1 (which would otherwise cause Streamline to hide DMFG from graphics settings).
-    // When Dynamic MFG is not enabled, do not override when configured for single-frame (<= 1), because Streamline requires dynamic max > 1.
+    // When Dynamic MFG is not enabled, do not override when configured for single-frame (<= 1), because Streamline
+    // requires dynamic max > 1.
     if (settingId == DRS_OVERRIDE_MAX_DLSSG_DYNAMIC_MULTI_FRAME_COUNT_ID)
     {
         if (dynamicMfg)
@@ -169,7 +176,8 @@ inline bool TryResolveDrsMultiFrameSetting(uint32_t settingId, int configuredMax
 }
 
 /// Formats dlssg_sm86.ini content with Native 0.2.4 specification and strict clamping.
-inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg, int hwBilinear = 0, const std::string& router = "SM86", int logLevel = 1)
+inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg, int hwBilinear = 0,
+                                    const std::string& router = "SM86", int logLevel = 1)
 {
     // Native 0.2.4 strictly requires: MaxGeneratedFrames must be 1, 2 or 3
     if (maxFrames <= 0 || maxFrames > 3)
@@ -200,13 +208,13 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     return ss.str();
 }
 
-/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3, MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame, DynamicMFG/DynamicTargetFPS).
+/// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3,
+/// MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame, DynamicMFG/DynamicTargetFPS).
 inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const std::string& preset = "Auto",
                                        const std::string& kernelImg = "Auto", int hwBilinear = 0,
                                        const std::string& router = "Auto", int logLevel = 1,
-                                       const std::string& spoofArch = "Auto",
-                                       bool dynamicMfg = false, float dynamicTargetFps = 0.0f,
-                                       bool hasDynamicMfgSupport = false)
+                                       const std::string& spoofArch = "Auto", bool dynamicMfg = false,
+                                       float dynamicTargetFps = 0.0f, bool hasDynamicMfgSupport = false)
 {
     // Clamping of MaxGeneratedFrames for 0.3.x: 1 to 5 (5 = 6X)
     if (maxFrames <= 0 || maxFrames > 5)
@@ -274,11 +282,8 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
 /// Merges or appends the [DLSSG-SM86-75-COMPANION] section into existing ReShade.ini text content,
 /// or creates a new ReShade.ini string if existingContent is empty.
 /// All other sections and keys in ReShade.ini are preserved verbatim.
-inline std::string MergeReshadeCompanionContent(const std::string& existingContent,
-                                                bool dynamicMfg,
-                                                float dynamicTargetFps,
-                                                int maxFrames,
-                                                int uiRecomposition = 1)
+inline std::string MergeReshadeCompanionContent(const std::string& existingContent, bool dynamicMfg,
+                                                float dynamicTargetFps, int maxFrames, int uiRecomposition = 1)
 {
     // In ReShade.ini companion:
     // Multiplier: 0 = FollowGame, 2..6 = Fixed multiplier (maxFrames + 1)
@@ -357,16 +362,10 @@ inline std::string MergeReshadeCompanionContent(const std::string& existingConte
 }
 
 /// Checks if an architecture ID represents Turing (SM75).
-inline bool IsTuringArch(uint32_t archId)
-{
-    return (archId == 0x00000160) || ((archId & 0xFFF0) == 0x0160);
-}
+inline bool IsTuringArch(uint32_t archId) { return (archId == 0x00000160) || ((archId & 0xFFF0) == 0x0160); }
 
 /// Checks if an architecture ID represents Ampere (SM86).
-inline bool IsAmpereArch(uint32_t archId)
-{
-    return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170);
-}
+inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }
 
 /// Detects if a dlssg_sm86 binary contains the SM75 kernel family (310.1 build or 0.3.1+ unified 310.9 build).
 inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
@@ -389,7 +388,8 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
     const std::string needleSm75Hw = "executed_on_sm75_hardware";
     const std::string needle3109NoSm75 = "The 310.9 backend has no SM75";
 
-    auto makeUtf16Le = [](std::string_view ascii) -> std::string {
+    auto makeUtf16Le = [](std::string_view ascii) -> std::string
+    {
         std::string out;
         out.reserve(ascii.size() * 2);
         for (char c : ascii)
@@ -409,11 +409,10 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
         std::string chunk = overlap + std::string(buffer.data(), bytesRead);
         if (chunk.find(needle3109NoSm75) != std::string::npos)
             return false;
-        if (!foundSm75 && (chunk.find(needleSm75Slots) != std::string::npos ||
-                           chunk.find(needleSm75Family) != std::string::npos ||
-                           chunk.find(needleCubinSm75) != std::string::npos ||
-                           chunk.find(needleSm75Hw) != std::string::npos ||
-                           chunk.find(needleSm75Bridge16) != std::string::npos))
+        if (!foundSm75 &&
+            (chunk.find(needleSm75Slots) != std::string::npos || chunk.find(needleSm75Family) != std::string::npos ||
+             chunk.find(needleCubinSm75) != std::string::npos || chunk.find(needleSm75Hw) != std::string::npos ||
+             chunk.find(needleSm75Bridge16) != std::string::npos))
         {
             foundSm75 = true;
         }
@@ -471,7 +470,8 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
     if (dllPath.empty())
         return false;
 
-    auto makeUtf16Le = [](std::string_view ascii) -> std::string {
+    auto makeUtf16Le = [](std::string_view ascii) -> std::string
+    {
         std::string out;
         out.reserve(ascii.size() * 2);
         for (char c : ascii)
@@ -520,8 +520,7 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
                 chunk.find(needleRequestControl) != std::string::npos ||
                 chunk.find(needleUniversalProxy) != std::string::npos ||
                 chunk.find(needleSetDisplayTarget) != std::string::npos ||
-                chunk.find(needleCompanion16) != std::string::npos ||
-                chunk.find(needleSm8675_16) != std::string::npos)
+                chunk.find(needleCompanion16) != std::string::npos || chunk.find(needleSm8675_16) != std::string::npos)
             {
                 return true;
             }
@@ -564,8 +563,7 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
             while (std::getline(reshadeFile, line))
             {
                 if (line.find("DLSSG-SM86-75-COMPANION") != std::string::npos ||
-                    line.find("Dynamic=") != std::string::npos ||
-                    line.find("TargetFPS=") != std::string::npos)
+                    line.find("Dynamic=") != std::string::npos || line.find("TargetFPS=") != std::string::npos)
                 {
                     return true;
                 }
@@ -576,7 +574,8 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
     return false;
 }
 
-/// Detects if a dlssg_sm86 binary contains the InitializeASI or DLSSG_UniversalProxy export symbol (e.g. SilyNoMeta builds).
+/// Detects if a dlssg_sm86 binary contains the InitializeASI or DLSSG_UniversalProxy export symbol (e.g. SilyNoMeta
+/// builds).
 inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
 {
     if (dllPath.empty())
@@ -596,8 +595,7 @@ inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
     {
         size_t bytesRead = file.gcount();
         std::string chunk = overlap + std::string(buffer.data(), bytesRead);
-        if (chunk.find(needleAsi) != std::string::npos ||
-            chunk.find(needleUniversalProxy) != std::string::npos)
+        if (chunk.find(needleAsi) != std::string::npos || chunk.find(needleUniversalProxy) != std::string::npos)
         {
             return true;
         }
@@ -613,7 +611,8 @@ inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
 
 /// Resolves router string ("Auto", "SM75" or "SM86") based on architecture ID, GPU name, configured preference,
 /// and whether the selected runtime binary supports dedicated SM75 kernels.
-inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "", const std::string& configuredRouter = "Auto", bool hasSm75Support = true)
+inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "",
+                                 const std::string& configuredRouter = "Auto", bool hasSm75Support = true)
 {
     if (configuredRouter == "SM75" || configuredRouter == "sm75")
     {
@@ -635,18 +634,13 @@ inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "
     // Fallback: name matching
     if (!gpuName.empty())
     {
-        if (gpuName.find("RTX 20") != std::string::npos ||
-            gpuName.find("GTX 16") != std::string::npos ||
-            gpuName.find("TITAN RTX") != std::string::npos ||
-            gpuName.find("Turing") != std::string::npos ||
-            gpuName.find("TU10") != std::string::npos ||
-            gpuName.find("TU11") != std::string::npos)
+        if (gpuName.find("RTX 20") != std::string::npos || gpuName.find("GTX 16") != std::string::npos ||
+            gpuName.find("TITAN RTX") != std::string::npos || gpuName.find("Turing") != std::string::npos ||
+            gpuName.find("TU10") != std::string::npos || gpuName.find("TU11") != std::string::npos)
             return hasSm75Support ? "SM75" : "Auto";
 
-        if (gpuName.find("RTX 30") != std::string::npos ||
-            gpuName.find("Ampere") != std::string::npos ||
-            gpuName.find("GA10") != std::string::npos ||
-            gpuName.find("RTX A") != std::string::npos)
+        if (gpuName.find("RTX 30") != std::string::npos || gpuName.find("Ampere") != std::string::npos ||
+            gpuName.find("GA10") != std::string::npos || gpuName.find("RTX A") != std::string::npos)
             return "SM86";
     }
 
@@ -672,7 +666,7 @@ inline std::string ResolveAutoKernelImage(uint32_t archId, const std::string& na
                    name.find("TU11") != std::string::npos || name.find("3080 Ti") != std::string::npos ||
                    name.find("3080Ti") != std::string::npos || name.find("Laptop") != std::string::npos ||
                    name.find("Mobile") != std::string::npos
-               ? "PTX" : "Auto";
+               ? "PTX"
+               : "Auto";
 }
 } // namespace AmpereMfgLoader
-

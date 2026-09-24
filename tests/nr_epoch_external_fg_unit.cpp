@@ -72,10 +72,7 @@ struct MockProxyContext
         uint64_t prepareCallCount = 0;
     } state;
 
-    void Reset()
-    {
-        state = {};
-    }
+    void Reset() { state = {}; }
 
     unsigned int Prepare(uint64_t submissionEpoch, bool* ready)
     {

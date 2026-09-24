@@ -10,64 +10,77 @@ constexpr uint32_t NV_GPU_ARCHITECTURE_GA100 = 0x00000170;
 constexpr uint32_t NV_GPU_ARCHITECTURE_AD100 = 0x00000190;
 constexpr uint32_t ARCH_MAX = 0xFFFFFFFF;
 
-namespace sl {
-    enum Feature {
-        kFeatureDLSS = 0,
-        kFeatureDLSS_G = 1000,
-        kFeatureDLSS_RR = 1001,
-        kFeatureReflex = 2,
-        kFeaturePCL = 3
-    };
+namespace sl
+{
+enum Feature
+{
+    kFeatureDLSS = 0,
+    kFeatureDLSS_G = 1000,
+    kFeatureDLSS_RR = 1001,
+    kFeatureReflex = 2,
+    kFeaturePCL = 3
+};
 }
 
-enum class FGInput {
+enum class FGInput
+{
     NoFG = 0,
     OptiScaler = 1,
     DLSSG = 2,
     NvngxFG = 3
 };
 
-enum class FGNvngxReplacement {
+enum class FGNvngxReplacement
+{
     None = 0,
     FSR3 = 1,
     DLSSG = 2
 };
 
-struct MockState {
+struct MockState
+{
     FGInput activeFgInput = FGInput::NoFG;
     FGNvngxReplacement activeFgNvngx = FGNvngxReplacement::None;
     bool externalFrameGeneration = false;
 };
 
-struct MockConfig {
+struct MockConfig
+{
     std::optional<bool> StreamlineSpoofing = true;
     std::optional<bool> FGDLSSGAmpereMfgUnlock = false;
 };
 
 // Mock Streamline spoofing environment
-struct MockStreamlineContext {
+struct MockStreamlineContext
+{
     uint32_t systemCapsArch = 0;
     uint32_t lastSetArch = 0;
     bool pluginLoadObservedSpoofedArch = false;
     uint32_t pluginLoadArchSeen = 0;
 
-    void setArch(uint32_t arch) {
+    void setArch(uint32_t arch)
+    {
         lastSetArch = arch;
         systemCapsArch = arch;
     }
 
-    uint32_t getSystemCapsArch() const {
-        return systemCapsArch;
-    }
+    uint32_t getSystemCapsArch() const { return systemCapsArch; }
 
-    void spoofArch(uint32_t currentArch, sl::Feature feature, const MockState& state) {
-        if (feature == sl::kFeatureDLSS) {
+    void spoofArch(uint32_t currentArch, sl::Feature feature, const MockState& state)
+    {
+        if (feature == sl::kFeatureDLSS)
+        {
             if (currentArch < NV_GPU_ARCHITECTURE_TU100)
                 return setArch(ARCH_MAX);
-        } else if (feature == sl::kFeatureDLSS_RR) {
+        }
+        else if (feature == sl::kFeatureDLSS_RR)
+        {
             return;
-        } else if (feature == sl::kFeatureDLSS_G) {
-            if (state.activeFgNvngx != FGNvngxReplacement::None) {
+        }
+        else if (feature == sl::kFeatureDLSS_G)
+        {
+            if (state.activeFgNvngx != FGNvngxReplacement::None)
+            {
                 // Not testing Dx12/Vulkan unavailability here
             }
 
@@ -77,22 +90,23 @@ struct MockStreamlineContext {
     }
 
     // Evaluates shouldSpoofArch as implemented in Streamline_Hooks.cpp
-    static bool evaluateShouldSpoofArch(const MockConfig& config, const MockState& state) {
+    static bool evaluateShouldSpoofArch(const MockConfig& config, const MockState& state)
+    {
         const bool ampereMfgActive = config.FGDLSSGAmpereMfgUnlock.value_or(false);
         return config.StreamlineSpoofing.value_or(true) &&
-            (state.activeFgInput == FGInput::NvngxFG ||
-             state.activeFgInput == FGInput::DLSSG ||
-             ampereMfgActive);
+               (state.activeFgInput == FGInput::NvngxFG || state.activeFgInput == FGInput::DLSSG || ampereMfgActive);
     }
 
     // Simulates hkdlssg_slOnPluginLoad
-    bool simulatePluginLoad(const MockConfig& config, const MockState& state, uint32_t physicalArch) {
+    bool simulatePluginLoad(const MockConfig& config, const MockState& state, uint32_t physicalArch)
+    {
         setArch(physicalArch);
 
         const bool shouldSpoofArch = evaluateShouldSpoofArch(config, state);
 
         uint32_t currentArch = 0;
-        if (shouldSpoofArch) {
+        if (shouldSpoofArch)
+        {
             currentArch = getSystemCapsArch();
             spoofArch(currentArch, sl::kFeatureDLSS_G, state);
         }
@@ -102,7 +116,8 @@ struct MockStreamlineContext {
         pluginLoadObservedSpoofedArch = (pluginLoadArchSeen >= NV_GPU_ARCHITECTURE_AD100);
 
         // Restore original arch after load
-        if (shouldSpoofArch) {
+        if (shouldSpoofArch)
+        {
             setArch(currentArch);
         }
 
@@ -110,7 +125,8 @@ struct MockStreamlineContext {
     }
 };
 
-int main() {
+int main()
+{
     std::printf("Running Streamline Turing & Ampere spoofing unit tests...\n");
 
     // Test 1: Baseline bug scenario - Turing GPU with external Ampere/Turing MFG, old logic without ampereMfgActive
@@ -125,12 +141,13 @@ int main() {
 
         // Old logic check: without ampereMfgActive
         bool oldShouldSpoofArch = config.StreamlineSpoofing.value_or(true) &&
-            (state.activeFgInput == FGInput::NvngxFG || state.activeFgInput == FGInput::DLSSG);
+                                  (state.activeFgInput == FGInput::NvngxFG || state.activeFgInput == FGInput::DLSSG);
         assert(!oldShouldSpoofArch && "Old logic must fail to trigger spoofing when activeFgInput is NoFG!");
 
         // New logic check: with ampereMfgActive
         bool newShouldSpoofArch = MockStreamlineContext::evaluateShouldSpoofArch(config, state);
-        assert(newShouldSpoofArch && "New logic MUST trigger spoofing when FGDLSSGAmpereMfgUnlock is true even if activeFgInput is NoFG!");
+        assert(newShouldSpoofArch &&
+               "New logic MUST trigger spoofing when FGDLSSGAmpereMfgUnlock is true even if activeFgInput is NoFG!");
 
         std::printf("  [PASS] Test 1: ampereMfgActive enables shouldSpoofArch during external FG mode\n");
     }
@@ -150,7 +167,8 @@ int main() {
 
         assert(loaded && "Plugin load on Turing must observe spoofed Ada/Max arch!");
         assert(ctx.pluginLoadArchSeen == ARCH_MAX && "Plugin load must see ARCH_MAX during slOnPluginLoad!");
-        assert(ctx.getSystemCapsArch() == NV_GPU_ARCHITECTURE_TU100 && "Original Turing arch must be restored after plugin load!");
+        assert(ctx.getSystemCapsArch() == NV_GPU_ARCHITECTURE_TU100 &&
+               "Original Turing arch must be restored after plugin load!");
 
         std::printf("  [PASS] Test 2: Turing GPU (0x160) successfully spoofed to ARCH_MAX and restored\n");
     }
@@ -170,7 +188,8 @@ int main() {
 
         assert(loaded && "Plugin load on Ampere must observe spoofed Ada/Max arch!");
         assert(ctx.pluginLoadArchSeen == ARCH_MAX && "Plugin load must see ARCH_MAX during slOnPluginLoad!");
-        assert(ctx.getSystemCapsArch() == NV_GPU_ARCHITECTURE_GA100 && "Original Ampere arch must be restored after plugin load!");
+        assert(ctx.getSystemCapsArch() == NV_GPU_ARCHITECTURE_GA100 &&
+               "Original Ampere arch must be restored after plugin load!");
 
         std::printf("  [PASS] Test 3: Ampere GPU (0x170) successfully spoofed to ARCH_MAX and restored\n");
     }
@@ -188,7 +207,8 @@ int main() {
         bool loaded = ctx.simulatePluginLoad(config, state, NV_GPU_ARCHITECTURE_AD100);
 
         assert(loaded && "Ada GPU should satisfy DLSS-G requirements natively!");
-        assert(ctx.pluginLoadArchSeen == NV_GPU_ARCHITECTURE_AD100 && "Ada arch must remain intact (no spoofing needed)!");
+        assert(ctx.pluginLoadArchSeen == NV_GPU_ARCHITECTURE_AD100 &&
+               "Ada arch must remain intact (no spoofing needed)!");
         assert(ctx.getSystemCapsArch() == NV_GPU_ARCHITECTURE_AD100 && "Arch unchanged after plugin load!");
 
         std::printf("  [PASS] Test 4: Ada GPU (0x190) arch remains untouched\n");

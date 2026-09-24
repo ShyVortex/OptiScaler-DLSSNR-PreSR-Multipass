@@ -209,31 +209,31 @@ int main()
 
     // Test 9: Real binary verification (when available)
     {
-        const std::filesystem::path realSilyPaths[] = {
-            "dlssg_for_sm86/SilyNoMeta/version.dll",
-            "scratch/sily_test/version.dll"
-        };
+        const std::filesystem::path realSilyPaths[] = { "dlssg_for_sm86/SilyNoMeta/version.dll",
+                                                        "scratch/sily_test/version.dll" };
         for (const auto& realSilyDll : realSilyPaths)
         {
             if (std::filesystem::exists(realSilyDll))
             {
-                assert(HasDynamicMfgSupport(realSilyDll) && "Real SilyNoMeta version.dll must be detected as supporting Dynamic MFG");
-                assert(HasSm75KernelFamily(realSilyDll) && "Real SilyNoMeta version.dll must detect SM75/SM86 bridge support");
-                std::printf("  [PASS] Case 9: Real SilyNoMeta release binary verified directly (%s)\n", realSilyDll.string().c_str());
+                assert(HasDynamicMfgSupport(realSilyDll) &&
+                       "Real SilyNoMeta version.dll must be detected as supporting Dynamic MFG");
+                assert(HasSm75KernelFamily(realSilyDll) &&
+                       "Real SilyNoMeta version.dll must detect SM75/SM86 bridge support");
+                std::printf("  [PASS] Case 9: Real SilyNoMeta release binary verified directly (%s)\n",
+                            realSilyDll.string().c_str());
                 break;
             }
         }
 
-        const std::filesystem::path realSdliPaths[] = {
-            "dlssg_for_sm86/sdli1995/version.dll",
-            "dlssg_for_sm86/version.dll"
-        };
+        const std::filesystem::path realSdliPaths[] = { "dlssg_for_sm86/sdli1995/version.dll",
+                                                        "dlssg_for_sm86/version.dll" };
         for (const auto& realSdliDll : realSdliPaths)
         {
             if (std::filesystem::exists(realSdliDll))
             {
                 assert(!HasDynamicMfgSupport(realSdliDll) && "Real sdli1995 version.dll must NOT report Dynamic MFG");
-                std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s)\n", realSdliDll.string().c_str());
+                std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s)\n",
+                            realSdliDll.string().c_str());
                 break;
             }
         }

@@ -25,9 +25,8 @@ std::wstring ToLower(const std::wstring& str)
 
 // Mock CandidatePaths ordering logic from DlssNr_CompatibilityRuntimePaths.cpp
 std::vector<fs::path> ResolveCandidatePaths(const std::optional<fs::path>& mainDllOverride,
-                                           const fs::path& optiScalerDir,
-                                           const fs::path& gameExeDir,
-                                           const std::vector<fs::path>& featureInfoPaths)
+                                            const fs::path& optiScalerDir, const fs::path& gameExeDir,
+                                            const std::vector<fs::path>& featureInfoPaths)
 {
     std::vector<fs::path> paths;
     // 1. Explicit user config override has highest priority
@@ -123,7 +122,7 @@ struct MockProxyContext
     }
 
     unsigned int PrepareWithCandidates(bool driverSuccess,
-                                      const std::vector<std::pair<fs::path, bool>>& availableCandidates)
+                                       const std::vector<std::pair<fs::path, bool>>& availableCandidates)
     {
         unsigned int created = driverSuccess ? NVSDK_NGX_Result_Success : NVSDK_NGX_Result_Fail_UnableToInit;
         if (driverSuccess)
@@ -174,11 +173,9 @@ int main()
     {
         fs::path optiDir = "/games/NBA2K27/OptiScaler";
         fs::path exeDir = "/games/NBA2K27";
-        std::vector<fs::path> featurePaths = {
-            "/games/NBA2K27/data/Streamline",
-            "/games/NBA2K27/data/streamline", // duplicate (different case)
-            "/games/NBA2K27/Engine/Binaries"
-        };
+        std::vector<fs::path> featurePaths = { "/games/NBA2K27/data/Streamline",
+                                               "/games/NBA2K27/data/streamline", // duplicate (different case)
+                                               "/games/NBA2K27/Engine/Binaries" };
 
         // Without override
         auto candidates = ResolveCandidatePaths(std::nullopt, optiDir, exeDir, featurePaths);
@@ -206,8 +203,7 @@ int main()
         // Candidate 1: Game Streamline DLL (official 310.8.0, supportsGpu = false on RTX 3070 Ti)
         // Candidate 2: Game root DLL (ShortFuse mod, supportsGpu = true on RTX 3070 Ti)
         std::vector<std::pair<fs::path, bool>> candidates = {
-            { "/games/NBA2K27/data/Streamline/nvngx_dlssnr.dll", false },
-            { "/games/NBA2K27/nvngx_dlssnr.dll", true }
+            { "/games/NBA2K27/data/Streamline/nvngx_dlssnr.dll", false }, { "/games/NBA2K27/nvngx_dlssnr.dll", true }
         };
 
         unsigned int result = ctx.PrepareWithCandidates(false, candidates);
@@ -226,9 +222,7 @@ int main()
     // Test 3: Direct driver success bypasses candidate iteration
     {
         MockProxyContext ctx;
-        std::vector<std::pair<fs::path, bool>> candidates = {
-            { "/games/NBA2K27/nvngx_dlssnr.dll", true }
-        };
+        std::vector<std::pair<fs::path, bool>> candidates = { { "/games/NBA2K27/nvngx_dlssnr.dll", true } };
 
         unsigned int result = ctx.PrepareWithCandidates(true, candidates);
         assert(result == NVSDK_NGX_Result_Success);
@@ -242,10 +236,9 @@ int main()
     // Test 4: All candidates fail -> latches failure without leaks
     {
         MockProxyContext ctx;
-        std::vector<std::pair<fs::path, bool>> candidates = {
-            { "/games/NBA2K27/data/Streamline/nvngx_dlssnr.dll", false },
-            { "/games/NBA2K27/invalid/nvngx_dlssnr.dll", false }
-        };
+        std::vector<std::pair<fs::path, bool>> candidates = { { "/games/NBA2K27/data/Streamline/nvngx_dlssnr.dll",
+                                                                false },
+                                                              { "/games/NBA2K27/invalid/nvngx_dlssnr.dll", false } };
 
         unsigned int result = ctx.PrepareWithCandidates(false, candidates);
         assert(result == NVSDK_NGX_Result_Fail);
@@ -260,10 +253,8 @@ int main()
     // Test 5: First candidate succeeds -> stops iteration immediately
     {
         MockProxyContext ctx;
-        std::vector<std::pair<fs::path, bool>> candidates = {
-            { "/games/NBA2K27/OptiScaler/nvngx_dlssnr.dll", true },
-            { "/games/NBA2K27/nvngx_dlssnr.dll", true }
-        };
+        std::vector<std::pair<fs::path, bool>> candidates = { { "/games/NBA2K27/OptiScaler/nvngx_dlssnr.dll", true },
+                                                              { "/games/NBA2K27/nvngx_dlssnr.dll", true } };
 
         unsigned int result = ctx.PrepareWithCandidates(false, candidates);
         assert(result == NVSDK_NGX_Result_Success);

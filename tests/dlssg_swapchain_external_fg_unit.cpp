@@ -7,23 +7,23 @@
 // Buffer types and resource state constants (mimicking Streamline & DX12)
 namespace sl
 {
-    using Feature = uint32_t;
-    constexpr Feature kFeatureDLSS_G = 1000;
-    constexpr uint32_t kBufferTypeHUDLessColor = 1;
-    constexpr uint32_t kBufferTypeDepth = 2;
+using Feature = uint32_t;
+constexpr Feature kFeatureDLSS_G = 1000;
+constexpr uint32_t kBufferTypeHUDLessColor = 1;
+constexpr uint32_t kBufferTypeDepth = 2;
 
-    struct Resource
-    {
-        void* native = nullptr;
-        uint32_t state = 0;
-    };
+struct Resource
+{
+    void* native = nullptr;
+    uint32_t state = 0;
+};
 
-    struct ResourceTag
-    {
-        uint32_t type = 0;
-        Resource* resource = nullptr;
-    };
-}
+struct ResourceTag
+{
+    uint32_t type = 0;
+    Resource* resource = nullptr;
+};
+} // namespace sl
 
 constexpr uint32_t D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE = 0x40;
 constexpr uint32_t D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE = 0x80;
@@ -50,18 +50,13 @@ enum class FGNvngxReplacement
 // ---------------------------------------------------------------------------
 // 1. Simulation of Streamline hkslSetTag CyberpunkHudlessState quirk
 // ---------------------------------------------------------------------------
-bool SimulateHkslSetTagCyberpunkQuirk(
-    bool externalFrameGeneration,
-    FGOutput activeFgOutput,
-    bool hasCyberpunkHudlessStateQuirk,
-    sl::ResourceTag& tag)
+bool SimulateHkslSetTagCyberpunkQuirk(bool externalFrameGeneration, FGOutput activeFgOutput,
+                                      bool hasCyberpunkHudlessStateQuirk, sl::ResourceTag& tag)
 {
     const uint32_t originalState = tag.resource->state;
 
     // Fixed logic from Streamline_Hooks.cpp
-    if (!externalFrameGeneration &&
-        activeFgOutput == FGOutput::FSRFG &&
-        hasCyberpunkHudlessStateQuirk &&
+    if (!externalFrameGeneration && activeFgOutput == FGOutput::FSRFG && hasCyberpunkHudlessStateQuirk &&
         tag.resource->state ==
             (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) &&
         tag.type == sl::kBufferTypeHUDLessColor)
@@ -75,17 +70,13 @@ bool SimulateHkslSetTagCyberpunkQuirk(
 // ---------------------------------------------------------------------------
 // 2. Simulation of wrapped_swapchain _localMutex recursion check
 // ---------------------------------------------------------------------------
-bool ShouldAcquireLocalMutex(
-    uint32_t currentOwner,
-    bool externalFrameGeneration,
-    FGNvngxReplacement activeFgNvngx,
-    FGOutput activeFgOutput)
+bool ShouldAcquireLocalMutex(uint32_t currentOwner, bool externalFrameGeneration, FGNvngxReplacement activeFgNvngx,
+                             FGOutput activeFgOutput)
 {
     // Fixed logic from wrapped_swapchain.cpp
     const bool presentOwnsLock = (currentOwner == 4 || currentOwner == 5);
-    const bool isDlssgMod = externalFrameGeneration ||
-                            activeFgNvngx != FGNvngxReplacement::None ||
-                            activeFgOutput == FGOutput::DLSSG;
+    const bool isDlssgMod =
+        externalFrameGeneration || activeFgNvngx != FGNvngxReplacement::None || activeFgOutput == FGOutput::DLSSG;
     if (!(presentOwnsLock && isDlssgMod))
     {
         return true; // Safe to acquire
@@ -102,14 +93,10 @@ struct PresentFlagsResult
     uint32_t flags = 0;
 };
 
-PresentFlagsResult SimulateLocalPresentVsyncFallback(
-    bool externalFrameGeneration,
-    bool forceVsyncConfigured,
-    bool forceVsyncValue,
-    bool scAllowTearing,
-    bool isExclusiveFullscreen,
-    uint32_t initialSyncInterval,
-    uint32_t initialFlags)
+PresentFlagsResult SimulateLocalPresentVsyncFallback(bool externalFrameGeneration, bool forceVsyncConfigured,
+                                                     bool forceVsyncValue, bool scAllowTearing,
+                                                     bool isExclusiveFullscreen, uint32_t initialSyncInterval,
+                                                     uint32_t initialFlags)
 {
     PresentFlagsResult res;
     res.syncInterval = initialSyncInterval;
@@ -139,12 +126,8 @@ PresentFlagsResult SimulateLocalPresentVsyncFallback(
 // ---------------------------------------------------------------------------
 // 4. Simulation of ResizeBuffers SwapChainFlags override
 // ---------------------------------------------------------------------------
-uint32_t SimulateResizeBuffersFlags(
-    bool externalFrameGeneration,
-    bool overrideVsyncConfig,
-    bool isExclusiveFullscreen,
-    void* currentFG,
-    uint32_t swapChainFlags)
+uint32_t SimulateResizeBuffersFlags(bool externalFrameGeneration, bool overrideVsyncConfig, bool isExclusiveFullscreen,
+                                    void* currentFG, uint32_t swapChainFlags)
 {
     if (overrideVsyncConfig && !isExclusiveFullscreen && currentFG == nullptr && !externalFrameGeneration)
     {
@@ -173,11 +156,11 @@ int main()
         bool mutated = SimulateHkslSetTagCyberpunkQuirk(
             /*externalFrameGeneration=*/true,
             /*activeFgOutput=*/FGOutput::NoFG,
-            /*hasCyberpunkHudlessStateQuirk=*/true,
-            tag);
+            /*hasCyberpunkHudlessStateQuirk=*/true, tag);
 
         assert(!mutated);
-        assert(tag.resource->state == (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+        assert(tag.resource->state ==
+               (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
         printf("  [PASS] Case 1: Cyberpunk hudless quirk does NOT mutate tags under External FG\n");
     }
 
@@ -194,8 +177,7 @@ int main()
         bool mutated = SimulateHkslSetTagCyberpunkQuirk(
             /*externalFrameGeneration=*/false,
             /*activeFgOutput=*/FGOutput::FSRFG,
-            /*hasCyberpunkHudlessStateQuirk=*/true,
-            tag);
+            /*hasCyberpunkHudlessStateQuirk=*/true, tag);
 
         assert(mutated);
         assert(tag.resource->state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS);

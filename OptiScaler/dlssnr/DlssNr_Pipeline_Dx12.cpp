@@ -152,8 +152,10 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &frame.MotionSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, &frame.MotionSubrectBaseY);
 
-    LOG_DEBUG("MakeDlssNrPass: beforeUpscale={}, supportedSubrects={}, color={}, depth={}, motion={}, exposure={}, output={}",
-              beforeUpscale, supportedSubrects, (void*) color, (void*) depth, (void*) motion, (void*) exposure, (void*) finalOutput);
+    LOG_DEBUG(
+        "MakeDlssNrPass: beforeUpscale={}, supportedSubrects={}, color={}, depth={}, motion={}, exposure={}, output={}",
+        beforeUpscale, supportedSubrects, (void*) color, (void*) depth, (void*) motion, (void*) exposure,
+        (void*) finalOutput);
 
     return {
         [=, &shader](ID3D12Resource* nextOutput) -> ID3D12Resource*
@@ -247,7 +249,7 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
                 shader.SetBufferState(commandList, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 NrBarrier(commandList, output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
                 DlssNr::CopyActiveColor(commandList, output, input,
-                                        { (unsigned)input->GetDesc().Width, input->GetDesc().Height });
+                                        { (unsigned) input->GetDesc().Width, input->GetDesc().Height });
                 NrBarrier(commandList, output, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             }
             return true;

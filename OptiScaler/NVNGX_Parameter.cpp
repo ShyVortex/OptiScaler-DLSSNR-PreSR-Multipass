@@ -820,9 +820,9 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
 #else
     const bool adaMfgActive = false;
 #endif
-    if ((api == API::DX12 || api == API::Vulkan) && (State::Instance().activeFgInput == FGInput::DLSSG ||
-                                                     State::Instance().activeFgNvngx != FGNvngxReplacement::None ||
-                                                     ampereMfgActive || adaMfgActive))
+    if ((api == API::DX12 || api == API::Vulkan) &&
+        (State::Instance().activeFgInput == FGInput::DLSSG ||
+         State::Instance().activeFgNvngx != FGNvngxReplacement::None || ampereMfgActive || adaMfgActive))
     {
         InParams->Set("FrameGeneration.Available", 1);
         InParams->Set("FrameGeneration.NeedsUpdatedDriver", 0);

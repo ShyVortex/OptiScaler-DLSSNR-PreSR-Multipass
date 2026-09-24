@@ -1885,11 +1885,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         const bool ampereMfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
         const int ampereMaxFrames = Config::Instance()->FGDLSSGAmpereMfgMaxFrames.value_or_default();
         const std::string ampereFallbackSetting = Config::Instance()->FGDLSSGAmpereMfgLinuxFsrFallback.value_or("auto");
-        const bool ampereDynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() || Config::Instance()->FGDLSSGForceDMFG.value_or_default();
-        const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(ampereMaxFrames, onLinux, ampereMfgUnlock, ampereFallbackSetting, ampereDynamicMfg);
+        const bool ampereDynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() ||
+                                      Config::Instance()->FGDLSSGForceDMFG.value_or_default();
+        const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(
+            ampereMaxFrames, onLinux, ampereMfgUnlock, ampereFallbackSetting, ampereDynamicMfg);
 
         // Initial state of FG
-        State::Instance().externalFrameGeneration = (Config::Instance()->ExternalFrameGeneration.value_or_default() || ampereMfgUnlock) && !ampereFallbackToFsrFg;
+        State::Instance().externalFrameGeneration =
+            (Config::Instance()->ExternalFrameGeneration.value_or_default() || ampereMfgUnlock) &&
+            !ampereFallbackToFsrFg;
         if (State::Instance().externalFrameGeneration)
         {
             // Only runtime overrides: preserve the user's OptiFG configuration for the next
@@ -1902,7 +1906,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             cfg->ForceXeLL.set_volatile_value(false);
             cfg->UseFakenvapi.set_volatile_value(false);
             cfg->FN_ForceReflex.set_volatile_value(ForceReflex::InGame);
-            LOG_INFO("External frame generation: leaving Streamline/Reflex and MFG control to the game or unlocker; NR/SR remain available");
+            LOG_INFO("External frame generation: leaving Streamline/Reflex and MFG control to the game or unlocker; "
+                     "NR/SR remain available");
         }
         else if (ampereFallbackToFsrFg)
         {
@@ -1911,14 +1916,17 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
             cfg->FGInput.set_volatile_value(FGInput::DLSSG);
-            const std::string fallbackType = AmpereMfgLoader::ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
+            const std::string fallbackType =
+                AmpereMfgLoader::ResolveFallbackFgType(cfg->FGDLSSGAmpereMfgLinuxFallbackType.value_or("fsrfg"));
             if (fallbackType == "xefg")
                 cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             else
                 cfg->FGOutput.set_volatile_value(FGOutput::FSRFG);
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
-            LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} (FGInput=DLSSG, FGOutput={})",
-                     ampereFallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"), (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
+            LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} "
+                     "(FGInput=DLSSG, FGOutput={})",
+                     ampereFallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"),
+                     (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();

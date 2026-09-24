@@ -38,9 +38,14 @@ static void PrintModule(const char* label, void* function)
 // Contain the old-path access violation to demonstrate the regression without launching a game.
 static unsigned CallReflex(decltype(&slReflexSetOptions) function, const sl::ReflexOptions& options)
 {
-    __try { return static_cast<unsigned>(function(options)); }
+    __try
+    {
+        return static_cast<unsigned>(function(options));
+    }
     __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
-    { return EXCEPTION_ACCESS_VIOLATION; }
+    {
+        return EXCEPTION_ACCESS_VIOLATION;
+    }
 }
 
 int wmain(int argc, wchar_t** argv)
@@ -74,7 +79,7 @@ int wmain(int argc, wchar_t** argv)
 
         // Mirror the previous binding order: the bundled plugin is loaded before device selection.
         const auto bundled = LoadLibraryW((directory / L"sl.reflex.dll").c_str());
-        const auto getPlugin = Export<void* (*)(const char*)>(bundled, "slGetPluginFunction");
+        const auto getPlugin = Export<void* (*) (const char*)>(bundled, "slGetPluginFunction");
         const auto stale = reinterpret_cast<decltype(&slReflexSetOptions)>(getPlugin("slReflexSetOptions"));
         Require(stale != nullptr, "Bundled Reflex export");
         ID3D12Device* device = nullptr;
@@ -92,12 +97,12 @@ int wmain(int argc, wchar_t** argv)
         const auto activeResult = CallReflex(activeReflex, options);
         Require(activeResult == static_cast<unsigned>(sl::Result::eOk), "Active Reflex startup call");
         std::puts("PASS: active Reflex startup call");
-        for (const auto& binding : { std::pair{sl::kFeatureDLSS_G, "slDLSSGSetOptions"},
-                                    {sl::kFeatureDLSS_G, "slDLSSGGetState"},
-                                    {sl::kFeatureReflex, "slReflexGetState"},
-                                    {sl::kFeatureReflex, "slReflexSleep"},
-                                    {sl::kFeaturePCL, "slPCLSetMarker"},
-                                    {sl::kFeaturePCL, "slPCLSetOptions"} })
+        for (const auto& binding : { std::pair { sl::kFeatureDLSS_G, "slDLSSGSetOptions" },
+                                     { sl::kFeatureDLSS_G, "slDLSSGGetState" },
+                                     { sl::kFeatureReflex, "slReflexGetState" },
+                                     { sl::kFeatureReflex, "slReflexSleep" },
+                                     { sl::kFeaturePCL, "slPCLSetMarker" },
+                                     { sl::kFeaturePCL, "slPCLSetOptions" } })
         {
             function = nullptr;
             Require(getFeature(binding.first, binding.second, function) == sl::Result::eOk && function, binding.second);

@@ -64,10 +64,7 @@ struct MockNrState
             reason = r;
     }
 
-    std::string PublishedReason() const
-    {
-        return (reason != nullptr && reason[0] != '\0') ? reason : "";
-    }
+    std::string PublishedReason() const { return (reason != nullptr && reason[0] != '\0') ? reason : ""; }
 };
 
 // Simulation of MakeDlssNrPass Setup logic

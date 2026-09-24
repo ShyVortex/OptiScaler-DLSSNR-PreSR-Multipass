@@ -11,9 +11,11 @@ int main()
     {
         std::vector<unsigned char> image(0x4000);
         auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(image.data());
-        dos->e_magic = IMAGE_DOS_SIGNATURE; dos->e_lfanew = 0x80;
+        dos->e_magic = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = 0x80;
         auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(image.data() + 0x80);
-        nt->Signature = IMAGE_NT_SIGNATURE; nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+        nt->Signature = IMAGE_NT_SIGNATURE;
+        nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
         nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
         nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
         nt->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
@@ -33,7 +35,8 @@ int main()
         std::vector<Slot> slots;
         assert(DlssNr::RuntimeImports::Find(image, slots) && slots.size() == 2);
         assert(slots[0].address == reinterpret_cast<void**>(image.data() + descriptor->FirstThunk) && slots[0].wide);
-        assert(slots[1].address == reinterpret_cast<void**>(image.data() + descriptor->FirstThunk + 8) && !slots[1].wide);
+        assert(slots[1].address == reinterpret_cast<void**>(image.data() + descriptor->FirstThunk + 8) &&
+               !slots[1].wide);
         // Malformed tables must fail without returning partial patch targets.
         const auto saved = names[1].u1.AddressOfData;
         names[1].u1.AddressOfData = image.size() - 1;
@@ -42,7 +45,7 @@ int main()
         directory.Size = sizeof(IMAGE_IMPORT_DESCRIPTOR);
         assert(!DlssNr::RuntimeImports::Find(image, slots) && slots.empty());
         directory.Size *= 2;
-        descriptor->FirstThunk = (DWORD)image.size() - 4;
+        descriptor->FirstThunk = (DWORD) image.size() - 4;
         assert(!DlssNr::RuntimeImports::Find(image, slots) && slots.empty());
         dos->e_lfanew = -1;
         assert(!DlssNr::RuntimeImports::Find(image, slots) && slots.empty());

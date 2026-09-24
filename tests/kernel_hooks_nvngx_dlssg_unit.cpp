@@ -25,11 +25,8 @@ static void* const FAKE_DLL_MODULE = reinterpret_cast<void*>(0x1000);
 static void* const FAKE_ORIGINAL_MODULE = reinterpret_cast<void*>(0x2000);
 static void* const FAKE_LOADED_PATH_MODULE = reinterpret_cast<void*>(0x3000);
 
-void* ResolveNvngxDlssgModuleA(
-    const char* lpModuleName,
-    void* originalHandle,
-    const MockState& state,
-    bool simulatePathLoadSuccess = false)
+void* ResolveNvngxDlssgModuleA(const char* lpModuleName, void* originalHandle, const MockState& state,
+                               bool simulatePathLoadSuccess = false)
 {
     if (lpModuleName == nullptr)
         return nullptr;
@@ -42,8 +39,7 @@ void* ResolveNvngxDlssgModuleA(
 
         // When external Frame Generation or native DLSSG is active, OptiScaler is not emulating nvngx_dlssg.dll.
         // Avoid returning OptiScaler's dllModule, which would fail Streamline's ProductName verification.
-        if (state.externalFrameGeneration ||
-            state.activeFgNvngx == FGNvngxReplacement::None)
+        if (state.externalFrameGeneration || state.activeFgNvngx == FGNvngxReplacement::None)
         {
             if (state.NVNGX_DLSSG_Path.has_value() && simulatePathLoadSuccess)
             {
@@ -58,11 +54,8 @@ void* ResolveNvngxDlssgModuleA(
     return originalHandle;
 }
 
-void* ResolveNvngxDlssgModuleW(
-    const wchar_t* lpModuleName,
-    void* originalHandle,
-    const MockState& state,
-    bool simulatePathLoadSuccess = false)
+void* ResolveNvngxDlssgModuleW(const wchar_t* lpModuleName, void* originalHandle, const MockState& state,
+                               bool simulatePathLoadSuccess = false)
 {
     if (lpModuleName == nullptr)
         return nullptr;
@@ -73,8 +66,7 @@ void* ResolveNvngxDlssgModuleW(
         if (original != nullptr)
             return original;
 
-        if (state.externalFrameGeneration ||
-            state.activeFgNvngx == FGNvngxReplacement::None)
+        if (state.externalFrameGeneration || state.activeFgNvngx == FGNvngxReplacement::None)
         {
             if (state.NVNGX_DLSSG_Path.has_value() && simulatePathLoadSuccess)
             {
@@ -106,7 +98,8 @@ int main()
         void* resW = ResolveNvngxDlssgModuleW(L"nvngx_dlssg.dll", FAKE_ORIGINAL_MODULE, state);
         assert(resW == FAKE_ORIGINAL_MODULE);
 
-        // 1b: nvngx_dlssg.dll not loaded, but NVNGX_DLSSG_Path is set and succeeds -> returns loaded module, never dllModule
+        // 1b: nvngx_dlssg.dll not loaded, but NVNGX_DLSSG_Path is set and succeeds -> returns loaded module, never
+        // dllModule
         state.NVNGX_DLSSG_Path = L"S:\\games\\nvngx_dlssg.dll";
         resA = ResolveNvngxDlssgModuleA("nvngx_dlssg.dll", nullptr, state, true);
         assert(resA == FAKE_LOADED_PATH_MODULE);

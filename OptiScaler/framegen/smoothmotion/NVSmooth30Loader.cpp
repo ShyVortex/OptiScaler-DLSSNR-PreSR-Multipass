@@ -62,24 +62,23 @@ void TrySetup()
 
     // Architecture guard: NVIDIA Ampere (RTX 30 series / SM86) required
     const uint32_t archId = static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id);
-    const bool isAmpere = IsAmpereArch(archId) ||
-                          (gpu.name.find("RTX 30") != std::string::npos ||
-                           gpu.name.find("Ampere") != std::string::npos ||
-                           gpu.name.find("GA10") != std::string::npos ||
-                           gpu.name.find("RTX A") != std::string::npos);
+    const bool isAmpere =
+        IsAmpereArch(archId) ||
+        (gpu.name.find("RTX 30") != std::string::npos || gpu.name.find("Ampere") != std::string::npos ||
+         gpu.name.find("GA10") != std::string::npos || gpu.name.find("RTX A") != std::string::npos);
 
     if (!isAmpere)
     {
         s_status.ErrorMessage = std::format(
-            "NVSmooth30 requires an RTX 30 series (Ampere) GPU. Detected arch 0x{:x} ({}).",
-            archId, gpu.name);
+            "NVSmooth30 requires an RTX 30 series (Ampere) GPU. Detected arch 0x{:x} ({}).", archId, gpu.name);
         LOG_WARN("NVSmooth30Loader: {}", s_status.ErrorMessage);
         return;
     }
 
     // Resolve DLL path (strictly inside OptiScaler directory)
     auto basePath = Util::DllPath().parent_path();
-    auto mainOverride = cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
+    auto mainOverride =
+        cfg->MainDllPath.has_value() ? std::filesystem::path(cfg->MainDllPath.value()) : std::filesystem::path();
     auto dllPath = ResolveCandidatePath(basePath, mainOverride);
 
     if (dllPath.empty())
@@ -102,7 +101,8 @@ void TrySetup()
     }
     else
     {
-        LOG_WARN("NVSmooth30Loader: Failed to apply Smooth Motion DRS setting; driver profile may require manual inspection");
+        LOG_WARN("NVSmooth30Loader: Failed to apply Smooth Motion DRS setting; driver profile may require manual "
+                 "inspection");
     }
 
     // Load nvsmooth30.dll

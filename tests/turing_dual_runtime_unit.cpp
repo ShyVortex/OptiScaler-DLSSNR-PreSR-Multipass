@@ -12,10 +12,12 @@ int main()
 
     // Test 1: Binary detection of SM75 kernel family and runtime model (0.3.1 310.9 vs 310.1 vs legacy 0.3.0)
     {
-        std::filesystem::path p3109 = std::filesystem::exists("dlssg_for_sm86/sdli1995/version.dll") ?
-            "dlssg_for_sm86/sdli1995/version.dll" : "dlssg_for_sm86/version.dll";
-        std::filesystem::path p3101 = std::filesystem::exists("dlssg_for_sm86/sdli1995/310.1/version.dll") ?
-            "dlssg_for_sm86/sdli1995/310.1/version.dll" : "dlssg_for_sm86/310.1/version.dll";
+        std::filesystem::path p3109 = std::filesystem::exists("dlssg_for_sm86/sdli1995/version.dll")
+                                          ? "dlssg_for_sm86/sdli1995/version.dll"
+                                          : "dlssg_for_sm86/version.dll";
+        std::filesystem::path p3101 = std::filesystem::exists("dlssg_for_sm86/sdli1995/310.1/version.dll")
+                                          ? "dlssg_for_sm86/sdli1995/310.1/version.dll"
+                                          : "dlssg_for_sm86/310.1/version.dll";
 
         if (std::filesystem::exists(p3109) && std::filesystem::exists(p3101))
         {
@@ -53,7 +55,8 @@ int main()
     {
         // Turing 0x160 on legacy 310.9 (hasSm75Support = false): must yield "Auto"
         std::string routerAuto = ResolveRouter(0x00000160, "RTX 2070", "Auto", false);
-        assert(routerAuto == "Auto" && "On legacy 310.9, Turing Auto router must resolve to Auto to prevent runtime abort!");
+        assert(routerAuto == "Auto" &&
+               "On legacy 310.9, Turing Auto router must resolve to Auto to prevent runtime abort!");
 
         // Turing 0x160 with explicit "SM75" on legacy 310.9: must safely fall back to "Auto"
         std::string routerFallback = ResolveRouter(0x00000160, "RTX 2070", "SM75", false);

@@ -67,9 +67,8 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
         // (e.g. DLTSS NW E5M3_SKIP FP8 kernels) that execute illegal instructions on Ampere/Turing hardware,
         // causing DXGI_ERROR_DEVICE_HUNG (0x887A0006) crashes on startup (e.g. in The Last of Us Part II).
         const auto primaryGpu = IdentifyGpu::getPrimaryGpu();
-        const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ?
-                                  primaryGpu.nvidiaArchInfo.architecture_id :
-                                  primaryGpu.nvidiaArchInfo.architecture;
+        const auto realArch = primaryGpu.nvidiaArchInfo.architecture_id != 0 ? primaryGpu.nvidiaArchInfo.architecture_id
+                                                                             : primaryGpu.nvidiaArchInfo.architecture;
 
         if (primaryGpu.vendorId == VendorId::Nvidia && realArch != 0 && realArch < NV_GPU_ARCHITECTURE_AD100)
         {
@@ -79,20 +78,17 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
             std::transform(callerLower.begin(), callerLower.end(), callerLower.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-            const bool isExplicitNonFgCaller = (callerLower.find("nvngx_dlss.") != std::string::npos ||
-                                                callerLower.find("nvngx_dlssd") != std::string::npos ||
-                                                callerLower.ends_with(".exe"));
+            const bool isExplicitNonFgCaller =
+                (callerLower.find("nvngx_dlss.") != std::string::npos ||
+                 callerLower.find("nvngx_dlssd") != std::string::npos || callerLower.ends_with(".exe"));
 
-            const bool isFgCaller = !isExplicitNonFgCaller && (
-                callerLower.find("sl.common") != std::string::npos ||
-                callerLower.find("sl.dlss_g") != std::string::npos ||
-                callerLower.find("sl.interposer") != std::string::npos ||
-                callerLower.find("dlssg") != std::string::npos ||
-                callerLower.find("version") != std::string::npos ||
-                callerLower == "_nvngx.dll" ||
-                callerLower == "nvngx.dll" ||
-                callerLower.find("_nvngx") != std::string::npos
-            );
+            const bool isFgCaller = !isExplicitNonFgCaller &&
+                                    (callerLower.find("sl.common") != std::string::npos ||
+                                     callerLower.find("sl.dlss_g") != std::string::npos ||
+                                     callerLower.find("sl.interposer") != std::string::npos ||
+                                     callerLower.find("dlssg") != std::string::npos ||
+                                     callerLower.find("version") != std::string::npos || callerLower == "_nvngx.dll" ||
+                                     callerLower == "nvngx.dll" || callerLower.find("_nvngx") != std::string::npos);
 
             const bool mfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
 
@@ -100,13 +96,15 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
             {
                 if (pGpuArchInfo->architecture < NV_GPU_ARCHITECTURE_AD100)
                 {
-                    pGpuArchInfo->architecture = static_cast<decltype(pGpuArchInfo->architecture)>(NV_GPU_ARCHITECTURE_AD100);
-                    pGpuArchInfo->architecture_id = static_cast<decltype(pGpuArchInfo->architecture_id)>(NV_GPU_ARCHITECTURE_AD100);
+                    pGpuArchInfo->architecture =
+                        static_cast<decltype(pGpuArchInfo->architecture)>(NV_GPU_ARCHITECTURE_AD100);
+                    pGpuArchInfo->architecture_id =
+                        static_cast<decltype(pGpuArchInfo->architecture_id)>(NV_GPU_ARCHITECTURE_AD100);
                     pGpuArchInfo->implementation = static_cast<decltype(pGpuArchInfo->implementation)>(0x102);
                     pGpuArchInfo->implementation_id = static_cast<decltype(pGpuArchInfo->implementation_id)>(0x102);
 
-                    LOG_INFO("Spoofed GPU arch to Ada (0x190) for FG caller '{}' (real: {:X})",
-                             caller, static_cast<uint32_t>(realArch));
+                    LOG_INFO("Spoofed GPU arch to Ada (0x190) for FG caller '{}' (real: {:X})", caller,
+                             static_cast<uint32_t>(realArch));
                 }
             }
             else if (!isFgCaller && pGpuArchInfo->architecture >= NV_GPU_ARCHITECTURE_AD100)
@@ -119,11 +117,11 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
                 pGpuArchInfo->revision = primaryGpu.nvidiaArchInfo.revision;
                 pGpuArchInfo->revision_id = primaryGpu.nvidiaArchInfo.revision_id;
 
-                LOG_INFO("Restored physical GPU arch for non-FG caller '{}': arch: {:X} impl: {:X} rev: {:X} (was spoofed: {:X})",
+                LOG_INFO("Restored physical GPU arch for non-FG caller '{}': arch: {:X} impl: {:X} rev: {:X} (was "
+                         "spoofed: {:X})",
                          caller, static_cast<uint32_t>(pGpuArchInfo->architecture),
                          static_cast<uint32_t>(pGpuArchInfo->implementation),
-                         static_cast<uint32_t>(pGpuArchInfo->revision),
-                         static_cast<uint32_t>(spoofedArch));
+                         static_cast<uint32_t>(pGpuArchInfo->revision), static_cast<uint32_t>(spoofedArch));
             }
         }
 
@@ -134,7 +132,8 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
         {
             pGpuArchInfo->implementation = NV_GPU_ARCH_IMPLEMENTATION_TU106;
             LOG_INFO("Spoofed arch: {0:X} impl: {1:X} rev: {2:X}!", static_cast<uint32_t>(pGpuArchInfo->architecture),
-                     static_cast<uint32_t>(pGpuArchInfo->implementation), static_cast<uint32_t>(pGpuArchInfo->revision));
+                     static_cast<uint32_t>(pGpuArchInfo->implementation),
+                     static_cast<uint32_t>(pGpuArchInfo->revision));
         }
     }
 
@@ -158,7 +157,8 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
     const bool dynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() ||
                             Config::Instance()->FGDLSSGForceDMFG.value_or_default();
     uint32_t targetFrames = 0;
-    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames, 5, explicitOverride, dynamicMfg))
+    if (AmpereMfgLoader::TryResolveDrsMultiFrameSetting(settingId, configuredFrames, onLinux, mfgUnlock, targetFrames,
+                                                        5, explicitOverride, dynamicMfg))
     {
         if (pSetting)
         {
@@ -170,7 +170,8 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_DRS_GetSetting(NvDRSSessionHandle hSe
             pSetting->u32CurrentValue = targetFrames;
             pSetting->u32PredefinedValue = targetFrames;
         }
-        LOG_INFO("hkNvAPI_DRS_GetSetting: overriding setting 0x{:X} to {} for Ampere MFG on Linux", settingId, targetFrames);
+        LOG_INFO("hkNvAPI_DRS_GetSetting: overriding setting 0x{:X} to {} for Ampere MFG on Linux", settingId,
+                 targetFrames);
         return NVAPI_OK;
     }
 
@@ -352,7 +353,8 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
         return false;
     }
 
-    auto qi = reinterpret_cast<PFN_NvApi_QueryInterface>(KernelBaseProxy::GetProcAddress_()(nvapiDll, "nvapi_QueryInterface"));
+    auto qi = reinterpret_cast<PFN_NvApi_QueryInterface>(
+        KernelBaseProxy::GetProcAddress_()(nvapiDll, "nvapi_QueryInterface"));
     if (!qi)
     {
         LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: nvapi_QueryInterface not found in nvapi64.dll");
@@ -373,7 +375,9 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
             LOG_INFO("NvApiHooks::ApplySmoothMotionDrs: detected NVIDIA driver version {}", driverVersion);
             if (driverVersion < MIN_SMOOTH_MOTION_DRIVER_VERSION)
             {
-                LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Smooth Motion requires NVIDIA driver 571.86 or newer (detected: {})", driverVersion);
+                LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Smooth Motion requires NVIDIA driver 571.86 or newer "
+                         "(detected: {})",
+                         driverVersion);
                 if (loadedLocally)
                     FreeLibrary(nvapiDll);
                 return false;
@@ -392,7 +396,8 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
     using PFN_DestroySession = NvAPI_Status(__cdecl*)(NvDRSSessionHandle);
     using PFN_LoadSettings = NvAPI_Status(__cdecl*)(NvDRSSessionHandle);
     using PFN_SaveSettings = NvAPI_Status(__cdecl*)(NvDRSSessionHandle);
-    using PFN_FindApplicationByName = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvAPI_UnicodeString, NvDRSProfileHandle*, NVDRS_APPLICATION*);
+    using PFN_FindApplicationByName =
+        NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvAPI_UnicodeString, NvDRSProfileHandle*, NVDRS_APPLICATION*);
     using PFN_CreateProfile = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NVDRS_PROFILE*, NvDRSProfileHandle*);
     using PFN_CreateApplication = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvDRSProfileHandle, NVDRS_APPLICATION*);
     using PFN_SetSetting = NvAPI_Status(__cdecl*)(NvDRSSessionHandle, NvDRSProfileHandle, NVDRS_SETTING*);
@@ -406,7 +411,8 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
     auto pfnCreateApp = reinterpret_cast<PFN_CreateApplication>(qi(0x4347a9de));
     auto pfnSetSetting = reinterpret_cast<PFN_SetSetting>(qi(0x577dd202));
 
-    if (!pfnCreateSession || !pfnDestroySession || !pfnLoadSettings || !pfnSaveSettings || !pfnFindApp || !pfnSetSetting)
+    if (!pfnCreateSession || !pfnDestroySession || !pfnLoadSettings || !pfnSaveSettings || !pfnFindApp ||
+        !pfnSetSetting)
     {
         LOG_WARN("NvApiHooks::ApplySmoothMotionDrs: Required DRS APIs are missing from driver");
         if (loadedLocally)
@@ -444,7 +450,8 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
                 NVDRS_PROFILE newProfile {};
                 newProfile.version = NVDRS_PROFILE_VER;
                 const std::wstring profName = L"OptiScaler " + std::filesystem::path(exePath).filename().wstring();
-                std::wcsncpy(reinterpret_cast<wchar_t*>(newProfile.profileName), profName.c_str(), NVAPI_UNICODE_STRING_MAX - 1);
+                std::wcsncpy(reinterpret_cast<wchar_t*>(newProfile.profileName), profName.c_str(),
+                             NVAPI_UNICODE_STRING_MAX - 1);
 
                 if (pfnCreateProfile(session, &newProfile, &profile) == NVAPI_OK && profile)
                 {
@@ -477,7 +484,9 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
 
             if (pfnSaveSettings(session) == NVAPI_OK)
             {
-                LOG_INFO("NvApiHooks::ApplySmoothMotionDrs: Successfully applied Smooth Motion (enable={}) to driver profile", enable);
+                LOG_INFO("NvApiHooks::ApplySmoothMotionDrs: Successfully applied Smooth Motion (enable={}) to driver "
+                         "profile",
+                         enable);
                 success = true;
             }
             else
@@ -496,7 +505,8 @@ bool NvApiHooks::ApplySmoothMotionDrs(bool enable)
 
 NvAPI_Status __stdcall NvApiHooks::hkNvAPI_D3D12_SetFlipConfig(void* pCommandQueue, NvU32 dwFlags, void* pParams)
 {
-    LOG_TRACE("hkNvAPI_D3D12_SetFlipConfig: pCommandQueue={:p}, dwFlags=0x{:X}, pParams={:p}", pCommandQueue, dwFlags, pParams);
+    LOG_TRACE("hkNvAPI_D3D12_SetFlipConfig: pCommandQueue={:p}, dwFlags=0x{:X}, pParams={:p}", pCommandQueue, dwFlags,
+              pParams);
     return NVAPI_OK;
 }
 
@@ -512,7 +522,8 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
         if (InterfaceId == GET_ID(NvAPI_DRS_GetSetting))
         {
             if (o_NvAPI_QueryInterface && !o_NvAPI_DRS_GetSetting)
-                o_NvAPI_DRS_GetSetting = reinterpret_cast<decltype(&NvAPI_DRS_GetSetting)>(o_NvAPI_QueryInterface(InterfaceId));
+                o_NvAPI_DRS_GetSetting =
+                    reinterpret_cast<decltype(&NvAPI_DRS_GetSetting)>(o_NvAPI_QueryInterface(InterfaceId));
             return &hkNvAPI_DRS_GetSetting;
         }
 
@@ -522,7 +533,8 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
             if (realFunc)
                 return realFunc;
 
-            LOG_INFO("hkNvAPI_QueryInterface: NvAPI_D3D12_SetFlipConfig is unimplemented by driver; providing stub returning NVAPI_OK");
+            LOG_INFO("hkNvAPI_QueryInterface: NvAPI_D3D12_SetFlipConfig is unimplemented by driver; providing stub "
+                     "returning NVAPI_OK");
             return reinterpret_cast<void*>(&hkNvAPI_D3D12_SetFlipConfig);
         }
 
@@ -552,7 +564,8 @@ void* __stdcall NvApiHooks::hkNvAPI_QueryInterface(unsigned int InterfaceId)
         if (functionPointer)
             return functionPointer;
 
-        LOG_INFO("hkNvAPI_QueryInterface: NvAPI_D3D12_SetFlipConfig unimplemented on Linux; providing stub returning NVAPI_OK");
+        LOG_INFO("hkNvAPI_QueryInterface: NvAPI_D3D12_SetFlipConfig unimplemented on Linux; providing stub returning "
+                 "NVAPI_OK");
         return reinterpret_cast<void*>(&hkNvAPI_D3D12_SetFlipConfig);
     }
 

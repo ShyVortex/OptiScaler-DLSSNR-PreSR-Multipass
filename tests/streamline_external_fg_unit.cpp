@@ -5,22 +5,22 @@
 
 namespace sl
 {
-    using Feature = uint32_t;
-    constexpr Feature kFeatureDLSS_G = 1000;
-    constexpr Feature kFeatureReflex = 1001;
+using Feature = uint32_t;
+constexpr Feature kFeatureDLSS_G = 1000;
+constexpr Feature kFeatureReflex = 1001;
 
-    enum class Result
-    {
-        eOk = 0,
-        eErrorFeatureNotSupported = -1,
-        eErrorInvalidParameter = -2
-    };
+enum class Result
+{
+    eOk = 0,
+    eErrorFeatureNotSupported = -1,
+    eErrorInvalidParameter = -2
+};
 
-    struct FeatureVersion
-    {
-        uint32_t major, minor, patch;
-    };
-}
+struct FeatureVersion
+{
+    uint32_t major, minor, patch;
+};
+} // namespace sl
 
 enum class FGInput
 {
@@ -56,11 +56,8 @@ sl::Result MockOriginalGetFeatureFunction(sl::Feature feature, const char* name,
     return sl::Result::eErrorFeatureNotSupported;
 }
 
-sl::Result SimulatedHkslGetFeatureFunction(
-    bool externalFrameGeneration,
-    sl::Feature feature,
-    const char* functionName,
-    void*& function)
+sl::Result SimulatedHkslGetFeatureFunction(bool externalFrameGeneration, sl::Feature feature, const char* functionName,
+                                           void*& function)
 {
     if (!externalFrameGeneration && feature == sl::kFeatureDLSS_G)
     {
@@ -130,18 +127,12 @@ int main()
         void* getStateFunc = nullptr;
         void* setOptionsFunc = nullptr;
         sl::Result r1 = SimulatedHkslGetFeatureFunction(
-            /*externalFrameGeneration=*/true,
-            sl::kFeatureDLSS_G,
-            "slDLSSGGetState",
-            getStateFunc);
+            /*externalFrameGeneration=*/true, sl::kFeatureDLSS_G, "slDLSSGGetState", getStateFunc);
         assert(r1 == sl::Result::eOk);
         assert(getStateFunc == REAL_DLSSG_GET_STATE);
 
         sl::Result r2 = SimulatedHkslGetFeatureFunction(
-            /*externalFrameGeneration=*/true,
-            sl::kFeatureDLSS_G,
-            "slDLSSGSetOptions",
-            setOptionsFunc);
+            /*externalFrameGeneration=*/true, sl::kFeatureDLSS_G, "slDLSSGSetOptions", setOptionsFunc);
         assert(r2 == sl::Result::eOk);
         assert(setOptionsFunc == REAL_DLSSG_SET_OPTIONS);
         printf("  [PASS] Case 3: External FG routes functions to real sl.dlss_g runtime, not dummy\n");
@@ -152,18 +143,12 @@ int main()
         void* getStateFunc = nullptr;
         void* setOptionsFunc = nullptr;
         sl::Result r1 = SimulatedHkslGetFeatureFunction(
-            /*externalFrameGeneration=*/false,
-            sl::kFeatureDLSS_G,
-            "slDLSSGGetState",
-            getStateFunc);
+            /*externalFrameGeneration=*/false, sl::kFeatureDLSS_G, "slDLSSGGetState", getStateFunc);
         assert(r1 == sl::Result::eOk);
         assert(getStateFunc == DUMMY_DLSSG_GET_STATE);
 
         sl::Result r2 = SimulatedHkslGetFeatureFunction(
-            /*externalFrameGeneration=*/false,
-            sl::kFeatureDLSS_G,
-            "slDLSSGSetOptions",
-            setOptionsFunc);
+            /*externalFrameGeneration=*/false, sl::kFeatureDLSS_G, "slDLSSGSetOptions", setOptionsFunc);
         assert(r2 == sl::Result::eOk);
         assert(setOptionsFunc == DUMMY_DLSSG_SET_OPTIONS);
         printf("  [PASS] Case 4: Internal DLSSG emulation continues to use internal dummies\n");

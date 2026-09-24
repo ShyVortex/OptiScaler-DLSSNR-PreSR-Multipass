@@ -167,16 +167,18 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
                     nr.failed = true;
                     if (!frame.BeforeUpscale)
                     {
-                        nr.reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution (try enabling 'Generate model before upscale' or reducing Working Scale)";
+                        nr.reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution "
+                                    "(try enabling 'Generate model before upscale' or reducing Working Scale)";
                     }
                     else
                     {
                         nr.reason = "the NVIDIA NGX driver could not create Neural Rendering";
                     }
                 }
-                LOG_ERROR("DLSS-NR driver creation for pass {} failed: 0x{:X} ({}) [resolution: {}x{}, BeforeUpscale: {}]",
-                          pass + 1, prepared, NgxResultName(prepared), workWidth, workHeight,
-                          frame.BeforeUpscale ? "true" : "false");
+                LOG_ERROR(
+                    "DLSS-NR driver creation for pass {} failed: 0x{:X} ({}) [resolution: {}x{}, BeforeUpscale: {}]",
+                    pass + 1, prepared, NgxResultName(prepared), workWidth, workHeight,
+                    frame.BeforeUpscale ? "true" : "false");
             }
             return false;
         }
