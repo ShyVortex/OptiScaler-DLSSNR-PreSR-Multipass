@@ -61,6 +61,24 @@ int main()
         std::filesystem::remove(testDll);
     }
 
+    // Case 4b: Synthetic binary with DLSSG_UniversalProxy signature (v0.3.5-2)
+    {
+        auto tempDir = std::filesystem::temp_directory_path() / "optiscaler_asi_test";
+        std::filesystem::create_directories(tempDir);
+
+        auto testDll = tempDir / "with_proxy.dll";
+        {
+            std::ofstream f(testDll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Export table with DLSSG_UniversalProxy, DLSSG_RequestControl, etc.";
+        }
+
+        assert(HasAsiInitExport(testDll) && "Binary with DLSSG_UniversalProxy must return true");
+        std::printf("  [PASS] Case 4b: Binary with DLSSG_UniversalProxy correctly detected\n");
+
+        std::filesystem::remove(testDll);
+    }
+
     // Case 5: Chunk boundary overlap detection
     {
         auto tempDir = std::filesystem::temp_directory_path() / "optiscaler_asi_test";
@@ -88,9 +106,9 @@ int main()
         std::filesystem::path realSily = "dlssg_for_sm86/SilyNoMeta/version.dll";
         if (std::filesystem::exists(realSily))
         {
-            assert(HasAsiInitExport(realSily) && "Real SilyNoMeta binary must contain InitializeASI export");
+            assert(HasAsiInitExport(realSily) && "Real SilyNoMeta binary must contain InitializeASI or DLSSG_UniversalProxy export");
             assert(HasDynamicMfgSupport(realSily) && "Real SilyNoMeta binary must contain DynamicMFG support");
-            std::printf("  [PASS] Case 6a: Real SilyNoMeta release binary verified (has InitializeASI & DynamicMFG)\n");
+            std::printf("  [PASS] Case 6a: Real SilyNoMeta release binary verified (has proxy export & DynamicMFG)\n");
         }
         else
         {

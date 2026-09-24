@@ -1,4 +1,4 @@
-#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+﻿#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
 #include <cassert>
 #include <cstdio>
 #include <filesystem>
@@ -88,6 +88,46 @@ int main()
         std::printf("  [PASS] Case 5: SilyNoMeta binary detected via author signature\n");
 
         std::filesystem::remove(silyDll3);
+        std::filesystem::remove_all(tempDir);
+    }
+
+    // Test 5b: SilyNoMeta v0.3.5-2 DLSSG_RequestControl export signature
+    {
+        auto tempDir = std::filesystem::temp_directory_path() / "optiscaler_dmfg_test";
+        std::filesystem::create_directories(tempDir);
+
+        auto silyDll4 = tempDir / "sily_v0352_export.dll";
+        {
+            std::ofstream f(silyDll4, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Export table contains DLSSG_UniversalProxy and DLSSG_RequestControl...";
+        }
+
+        assert(HasDynamicMfgSupport(silyDll4) && "Binary with DLSSG_RequestControl needle must be detected");
+        std::printf("  [PASS] Case 5b: SilyNoMeta v0.3.5-2 binary detected via DLSSG_RequestControl export\n");
+
+        std::filesystem::remove(silyDll4);
+        std::filesystem::remove_all(tempDir);
+    }
+
+    // Test 5c: SilyNoMeta v0.3.5-2 UTF-16LE DLSSG-SM86-75-COMPANION signature
+    {
+        auto tempDir = std::filesystem::temp_directory_path() / "optiscaler_dmfg_test";
+        std::filesystem::create_directories(tempDir);
+
+        auto silyDll5 = tempDir / "sily_v0352_utf16.dll";
+        {
+            std::ofstream f(silyDll5, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            // UTF-16LE 'DLSSG-SM86-75-COMPANION'
+            std::u16string u16Companion = u"DLSSG-SM86-75-COMPANION";
+            f.write(reinterpret_cast<const char*>(u16Companion.data()), u16Companion.size() * sizeof(char16_t));
+        }
+
+        assert(HasDynamicMfgSupport(silyDll5) && "Binary with UTF-16LE DLSSG-SM86-75-COMPANION must be detected");
+        std::printf("  [PASS] Case 5c: SilyNoMeta v0.3.5-2 binary detected via UTF-16LE COMPANION string\n");
+
+        std::filesystem::remove(silyDll5);
         std::filesystem::remove_all(tempDir);
     }
 

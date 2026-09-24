@@ -376,6 +376,13 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
     const std::string needleSilyNoMeta = "SilyNoMeta";
     const std::string needleSilyNoMeta16 = makeUtf16Le(needleSilyNoMeta);
 
+    // SilyNoMeta v0.3.5-2 Universal Proxy export and string needles
+    const std::string needleRequestControl = "DLSSG_RequestControl";
+    const std::string needleUniversalProxy = "DLSSG_UniversalProxy";
+    const std::string needleSetDisplayTarget = "DLSSG_SetDisplayTarget";
+    const std::string needleCompanion16 = makeUtf16Le("DLSSG-SM86-75-COMPANION");
+    const std::string needleSm8675_16 = makeUtf16Le("DLSSG-SM86-75");
+
     std::ifstream file(dllPath, std::ios::binary);
     if (file.is_open())
     {
@@ -394,7 +401,12 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
                 chunk.find(needleActivateMfg) != std::string::npos ||
                 chunk.find(needleActivateMfg16) != std::string::npos ||
                 chunk.find(needleSilyNoMeta) != std::string::npos ||
-                chunk.find(needleSilyNoMeta16) != std::string::npos)
+                chunk.find(needleSilyNoMeta16) != std::string::npos ||
+                chunk.find(needleRequestControl) != std::string::npos ||
+                chunk.find(needleUniversalProxy) != std::string::npos ||
+                chunk.find(needleSetDisplayTarget) != std::string::npos ||
+                chunk.find(needleCompanion16) != std::string::npos ||
+                chunk.find(needleSm8675_16) != std::string::npos)
             {
                 return true;
             }
@@ -406,7 +418,7 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
         }
     }
 
-    // Also check companion dlssg_sm86.ini if present beside the DLL
+    // Also check companion dlssg_sm86.ini or ReShade.ini if present beside the DLL
     std::error_code ec;
     std::filesystem::path iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
     if (std::filesystem::exists(iniPath, ec))
@@ -427,10 +439,29 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
         }
     }
 
+    std::filesystem::path reshadeIniPath = dllPath.parent_path() / L"ReShade.ini";
+    if (std::filesystem::exists(reshadeIniPath, ec))
+    {
+        std::ifstream reshadeFile(reshadeIniPath);
+        if (reshadeFile.is_open())
+        {
+            std::string line;
+            while (std::getline(reshadeFile, line))
+            {
+                if (line.find("DLSSG-SM86-75-COMPANION") != std::string::npos ||
+                    line.find("Dynamic=") != std::string::npos ||
+                    line.find("TargetFPS=") != std::string::npos)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
     return false;
 }
 
-/// Detects if a dlssg_sm86 binary contains the InitializeASI export symbol (e.g. SilyNoMeta ASI build).
+/// Detects if a dlssg_sm86 binary contains the InitializeASI or DLSSG_UniversalProxy export symbol (e.g. SilyNoMeta builds).
 inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
 {
     if (dllPath.empty())
@@ -442,15 +473,19 @@ inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
 
     constexpr size_t bufferSize = 65536;
     std::string buffer(bufferSize, '\0');
-    const std::string needle = "InitializeASI";
+    const std::string needleAsi = "InitializeASI";
+    const std::string needleUniversalProxy = "DLSSG_UniversalProxy";
 
     std::string overlap;
     while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
     {
         size_t bytesRead = file.gcount();
         std::string chunk = overlap + std::string(buffer.data(), bytesRead);
-        if (chunk.find(needle) != std::string::npos)
+        if (chunk.find(needleAsi) != std::string::npos ||
+            chunk.find(needleUniversalProxy) != std::string::npos)
+        {
             return true;
+        }
         constexpr size_t maxNeedle = 32;
         if (chunk.size() >= maxNeedle)
             overlap = chunk.substr(chunk.size() - maxNeedle + 1);
