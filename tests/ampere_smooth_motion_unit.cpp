@@ -197,14 +197,23 @@ int main()
             std::string helpMarker;
         };
 
-        auto evaluateUiState = [](bool onLinux, bool isNvidia, uint32_t archId) -> SmoothMotionUiState
+        auto evaluateUiState = [](bool onLinux, bool isNvidia, uint32_t archId,
+                                  bool fgConflict = false) -> SmoothMotionUiState
         {
             const bool isAdaOrBlackwell = isNvidia && (archId >= NV_GPU_ARCHITECTURE_AD100);
             const bool isAmpere = isNvidia && (archId == NV_GPU_ARCHITECTURE_GA100);
-            const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere);
+            const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere) || fgConflict;
             if (disableSmoothMotion)
             {
-                if (onLinux)
+                if (fgConflict)
+                {
+                    return { true, "Disabled because Frame Generation (DLSS-G / MFG) is active.\n"
+                                   "NVIDIA Smooth Motion is driver-level frame generation for games lacking native "
+                                   "DLSS-G.\n"
+                                   "Disable MFG / Frame Generation first, Save Settings and restart to use Smooth "
+                                   "Motion." };
+                }
+                else if (onLinux)
                 {
                     return { true, "Disabled because the active OS is not Windows (10/11).\n"
                                    "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires "
@@ -301,6 +310,28 @@ int main()
             assert(ui.disabled);
             assert(ui.helpMarker.find("Disabled because the active GPU is not NVIDIA") != std::string::npos);
             std::printf("  [PASS] Case 8f: Windows + non-NVIDIA GPU evaluates to disabled with GPU explanation\n");
+        }
+
+        // Case 8g: Windows + Ampere GPU + active MFG conflict -> Disabled with conflict explanation
+        {
+            auto ui =
+                evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_GA100, /*fgConflict=*/true);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because Frame Generation (DLSS-G / MFG) is active") !=
+                   std::string::npos);
+            std::printf("  [PASS] Case 8g: Windows + Ampere GPU with active MFG evaluates to disabled with conflict "
+                        "explanation\n");
+        }
+
+        // Case 8h: Windows + Ada GPU + active MFG conflict -> Disabled with conflict explanation
+        {
+            auto ui =
+                evaluateUiState(/*onLinux=*/false, /*isNvidia=*/true, NV_GPU_ARCHITECTURE_AD100, /*fgConflict=*/true);
+            assert(ui.disabled);
+            assert(ui.helpMarker.find("Disabled because Frame Generation (DLSS-G / MFG) is active") !=
+                   std::string::npos);
+            std::printf("  [PASS] Case 8h: Windows + Ada GPU with active MFG evaluates to disabled with conflict "
+                        "explanation\n");
         }
 
         std::printf(

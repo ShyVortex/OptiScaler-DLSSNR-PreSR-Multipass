@@ -164,6 +164,9 @@ HRESULT __stdcall WrappedIDXGIFactory7::QueryInterface(REFIID riid, void** ppvOb
         return S_OK;
     }
 
+    if (_real != nullptr)
+        return _real->QueryInterface(riid, ppvObject);
+
     *ppvObject = nullptr;
     return E_NOINTERFACE;
 }

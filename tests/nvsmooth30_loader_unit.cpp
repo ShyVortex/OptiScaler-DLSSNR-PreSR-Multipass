@@ -27,7 +27,8 @@ enum class Status
     NotAmpere,
     MissingBinary,
     LoadFailed,
-    Active
+    Active,
+    FgConflict
 };
 
 inline const char* StatusToString(Status s)
@@ -44,6 +45,8 @@ inline const char* StatusToString(Status s)
         return "Failed to load nvsmooth30.dll";
     case Status::Active:
         return "Active (Smooth Motion unlocked on RTX 30)";
+    case Status::FgConflict:
+        return "Conflict: DLSS-G / MFG active";
     default:
         return "Unknown";
     }
@@ -92,11 +95,19 @@ struct MockLoaderState
     }
 
     bool TrySetup(bool configSmoothMotionEnabled, bool configNVSmooth30Enabled, bool isNvidia, uint32_t archId,
-                  const fs::path& basePath, const fs::path& overridePath, bool simulateLoadSuccess = true)
+                  const fs::path& basePath, const fs::path& overridePath, bool simulateLoadSuccess = true,
+                  bool fgConflict = false)
     {
         if (!configSmoothMotionEnabled || !configNVSmooth30Enabled)
         {
             status = Status::Disabled;
+            return false;
+        }
+
+        // Mutual exclusion guard: DLSS-G / MFG Frame Generation conflict
+        if (fgConflict)
+        {
+            status = Status::FgConflict;
             return false;
         }
 
@@ -263,6 +274,24 @@ int main()
         assert(!ok);
         assert(loader.status == NVSmooth30Unit::Status::LoadFailed);
         std::printf("  [PASS] Case 4b: LoadFailed status handled cleanly\n");
+    }
+
+    // Test 5: Mutual Exclusion Guarding (DLSS-G / MFG vs Smooth Motion)
+    {
+        NVSmooth30Unit::MockLoaderState loader;
+        const fs::path optiScalerDll = testRoot / "OptiScaler" / "nvsmooth30.dll";
+        {
+            std::ofstream f(optiScalerDll);
+            f << "MZ_MOCK_DLL";
+        }
+
+        // With Ampere GPU, valid DLL, and SmoothMotion enabled, but FG conflict active (e.g. AmpereMfgUnlock)
+        bool ok = loader.TrySetup(true, true, true, NV_GPU_ARCHITECTURE_GA100, testRoot, {}, true, /*fgConflict=*/true);
+        assert(!ok);
+        assert(loader.status == NVSmooth30Unit::Status::FgConflict);
+        assert(std::string(NVSmooth30Unit::StatusToString(loader.status)) == "Conflict: DLSS-G / MFG active");
+        assert(!loader.drsProfileApplied);
+        std::printf("  [PASS] Case 5: DLSS-G / MFG mutual exclusion conflict handled cleanly\n");
     }
 
     // Clean up temporary files

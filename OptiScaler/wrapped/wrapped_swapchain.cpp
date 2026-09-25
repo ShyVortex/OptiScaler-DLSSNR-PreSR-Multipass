@@ -688,6 +688,9 @@ HRESULT STDMETHODCALLTYPE WrappedIDXGISwapChain4::QueryInterface(REFIID riid, vo
         return S_OK;
     }
 
+    if (_real != nullptr)
+        return _real->QueryInterface(riid, ppvObject);
+
     *ppvObject = nullptr;
     return E_NOINTERFACE;
 }
