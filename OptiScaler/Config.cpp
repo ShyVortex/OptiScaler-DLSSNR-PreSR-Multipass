@@ -191,6 +191,16 @@ bool Config::Reload(std::filesystem::path iniPath)
                 ExternalFrameGeneration.set_from_config(true);
                 FGDLSSGAdaMfgUnlock.set_from_config(false);
             }
+
+            if (FGDLSSGAmpereMfgUnlock.value_or_default() || FGDLSSGAdaMfgUnlock.value_or_default())
+            {
+                if (FGDLSSGSmoothMotion.value_or_default())
+                {
+                    LOG_WARN("Config: Smooth Motion cannot be used while DLSS-G / MFG Frame Generation is enabled. "
+                             "Disabling Smooth Motion.");
+                    FGDLSSGSmoothMotion.set_volatile_value(false);
+                }
+            }
             FGDebugView.set_from_config(readBool("FrameGen", "DebugView"));
 
             if (auto FGInputString = readString("FrameGen", "FGInput"); FGInputString.has_value())

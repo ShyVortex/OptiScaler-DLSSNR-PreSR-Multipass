@@ -3248,7 +3248,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     else
     {
         if (ImGui::Checkbox("RTX 40 MFG unlock (restart)", &adaUnlock))
+        {
             config->FGDLSSGAdaMfgUnlock = adaUnlock;
+            if (adaUnlock)
+            {
+                config->FGDLSSGAmpereMfgUnlock = false;
+                config->FGDLSSGSmoothMotion = false;
+                NvApiHooks::ApplySmoothMotionDrs(false);
+            }
+        }
         ShowHelpMarker("Experimental. Save Settings and restart. Requires a supported DLSSG runtime."
                        "\nDo not combine with another MFG unlocker.");
     }
@@ -3307,6 +3315,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     config->ExternalFrameGeneration = true;
                     config->FGDLSSGAdaMfgUnlock = false;
+                    config->FGDLSSGSmoothMotion = false;
+                    NvApiHooks::ApplySmoothMotionDrs(false);
                     AmpereMfgLoader::ProbeCandidate(true);
                 }
             }
@@ -3616,14 +3626,22 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
     const bool isAmpere = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_GA100);
-    const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere);
+    const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
+    const bool fgConflict = ampereActive || adaActive || state.externalFrameGeneration;
+    const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere) || fgConflict;
 
     if (disableSmoothMotion)
     {
         ImGui::BeginDisabled();
         ImGui::Checkbox("NVIDIA Smooth Motion (Driver-level FG)##driver_sm", &smoothMotion);
         ImGui::EndDisabled();
-        if (onLinux)
+        if (fgConflict)
+        {
+            ShowHelpMarker("Disabled because Frame Generation (DLSS-G / MFG) is active.\n"
+                           "NVIDIA Smooth Motion is driver-level frame generation for games lacking native DLSS-G.\n"
+                           "Disable MFG / Frame Generation first, Save Settings and restart to use Smooth Motion.");
+        }
+        else if (onLinux)
         {
             ShowHelpMarker("Disabled because the active OS is not Windows (10/11).\n"
                            "NVIDIA Smooth Motion is a Windows-only driver display pipeline feature (requires driver "
@@ -3714,6 +3732,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Active");
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%s)", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());
+            }
+            else if (fgConflict)
+            {
+                ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.2f, 1.0f), "Conflict: DLSS-G / MFG active");
             }
             else if (!smoothMotion)
             {

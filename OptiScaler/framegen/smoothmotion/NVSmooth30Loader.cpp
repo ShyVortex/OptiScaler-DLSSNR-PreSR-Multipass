@@ -46,6 +46,15 @@ void TrySetup()
     s_setupAttempted = true;
     s_status.Enabled = true;
 
+    // Mutual exclusion guard: Smooth Motion cannot run concurrently with DLSS-G / MFG Frame Generation
+    if (cfg->FGDLSSGAmpereMfgUnlock.value_or_default() || cfg->FGDLSSGAdaMfgUnlock.value_or_default() ||
+        State::Instance().externalFrameGeneration)
+    {
+        s_status.ErrorMessage = "Smooth Motion cannot be used while Frame Generation / MFG is active.";
+        LOG_WARN("NVSmooth30Loader: {}", s_status.ErrorMessage);
+        return;
+    }
+
     // Platform guard: NVSmooth30 patches Windows NvPresent64.dll and does not run on Linux/Proton
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const bool onLinux = State::Instance().isRunningOnLinux || gpu.usesVkd3dProton;
