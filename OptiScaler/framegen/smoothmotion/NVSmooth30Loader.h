@@ -17,6 +17,7 @@ struct Status
 };
 
 Status LastStatus();
+inline Status GetStatus() { return LastStatus(); }
 
 /// Called after DLL initialization, once GPU/environment information is available.
 void TrySetup();

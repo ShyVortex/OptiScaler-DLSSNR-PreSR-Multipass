@@ -55,6 +55,7 @@ using PFN_DLSSG_SetDisplayTarget = bool (*)(uint32_t targetFps);
 using PFN_DLSSG_RequestUI = bool (*)(uint32_t mode);
 
 Status LastStatus();
+inline Status GetStatus() { return LastStatus(); }
 
 /// Probes candidate paths for a dlssg_sm86 binary without loading it or writing files.
 /// Populates status with candidate path, mod variant, SM75 support, 310.1 status, etc.

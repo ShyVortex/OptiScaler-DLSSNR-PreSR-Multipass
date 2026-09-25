@@ -3506,7 +3506,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     // Live programmatic control update without restarting
                     float targetFps = config->FGDLSSGFramerateTargetDMFG.value_or_default();
                     uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
-                    const int maxCeiling = AmpereMfgLoader::GetStatus().Is3101Runtime ? 3 : 5;
+                    const int maxCeiling = AmpereMfgLoader::LastStatus().Is3101Runtime ? 3 : 5;
                     const int explicitOverride = config->FGDLSSGOverrideInterpolationCount.value_or(0);
                     uint32_t liveMode = 0;
                     uint32_t multiplier = 0;
@@ -4114,14 +4114,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
                             StreamlineHooks::updateDlssgOptions();
 
-                            if (AmpereMfgLoader::GetStatus().LiveControlSupported)
+                            if (AmpereMfgLoader::LastStatus().LiveControlSupported)
                             {
                                 AmpereMfgLoader::WriteCompanionIni();
                                 const bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or(false) ||
                                                         config->FGDLSSGForceDMFG.value_or(false);
                                 float targetFps = config->FGDLSSGFramerateTargetDMFG.value_or_default();
                                 uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
-                                const int maxCeiling = AmpereMfgLoader::GetStatus().Is3101Runtime ? 3 : 5;
+                                const int maxCeiling = AmpereMfgLoader::LastStatus().Is3101Runtime ? 3 : 5;
                                 const int explicitOverride = config->FGDLSSGOverrideInterpolationCount.value_or(0);
                                 uint32_t liveMode = 0;
                                 uint32_t multiplier = 0;
