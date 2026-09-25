@@ -118,6 +118,9 @@ void TrySetup()
                  "inspection");
     }
 
+    // Sanitize runtime environment variables for NVSmooth30
+    SanitizeEnvironment();
+
     // Load nvsmooth30.dll
     NtdllProxy::Init();
     LOG_INFO("NVSmooth30Loader: Loading {}", wstring_to_string(dllPath.wstring()));
@@ -137,6 +140,28 @@ void TrySetup()
     s_status.DllLoaded = true;
     s_status.ErrorMessage.clear();
     LOG_INFO("NVSmooth30Loader: NVSmooth30 loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+}
+
+void SanitizeEnvironment()
+{
+#ifdef _WIN32
+    // Configure environment variables to sanitize NVSmooth30 runtime behavior:
+    // 1. Disable D3D11 bridge (OptiScaler manages native D3D12 presentation and Dx11wDx12)
+    // 2. Disable custom latency manipulation (prevents SetMaximumFrameLatency(1) invalid call on D3D12 swapchains)
+    // 3. Disable external GDI/D3D11 text OSD (prevents crashes on exclusive/composition swapchains)
+    // 4. Signal to skip dummy swapchain creation and DXGI vtable stomping
+    SetEnvironmentVariableW(L"SM86_ENABLE_D3D11_BRIDGE", L"0");
+    SetEnvironmentVariableW(L"SM86_LOW_LATENCY", L"0");
+    SetEnvironmentVariableW(L"SM86_ENABLE_OSD", L"0");
+    SetEnvironmentVariableW(L"SM86_SKIP_DXGI_HOOKS", L"1");
+    LOG_INFO("NVSmooth30Loader: Runtime environment sanitized (Bridge=0, LowLatency=0, OSD=0, SkipDxgiHooks=1)");
+#endif
+}
+
+void SetSwapchainAttached(bool attached)
+{
+    std::lock_guard lock(s_mutex);
+    s_status.SwapchainAttached = attached;
 }
 
 } // namespace NVSmooth30Loader

@@ -12,6 +12,7 @@ struct Status
     bool DllFound = false;           // nvsmooth30.dll found in OptiScaler directory
     bool DllLoaded = false;          // LoadLibrary succeeded
     bool SmoothMotionActive = false; // NVIDIA Smooth Motion DRS setting applied
+    bool SwapchainAttached = false;  // Verified attached to active DXGI SwapChain
     std::wstring LoadedDllPath;      // Absolute path of loaded DLL
     std::string ErrorMessage;        // Human-readable error if anything failed
 };
@@ -21,6 +22,12 @@ inline Status GetStatus() { return LastStatus(); }
 
 /// Called after DLL initialization, once GPU/environment information is available.
 void TrySetup();
+
+/// Applies sanitized environment variables before loading nvsmooth30.dll.
+void SanitizeEnvironment();
+
+/// Records whether NvPresent64.dll is genuinely attached to the active swapchain.
+void SetSwapchainAttached(bool attached);
 
 /// Evaluates whether an architecture ID represents Nvidia Ampere (SM86).
 inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }

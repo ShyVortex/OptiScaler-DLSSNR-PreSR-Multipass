@@ -19,6 +19,7 @@
 
 #include <dxgi1_6.h>
 #include <misc/IdentifyGpu.h>
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include "Hook_Utils.h"
 
@@ -1350,6 +1351,12 @@ static HRESULT hkD3D12CreateDevice(IUnknown* pAdapter, D3D_FEATURE_LEVEL Minimum
 #endif
     IdentifyGpu::updateD3d12Capabilities(o_D3D12CreateDevice);
 
+    // Early synchronous setup for NVIDIA Smooth Motion on Ampere before D3D12 device/swapchain creation
+    if (Config::Instance()->FGDLSSGSmoothMotion.value_or(false))
+    {
+        NVSmooth30Loader::TrySetup();
+    }
+
     DXGI_ADAPTER_DESC desc {};
     std::wstring szName;
     bool nonPrimaryGpu = false;
@@ -1525,6 +1532,12 @@ static HRESULT hkCreateDevice(ID3D12DeviceFactory* pFactory, IUnknown* pAdapter,
             if (!IsEqualLUID(desc.AdapterLuid, primaryGpu.luid))
                 LOG_WARN("D3D12Device created with non-primary GPU");
         }
+    }
+
+    // Early synchronous setup for NVIDIA Smooth Motion on Ampere before D3D12 device/swapchain creation
+    if (Config::Instance()->FGDLSSGSmoothMotion.value_or(false))
+    {
+        NVSmooth30Loader::TrySetup();
     }
 
     auto minLevel = MinimumFeatureLevel;
