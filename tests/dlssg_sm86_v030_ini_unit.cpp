@@ -291,7 +291,7 @@ int main()
 
     // Test 14: ReShade.ini companion section generation from scratch
     {
-        std::string newReshade = MergeReshadeCompanionContent("", true, 144.0f, 5, 1);
+        std::string newReshade = MergeReshadeCompanionContent("", true, 144.0f, 0, 1);
         assert(newReshade.find("[DLSSG-SM86-75-COMPANION]\n") != std::string::npos);
         assert(newReshade.find("Dynamic=1\n") != std::string::npos);
         assert(newReshade.find("TargetFPS=144\n") != std::string::npos);
@@ -299,12 +299,17 @@ int main()
                std::string::npos); // Dynamic mode sets Multiplier=0 (FollowGame/Dynamic)
         assert(newReshade.find("UIRecomposition=1\n") != std::string::npos);
 
-        // Fixed multiplier mode (dynamicMfg = false, maxFrames = 3 -> Multiplier = 4 (4X))
-        std::string fixedReshade = MergeReshadeCompanionContent("", false, 0.0f, 3, 2);
+        // Fixed multiplier mode (dynamicMfg = false, fixedMultiplier = 4 -> Multiplier = 4 (4X))
+        std::string fixedReshade = MergeReshadeCompanionContent("", false, 0.0f, 4, 2);
         assert(fixedReshade.find("Dynamic=0\n") != std::string::npos);
         assert(fixedReshade.find("Multiplier=4\n") != std::string::npos);
         assert(fixedReshade.find("TargetFPS=0\n") != std::string::npos);
         assert(fixedReshade.find("UIRecomposition=2\n") != std::string::npos);
+
+        // FollowGame mode (dynamicMfg = false, fixedMultiplier = 0 (default) -> Multiplier = 0 (FollowGame))
+        std::string followGameReshade = MergeReshadeCompanionContent("", false, 0.0f, 0, 1);
+        assert(followGameReshade.find("Dynamic=0\n") != std::string::npos);
+        assert(followGameReshade.find("Multiplier=0\n") != std::string::npos);
 
         std::printf("  [PASS] Case 14: ReShade.ini companion section generation from scratch verified\n");
     }
@@ -326,7 +331,7 @@ int main()
                                "[OVERLAY]\n"
                                "ShowFPS=1\n";
 
-        std::string merged = MergeReshadeCompanionContent(existing, true, 120.0f, 5, 1);
+        std::string merged = MergeReshadeCompanionContent(existing, true, 120.0f, 0, 1);
 
         // Verify other sections are preserved verbatim
         assert(merged.find("[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\nPerformanceMode=1\n") !=

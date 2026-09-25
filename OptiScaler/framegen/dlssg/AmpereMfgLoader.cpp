@@ -375,13 +375,14 @@ bool WriteCompanionIni()
             const bool dynamicMfg =
                 cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
             const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
-            const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
             const int maxCeiling = is3101 ? 3 : 5;
-            const int effectiveFrames = dynamicMfg ? maxCeiling : configuredFrames;
-            const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, false, maxCeiling);
+            const int explicitOverride = cfg->FGDLSSGOverrideInterpolationCount.value_or(0);
+            uint32_t mode = 0;
+            uint32_t multiplier = 0;
+            ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
 
             std::string updatedReshade =
-                MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
+                MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, multiplier);
             std::ofstream reshadeOut(reshadeIniPath, std::ios::out | std::ios::trunc);
             if (reshadeOut.is_open())
             {
@@ -650,11 +651,13 @@ void TrySetup()
                 cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
             const float dynamicTargetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
             const int maxCeiling = s_status.Is3101Runtime ? 3 : 5;
-            const int effectiveFrames = dynamicMfg ? maxCeiling : configuredFrames;
-            const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, false, maxCeiling);
+            const int explicitOverride = cfg->FGDLSSGOverrideInterpolationCount.value_or(0);
+            uint32_t mode = 0;
+            uint32_t multiplier = 0;
+            ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
 
             std::string updatedReshade =
-                MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, maxFrames);
+                MergeReshadeCompanionContent(existingReshade, dynamicMfg, dynamicTargetFps, multiplier);
             std::ofstream reshadeOut(reshadeIniPath, std::ios::out | std::ios::trunc);
             if (reshadeOut.is_open())
             {
@@ -730,9 +733,11 @@ void TrySetup()
         // Initial sync of live settings if configured
         const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
         const float targetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
-        const int configuredFrames = cfg->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-        const int multiplier = (configuredFrames >= 1 && configuredFrames <= 5) ? (configuredFrames + 1) : 0;
-        uint32_t mode = dynamicMfg ? 1 : ((multiplier >= 2) ? 2 : 0);
+        const int maxCeiling = s_status.Is3101Runtime ? 3 : 5;
+        const int explicitOverride = cfg->FGDLSSGOverrideInterpolationCount.value_or(0);
+        uint32_t mode = 0;
+        uint32_t multiplier = 0;
+        ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
         uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
 
         if (s_pfnRequestControl)

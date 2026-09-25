@@ -164,6 +164,74 @@ int main()
         std::printf("  [PASS] Case 4: Live programmatic dispatch, struct packing, and parameter clamping verified\n");
     }
 
+    // Test 5: ResolveControlModeAndMultiplier resolution logic
+    {
+        uint32_t mode = 999;
+        uint32_t mult = 999;
+
+        // 1. Default unconfigured state: dynamicMfg = false, explicitOverride = 0 -> FollowGame mode 0, multiplier 0
+        ResolveControlModeAndMultiplier(false, 0, 5, mode, mult);
+        assert(mode == 0 && "Default unconfigured state must resolve to mode 0 (FollowGame)");
+        assert(mult == 0 && "Default unconfigured state must resolve to multiplier 0");
+
+        // 2. Dynamic mode active: dynamicMfg = true, explicitOverride = 0 -> Dynamic mode 1, multiplier 0
+        ResolveControlModeAndMultiplier(true, 0, 5, mode, mult);
+        assert(mode == 1 && "Dynamic MFG must resolve to mode 1 (Dynamic)");
+        assert(mult == 0 && "Dynamic MFG must resolve to multiplier 0");
+
+        // 3. Dynamic mode active even when an override count is stored -> Dynamic mode takes precedence
+        ResolveControlModeAndMultiplier(true, 2, 5, mode, mult);
+        assert(mode == 1 && "Dynamic MFG must take precedence over static override");
+        assert(mult == 0 && "Dynamic MFG must keep multiplier at 0");
+
+        // 4. Explicit override active: dynamicMfg = false, explicitOverride = 1 (2X) -> Fixed mode 2, multiplier 2
+        ResolveControlModeAndMultiplier(false, 1, 5, mode, mult);
+        assert(mode == 2 && "Explicit override must resolve to mode 2 (Fixed Multiplier)");
+        assert(mult == 2 && "1 generated frame must resolve to 2X multiplier");
+
+        // 5. Explicit override active: dynamicMfg = false, explicitOverride = 2 (3X) -> Fixed mode 2, multiplier 3
+        ResolveControlModeAndMultiplier(false, 2, 5, mode, mult);
+        assert(mode == 2);
+        assert(mult == 3 && "2 generated frames must resolve to 3X multiplier");
+
+        // 6. Explicit override active: dynamicMfg = false, explicitOverride = 3 (4X) -> Fixed mode 2, multiplier 4
+        ResolveControlModeAndMultiplier(false, 3, 5, mode, mult);
+        assert(mode == 2);
+        assert(mult == 4 && "3 generated frames must resolve to 4X multiplier");
+
+        // 7. Explicit override clamping on 310.1 runtime (maxCeiling = 3, up to 4X)
+        ResolveControlModeAndMultiplier(false, 5, 3, mode, mult);
+        assert(mode == 2);
+        assert(mult == 4 && "Explicit override 5 on 310.1 runtime must clamp to ceiling 3 + 1 = 4");
+
+        // 8. Explicit override clamping on 310.9 runtime (maxCeiling = 5, up to 6X)
+        ResolveControlModeAndMultiplier(false, 8, 5, mode, mult);
+        assert(mode == 2);
+        assert(mult == 6 && "Explicit override 8 on 310.9 runtime must clamp to ceiling 5 + 1 = 6");
+
+        std::printf("  [PASS] Case 5: ResolveControlModeAndMultiplier resolution and clamping verified\n");
+    }
+
+    // Test 6: FollowGame live programmatic dispatch (mode = 0, multiplier = 0)
+    {
+        g_testPfnRequestControl = MockRequestControl;
+        s_mockRequestCalled = false;
+        s_lastRequest = {};
+
+        // Dispatch FollowGame / Driver mode
+        assert(ApplyLiveControl(0, 0, 0) && "ApplyLiveControl in mode 0 must succeed");
+        assert(s_mockRequestCalled);
+        assert(s_lastRequest.version == 1);
+        assert(s_lastRequest.mode == 0 && "Dispatched mode must be 0 (FollowGame)");
+        assert(s_lastRequest.multiplier == 0 && "Dispatched multiplier must be 0");
+        assert(s_lastRequest.targetFPS == 0);
+
+        // Reset pointers
+        g_testPfnRequestControl = nullptr;
+
+        std::printf("  [PASS] Case 6: Live FollowGame (mode 0, multiplier 0) dispatch verified\n");
+    }
+
     std::printf("=== All Dynamic Multi-Frame Generation (DMFG) Live Control Unit Tests PASSED! ===\n");
     return 0;
 }

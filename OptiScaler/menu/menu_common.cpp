@@ -3496,9 +3496,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     // Live programmatic control update without restarting
                     float targetFps = config->FGDLSSGFramerateTargetDMFG.value_or_default();
                     uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
-                    int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-                    uint32_t multiplier = (configuredFrames >= 1 && configuredFrames <= 5) ? (configuredFrames + 1) : 0;
-                    uint32_t liveMode = dynamicMfg ? 1 : ((multiplier >= 2) ? 2 : 0);
+                    const int maxCeiling = AmpereMfgLoader::GetStatus().Is3101Runtime ? 3 : 5;
+                    const int explicitOverride = config->FGDLSSGOverrideInterpolationCount.value_or(0);
+                    uint32_t liveMode = 0;
+                    uint32_t multiplier = 0;
+                    AmpereMfgLoader::ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, liveMode,
+                                                                     multiplier);
                     AmpereMfgLoader::ApplyLiveControl(liveMode, targetInt, multiplier);
                 }
                 ShowHelpMarker("Requests dynamic multi-frame generation pacing in SilyNoMeta's dlssg_sm86.\n"
@@ -4084,6 +4087,22 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                             }
 
                             StreamlineHooks::updateDlssgOptions();
+
+                            if (AmpereMfgLoader::GetStatus().LiveControlSupported)
+                            {
+                                AmpereMfgLoader::WriteCompanionIni();
+                                const bool dynamicMfg = config->FGDLSSGOverrideForceDMFG.value_or(false) ||
+                                                        config->FGDLSSGForceDMFG.value_or(false);
+                                float targetFps = config->FGDLSSGFramerateTargetDMFG.value_or_default();
+                                uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
+                                const int maxCeiling = AmpereMfgLoader::GetStatus().Is3101Runtime ? 3 : 5;
+                                const int explicitOverride = config->FGDLSSGOverrideInterpolationCount.value_or(0);
+                                uint32_t liveMode = 0;
+                                uint32_t multiplier = 0;
+                                AmpereMfgLoader::ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride,
+                                                                                 maxCeiling, liveMode, multiplier);
+                                AmpereMfgLoader::ApplyLiveControl(liveMode, targetInt, multiplier);
+                            }
                         }
                     }
 

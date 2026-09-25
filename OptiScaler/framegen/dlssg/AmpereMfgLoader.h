@@ -292,15 +292,43 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     return ss.str();
 }
 
+/// Resolves the SilyNoMeta DLSSG_RequestControl mode and multiplier based on configured options:
+/// - Dynamic MFG active: mode 1 (Dynamic), multiplier 0
+/// - Explicit user override active (FGDLSSGOverrideInterpolationCount > 0): mode 2 (Fixed Multiplier), multiplier =
+/// override + 1
+/// - Default / Unset override: mode 0 (FollowGame / Driver mode), multiplier 0 (game in-engine menu controls
+/// multiplier)
+inline void ResolveControlModeAndMultiplier(bool dynamicMfg, int explicitOverrideFrames, int maxCeiling,
+                                            uint32_t& outMode, uint32_t& outMultiplier)
+{
+    if (dynamicMfg)
+    {
+        outMode = 1;
+        outMultiplier = 0;
+    }
+    else if (explicitOverrideFrames > 0)
+    {
+        outMode = 2;
+        int clamped = (explicitOverrideFrames > maxCeiling) ? maxCeiling : explicitOverrideFrames;
+        outMultiplier = static_cast<uint32_t>(clamped + 1);
+    }
+    else
+    {
+        outMode = 0;
+        outMultiplier = 0;
+    }
+}
+
 /// Merges or appends the [DLSSG-SM86-75-COMPANION] section into existing ReShade.ini text content,
 /// or creates a new ReShade.ini string if existingContent is empty.
 /// All other sections and keys in ReShade.ini are preserved verbatim.
 inline std::string MergeReshadeCompanionContent(const std::string& existingContent, bool dynamicMfg,
-                                                float dynamicTargetFps, int maxFrames, int uiRecomposition = 1)
+                                                float dynamicTargetFps, int fixedMultiplier = 0,
+                                                int uiRecomposition = 1)
 {
     // In ReShade.ini companion:
-    // Multiplier: 0 = FollowGame, 2..6 = Fixed multiplier (maxFrames + 1)
-    int multiplier = (maxFrames >= 1 && maxFrames <= 5) ? (maxFrames + 1) : 0;
+    // Multiplier: 0 = FollowGame, 2..6 = Fixed multiplier
+    int multiplier = (!dynamicMfg && fixedMultiplier >= 2 && fixedMultiplier <= 6) ? fixedMultiplier : 0;
     int dynamicVal = dynamicMfg ? 1 : 0;
     int targetFpsInt = (dynamicTargetFps > 0.0f) ? static_cast<int>(dynamicTargetFps + 0.5f) : 0;
     int validUi = (uiRecomposition >= 0 && uiRecomposition <= 2) ? uiRecomposition : 1;
@@ -308,7 +336,7 @@ inline std::string MergeReshadeCompanionContent(const std::string& existingConte
     std::ostringstream newSection;
     newSection << "[DLSSG-SM86-75-COMPANION]\n";
     newSection << "VulkanFamily=0\n";
-    newSection << "Multiplier=" << (dynamicMfg ? 0 : multiplier) << "\n";
+    newSection << "Multiplier=" << multiplier << "\n";
     newSection << "Dynamic=" << dynamicVal << "\n";
     newSection << "TargetFPS=" << targetFpsInt << "\n";
     newSection << "DLSSRenderScale=0\n";
