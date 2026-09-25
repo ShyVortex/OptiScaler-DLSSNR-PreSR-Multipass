@@ -110,4 +110,17 @@ To safely manage upstream merges and mod evolution, three permanent branches are
    - **Case A (Mod Updates Available)**: If a new `dlssg_for_sm86` release exists, inspect differences in `dlssg-sm86`, apply necessary updates to OptiScaler's loader/hooks, verify with tests, and merge `dlssg-sm86` into `main`.
    - **Case B (No Mod Updates)**: If no mod updates are required, directly merge `merge-upstream` into `main`.
 
+## Implementation Planning & Issue Triage Standards
+Every implementation plan created for the project must document:
+1. **Reported Issue**: The verbatim report and symptoms reported by the user or identified in the field.
+2. **Issue Validity Assessment**: Verification confirming that the reported behavior is a genuine issue in OptiScaler / mod integration logic rather than user misconfiguration or unsupported settings.
+3. **Solution Applied / Proposed**: The precise architectural/code solution implemented to resolve the defect cleanly.
+4. **Issue Documentation in `docs/issues/`**: All investigated or resolved defects must be documented in `docs/issues/` categorized into domain subfolders:
+   - `docs/issues/SR/` — Super Resolution (DLSS, FSR, XeSS)
+   - `docs/issues/FG/` — Frame Generation (DLSS-G, FSR-FG, XeFG, Smooth Motion, external proxies)
+   - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
+   - `docs/issues/NR/` — Neural Rendering (DLSS-NR)
+
+
+
 
