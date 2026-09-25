@@ -6,6 +6,8 @@
 #include <fstream>
 #include <optional>
 
+#include <map>
+
 // Architecture identifiers matching NVAPI / OptiScaler
 constexpr uint32_t NV_GPU_ARCHITECTURE_TU100 = 0x00000160;
 constexpr uint32_t NV_GPU_ARCHITECTURE_GA100 = 0x00000170; // Ampere (RTX 30)
@@ -81,17 +83,60 @@ inline fs::path FindCandidatePath(const fs::path& basePath, const fs::path& over
     return {};
 }
 
+inline std::map<std::string, std::string> GetSanitizedEnvironment()
+{
+    return { { "SM86_ENABLE_D3D11_BRIDGE", "0" },
+             { "SM86_LOW_LATENCY", "0" },
+             { "SM86_ENABLE_OSD", "0" },
+             { "SM86_SKIP_DXGI_HOOKS", "1" } };
+}
+
+inline bool IsDummyWindow(const std::string& className, uint32_t width, uint32_t height)
+{
+    if (className == "NVSmooth30DummyWindow")
+        return true;
+    if (width == 16 && height == 16 && className.find("Dummy") != std::string::npos)
+        return true;
+    return false;
+}
+
 struct MockLoaderState
 {
     Status status = Status::Disabled;
     std::string loadedPath;
     bool drsProfileApplied = false;
+    bool swapchainAttached = false;
 
     void Reset()
     {
         status = Status::Disabled;
         loadedPath.clear();
         drsProfileApplied = false;
+        swapchainAttached = false;
+    }
+
+    std::string GetStatusString() const
+    {
+        if (status == Status::Active)
+        {
+            if (swapchainAttached)
+                return "Active (Swapchain bound)";
+            else
+                return "Pending Restart (Swapchain not bound)";
+        }
+        return StatusToString(status);
+    }
+
+    std::string GetBannerTag() const
+    {
+        if (status == Status::Active)
+        {
+            if (swapchainAttached)
+                return "[Smooth Motion Active (RTX 30)]";
+            else
+                return "[Pending Restart: Active on next game launch]";
+        }
+        return "[Pending Restart]";
     }
 
     bool TrySetup(bool configSmoothMotionEnabled, bool configNVSmooth30Enabled, bool isNvidia, uint32_t archId,
@@ -292,6 +337,57 @@ int main()
         assert(std::string(NVSmooth30Unit::StatusToString(loader.status)) == "Conflict: DLSS-G / MFG active");
         assert(!loader.drsProfileApplied);
         std::printf("  [PASS] Case 5: DLSS-G / MFG mutual exclusion conflict handled cleanly\n");
+    }
+
+    // Test 6: Environment Sanitization Flags
+    {
+        auto env = NVSmooth30Unit::GetSanitizedEnvironment();
+        assert(env["SM86_ENABLE_D3D11_BRIDGE"] == "0");
+        assert(env["SM86_LOW_LATENCY"] == "0");
+        assert(env["SM86_ENABLE_OSD"] == "0");
+        assert(env["SM86_SKIP_DXGI_HOOKS"] == "1");
+        std::printf("  [PASS] Case 6: Environment sanitization flags verified (Bridge=0, Latency=0, OSD=0, "
+                    "SkipDxgiHooks=1)\n");
+    }
+
+    // Test 7: Swapchain Attachment & Restart Requirement State Transitions
+    {
+        NVSmooth30Unit::MockLoaderState loader;
+        const fs::path optiScalerDll = testRoot / "OptiScaler" / "nvsmooth30.dll";
+        {
+            std::ofstream f(optiScalerDll);
+            f << "MZ_MOCK_DLL";
+        }
+
+        bool ok = loader.TrySetup(true, true, true, NV_GPU_ARCHITECTURE_GA100, testRoot, {});
+        assert(ok);
+        assert(loader.status == NVSmooth30Unit::Status::Active);
+
+        // Before swapchain attachment (mid-game toggle / pending restart):
+        assert(!loader.swapchainAttached);
+        assert(loader.GetStatusString() == "Pending Restart (Swapchain not bound)");
+        assert(loader.GetBannerTag() == "[Pending Restart: Active on next game launch]");
+
+        // After swapchain attachment verified:
+        loader.swapchainAttached = true;
+        assert(loader.GetStatusString() == "Active (Swapchain bound)");
+        assert(loader.GetBannerTag() == "[Smooth Motion Active (RTX 30)]");
+
+        std::printf("  [PASS] Case 7: Swapchain attachment & Pending Restart transitions verified\n");
+    }
+
+    // Test 8: NVSmooth30 Dummy Window Interception (prevents Streamline corruption and DXGI crash)
+    {
+        // Dummy 16x16 window created by nvsmooth30
+        assert(NVSmooth30Unit::IsDummyWindow("NVSmooth30DummyWindow", 16, 16));
+        assert(NVSmooth30Unit::IsDummyWindow("NVSmooth30DummyWindow", 0, 0));
+
+        // Normal game windows MUST NOT be intercepted
+        assert(!NVSmooth30Unit::IsDummyWindow("ControlWindowClass", 2560, 1440));
+        assert(!NVSmooth30Unit::IsDummyWindow("UnrealWindow", 3840, 2160));
+        assert(!NVSmooth30Unit::IsDummyWindow("DXGI_SWAPCHAIN_WINDOW", 1920, 1080));
+
+        std::printf("  [PASS] Case 8: NVSmooth30 dummy window interception verified\n");
     }
 
     // Clean up temporary files

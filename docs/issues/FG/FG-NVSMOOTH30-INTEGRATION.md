@@ -148,10 +148,14 @@ This guarantees that extended Windows interfaces (`IDXGISwapChainMedia`) and pro
   - Verify mutual exclusion gating rejecting setup when DLSS-G / Ampere MFG / Ada MFG is active.
   - Verify configuration disabling when `SmoothMotion` is false overall vs when `NVSmooth30` is false.
   - Verify candidate path resolution and status strings.
-  - Verify environment variable sanitization (`SM86_ENABLE_D3D11_BRIDGE=0`, `SM86_LOW_LATENCY=0`, etc.).
+  - Verify environment variable sanitization (`SM86_ENABLE_D3D11_BRIDGE=0`, `SM86_LOW_LATENCY=0`, `SM86_ENABLE_OSD=0`, `SM86_SKIP_DXGI_HOOKS=1`).
   - Verify swapchain attachment verification logic distinguishing pending restart vs truly attached.
+  - Verify NVSmooth30 dummy window (`NVSmooth30DummyWindow`, 16x16) detection and interception.
 - `tests/ampere_smooth_motion_unit.cpp`:
   - Verify mutual exclusion UI evaluation when MFG is active.
   - Verify INI configuration priority and fallback defaults.
-  - Verify restart-pending UI status reporting.
-- All unit tests must compile and pass cleanly via `g++ -std=c++20`.
+  - Verify restart-pending UI status reporting and contextual help markers.
+  - Verify status banner color and text transitions (`[Pending Restart]` vs `[Smooth Motion Active (RTX 30)]`).
+- All unit tests compiled and passed cleanly via `g++ -std=c++20`.
+- Clang-format check passed cleanly with zero violations (`clang-format --dry-run --Werror`).
+- UTF-8 BOM (`\xef\xbb\xbf`) preserved across all modified C++ source and header files.

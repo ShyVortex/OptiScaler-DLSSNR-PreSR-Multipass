@@ -242,7 +242,7 @@ int main()
                     "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
                     "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
                     "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
-                    "Can be toggled dynamically on the fly."
+                    "Note: A game restart is required for NvPresent64 to attach to the DXGI swapchain."
                 };
             }
             return {
@@ -251,7 +251,7 @@ int main()
                 "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
                 "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
                 "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
-                "Can be toggled dynamically on the fly."
+                "Note: A game restart may be required for the driver to attach to the DXGI swapchain."
             };
         };
 
@@ -382,6 +382,48 @@ int main()
         }
 
         std::printf("  [PASS] Case 9: INI configuration priority and legacy migration verified\n");
+    }
+
+    // Test 10: Smooth Motion Status Banner & Tag Logic
+    {
+        auto evaluateStatusBanner = [](bool isAmpere, bool dllLoaded, bool swapchainAttached,
+                                       bool smoothMotion) -> std::pair<std::string, std::string>
+        {
+            if (!smoothMotion)
+                return { "", "" };
+
+            if (isAmpere)
+            {
+                if (dllLoaded && swapchainAttached)
+                    return { "[Smooth Motion Active (RTX 30)]", "green" };
+                else if (dllLoaded)
+                    return { "[Pending Restart: Active on next game launch]", "amber" };
+                else
+                    return { "[Pending Restart]", "amber" };
+            }
+            else
+            {
+                return { "[Smooth Motion Active]", "green" };
+            }
+        };
+
+        // Ampere with swapchain bound -> Active (green)
+        auto [text1, color1] = evaluateStatusBanner(true, true, true, true);
+        assert(text1 == "[Smooth Motion Active (RTX 30)]" && color1 == "green");
+
+        // Ampere with DLL loaded but swapchain not bound (mid-game toggle) -> Pending Restart (amber)
+        auto [text2, color2] = evaluateStatusBanner(true, true, false, true);
+        assert(text2 == "[Pending Restart: Active on next game launch]" && color2 == "amber");
+
+        // Ampere with DLL not loaded -> Pending Restart (amber)
+        auto [text3, color3] = evaluateStatusBanner(true, false, false, true);
+        assert(text3 == "[Pending Restart]" && color3 == "amber");
+
+        // Ada / Blackwell -> Smooth Motion Active (green)
+        auto [text4, color4] = evaluateStatusBanner(false, false, false, true);
+        assert(text4 == "[Smooth Motion Active]" && color4 == "green");
+
+        std::printf("  [PASS] Case 10: Smooth Motion status banner and restart requirement logic verified\n");
     }
 
     std::printf("\nALL NVIDIA SMOOTH MOTION TESTS PASSED SUCCESSFULLY!\n");

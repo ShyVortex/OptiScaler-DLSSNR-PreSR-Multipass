@@ -9,6 +9,7 @@
 #include <nvapi/fakenvapi.h>
 #include <hooks/Reflex_Hooks.h>
 #include <hooks/D3D12_Hooks.h>
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include <menu/menu_overlay_dx.h>
 
@@ -594,6 +595,74 @@ WrappedIDXGISwapChain4::WrappedIDXGISwapChain4(IDXGISwapChain* real, IUnknown* p
     auto refCount = _real->Release();
 
     CheckForHdrOutput();
+
+    HMODULE hNvPresent = GetModuleHandleW(L"NvPresent64.dll");
+    if (hNvPresent != nullptr && _real != nullptr)
+    {
+        const auto isAddressInModule = [](void* address, HMODULE hModule) -> bool
+        {
+            if (address == nullptr || hModule == nullptr)
+                return false;
+
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(hModule);
+            if (dos->e_magic == IMAGE_DOS_SIGNATURE)
+            {
+                const auto* nt =
+                    reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const BYTE*>(hModule) + dos->e_lfanew);
+                if (nt->Signature == IMAGE_NT_SIGNATURE)
+                {
+                    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+                    uintptr_t start = reinterpret_cast<uintptr_t>(hModule);
+                    uintptr_t end = start + nt->OptionalHeader.SizeOfImage;
+                    if (addr >= start && addr < end)
+                        return true;
+                }
+            }
+
+            HMODULE addrMod = nullptr;
+            if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCSTR>(address), &addrMod))
+            {
+                return addrMod == hModule;
+            }
+
+            return false;
+        };
+
+        void** vtable = *reinterpret_cast<void***>(_real);
+        bool attached = false;
+        if (vtable != nullptr)
+        {
+            if (isAddressInModule(vtable[0], hNvPresent) || isAddressInModule(vtable[8], hNvPresent) ||
+                isAddressInModule(vtable[22], hNvPresent))
+            {
+                attached = true;
+            }
+            else
+            {
+                // Check candidate pointer at offset +0x18 (common for interposers wrapping underlying swapchain)
+                const auto* bytes = reinterpret_cast<const std::byte*>(_real);
+                void* candidate = nullptr;
+                std::memcpy(&candidate, bytes + 0x18, sizeof(candidate));
+                if (candidate != nullptr && candidate != _real)
+                {
+                    void** candVtable = *reinterpret_cast<void***>(candidate);
+                    if (candVtable != nullptr &&
+                        (isAddressInModule(candVtable[0], hNvPresent) || isAddressInModule(candVtable[8], hNvPresent) ||
+                         isAddressInModule(candVtable[22], hNvPresent)))
+                    {
+                        attached = true;
+                    }
+                }
+            }
+        }
+        if (attached || !NVSmooth30Loader::GetStatus().SwapchainAttached)
+        {
+            NVSmooth30Loader::SetSwapchainAttached(attached);
+        }
+        LOG_INFO("NVSmooth30: Swapchain attachment verified = {}", attached);
+    }
 
     LOG_INFO("{} created, real: {:X}, refCount: {}", _id, (UINT64) real, refCount);
 }

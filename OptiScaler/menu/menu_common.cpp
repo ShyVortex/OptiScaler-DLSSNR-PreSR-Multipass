@@ -3681,7 +3681,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
                 "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
                 "On GeForce RTX 30 (Ampere), this feature is unlocked via OptiScaler/nvsmooth30.dll.\n"
-                "Can be toggled dynamically on the fly.");
+                "Note: A game restart is required for NvPresent64 to attach to the DXGI swapchain.");
         }
         else
         {
@@ -3690,7 +3690,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "Enables driver-level optical-flow frame interpolation directly via NVIDIA Driver Settings (DRS).\n"
                 "Strictly opt-in: intended for games that lack native DLSS Frame Generation support.\n"
                 "Supported natively on GeForce RTX 40 (Ada) and RTX 50 (Blackwell) series GPUs.\n"
-                "Can be toggled dynamically on the fly.");
+                "Note: A game restart may be required for the driver to attach to the DXGI swapchain.");
         }
 
         const auto& ampereStatus = AmpereMfgLoader::LastStatus();
@@ -3698,9 +3698,20 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         if (ampereStatus.SmoothMotionActive || nvSmoothStatus.SmoothMotionActive || smoothMotion)
         {
             ImGui::SameLine();
-            if (isAmpere && nvSmoothStatus.DllLoaded)
+            if (isAmpere)
             {
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active (RTX 30)]");
+                if (nvSmoothStatus.DllLoaded && nvSmoothStatus.SwapchainAttached)
+                {
+                    ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "[Smooth Motion Active (RTX 30)]");
+                }
+                else if (nvSmoothStatus.DllLoaded)
+                {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "[Pending Restart: Active on next game launch]");
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "[Pending Restart]");
+                }
             }
             else
             {
@@ -3723,13 +3734,21 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("NVSmooth30 Unlocker (placed in OptiScaler/nvsmooth30.dll):\n"
                            "Patches NvPresent64 architecture gates and redirects CUDA kernels to SM86,\n"
                            "allowing RTX 30 (Ampere) cards to run NVIDIA driver-level Smooth Motion.\n"
-                           "Requires driver 571.86+ on Windows.");
+                           "Requires driver 571.86+ on Windows.\n"
+                           "Note: A game restart is required for the unlocker to hook the DXGI presentation layer.");
 
             ImGui::Text("NVSmooth30 Status:");
             ImGui::SameLine();
             if (nvSmoothStatus.DllLoaded)
             {
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Active");
+                if (nvSmoothStatus.SwapchainAttached)
+                {
+                    ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.2f, 1.0f), "Active (Swapchain bound)");
+                }
+                else
+                {
+                    ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "Pending Restart (Swapchain not bound)");
+                }
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%s)", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());
             }
