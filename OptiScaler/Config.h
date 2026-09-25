@@ -101,12 +101,13 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
     }
 
     constexpr T value_or_default() &&
-        requires(defaultState != NoDefault) {
-            return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
-        }
+        requires(defaultState != NoDefault)
+    {
+        return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
+    }
 
-        constexpr std::optional<T> value_for_config()
-            requires(defaultState == WithDefault)
+    constexpr std::optional<T> value_for_config()
+        requires(defaultState == WithDefault)
     {
         if (_volatile)
         {
@@ -656,7 +657,7 @@ class Config
         false
     }; // NVIDIA Smooth Motion pacing/interpolation via DRS (strictly opt-in, default false)
     CustomOptional<bool> SmoothMotionNVSmooth30 {
-        false
+        true
     }; // Sideload nvsmooth30.dll from OptiScaler directory on RTX 30 (SM86) cards
     CustomOptional<FGOutput> FGOutput { FGOutput::NoFG };
     CustomOptional<FGNvngxReplacement> FGNvngxReplacement { FGNvngxReplacement::None };

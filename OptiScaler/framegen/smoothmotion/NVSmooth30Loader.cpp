@@ -29,17 +29,21 @@ Status LastStatus()
 void TrySetup()
 {
     std::lock_guard lock(s_mutex);
-    if (s_setupAttempted)
+    if (s_status.DllLoaded)
         return;
-    s_setupAttempted = true;
 
     auto* cfg = Config::Instance();
 
-    // Check if NVSmooth30 is enabled in configuration
-    const bool optedIn = cfg->SmoothMotionNVSmooth30.value_or(false);
-    if (!optedIn)
+    // Check if Smooth Motion is requested and NVSmooth30 unlocker is enabled
+    const bool smoothMotion = cfg->FGDLSSGSmoothMotion.value_or_default();
+    const bool optedIn = cfg->SmoothMotionNVSmooth30.value_or_default();
+    if (!smoothMotion || !optedIn)
+    {
+        s_status.Enabled = false;
         return;
+    }
 
+    s_setupAttempted = true;
     s_status.Enabled = true;
 
     // Platform guard: NVSmooth30 patches Windows NvPresent64.dll and does not run on Linux/Proton

@@ -3650,7 +3650,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             config->FGDLSSGSmoothMotion = smoothMotion;
             NvApiHooks::ApplySmoothMotionDrs(smoothMotion);
-            if (smoothMotion && isAmpere && config->SmoothMotionNVSmooth30.value_or(true))
+            if (smoothMotion && isAmpere && config->SmoothMotionNVSmooth30.value_or_default())
             {
                 NVSmooth30Loader::TrySetup();
             }
@@ -3693,7 +3693,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         if (isAmpere)
         {
             ImGui::Indent();
-            bool nvSmooth30 = config->SmoothMotionNVSmooth30.value_or(true);
+            bool nvSmooth30 = config->SmoothMotionNVSmooth30.value_or_default();
             if (ImGui::Checkbox("Enable NVSmooth30 Unlocker (RTX 30)##nv_smooth30", &nvSmooth30))
             {
                 config->SmoothMotionNVSmooth30 = nvSmooth30;
@@ -3715,7 +3715,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ImGui::SameLine();
                 ImGui::TextDisabled("(%s)", wstring_to_string(nvSmoothStatus.LoadedDllPath).c_str());
             }
-            else if (!nvSmoothStatus.Enabled)
+            else if (!smoothMotion)
+            {
+                ImGui::TextDisabled("Inactive (Smooth Motion disabled)");
+            }
+            else if (!nvSmooth30)
             {
                 ImGui::TextDisabled("Disabled in config");
             }
