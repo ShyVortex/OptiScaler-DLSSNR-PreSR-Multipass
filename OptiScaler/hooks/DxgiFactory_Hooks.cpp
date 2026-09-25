@@ -14,6 +14,7 @@
 #include <with_dx12/with_dx12.h>
 #include <wrapped/wrapped_swapchain.h>
 #include <with_dx12/dx11_with_dx12_sc.h>
+#include <framegen/smoothmotion/NVSmooth30Loader.h>
 
 #include <d3d11.h>
 #include <magic_enum.hpp>
@@ -70,6 +71,24 @@ static bool PrepareDx12FlipFormat(DXGI_FORMAT& format)
         LOG_ERROR("Unsupported texture format for DX12 flip swapchain: {}", (UINT) format);
         return false;
     }
+}
+
+static bool IsNvSmooth30DummyWindow(HWND hWnd, UINT width, UINT height)
+{
+    if (hWnd == nullptr)
+        return false;
+
+    if (width <= 32 && height <= 32)
+    {
+        wchar_t className[64] = { 0 };
+        if (GetClassNameW(hWnd, className, 64) > 0)
+        {
+            if (wcscmp(className, L"NVSmooth30DummyWindow") == 0)
+                return true;
+        }
+    }
+
+    return false;
 }
 
 static bool PrepareDx12InteropDesc(DXGI_SWAP_CHAIN_DESC& desc, bool tearingSupported)
@@ -410,6 +429,19 @@ HRESULT DxgiFactoryHooks::CreateSwapChain(IDXGIFactory* realFactory, IUnknown* p
                                           IDXGISwapChain** ppSwapChain)
 {
     *ppSwapChain = nullptr;
+
+    if (Config::Instance()->FGDLSSGSmoothMotion.value_or(false))
+    {
+        NVSmooth30Loader::TrySetup();
+    }
+
+    if (pDesc != nullptr &&
+        IsNvSmooth30DummyWindow(pDesc->OutputWindow, pDesc->BufferDesc.Width, pDesc->BufferDesc.Height))
+    {
+        LOG_INFO("CreateSwapChain: Intercepted NVSmooth30 dummy swapchain probe; neutralizing DXGI vtable hijack to "
+                 "protect D3D12/Streamline presentation.");
+        return DXGI_ERROR_INVALID_CALL;
+    }
 
     if (State::Instance().vulkanCreatingSC)
     {
@@ -780,6 +812,18 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
                                                  IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain)
 {
     *ppSwapChain = nullptr;
+
+    if (Config::Instance()->FGDLSSGSmoothMotion.value_or(false))
+    {
+        NVSmooth30Loader::TrySetup();
+    }
+
+    if (pDesc != nullptr && IsNvSmooth30DummyWindow(hWnd, pDesc->Width, pDesc->Height))
+    {
+        LOG_INFO("CreateSwapChainForHwnd: Intercepted NVSmooth30 dummy swapchain probe; neutralizing DXGI vtable "
+                 "hijack to protect D3D12/Streamline presentation.");
+        return DXGI_ERROR_INVALID_CALL;
+    }
 
     static bool firstCall = static_cast<bool>(State::Instance().gameQuirks & GameQuirk::NoFSRFGFirstSwapchain);
     if (firstCall)
@@ -1637,6 +1681,18 @@ HRESULT DxgiFactoryHooks::DLSSGCreateSwapChainForHwnd(IDXGIFactory2* realFactory
                                                       IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain)
 {
     *ppSwapChain = nullptr;
+
+    if (Config::Instance()->FGDLSSGSmoothMotion.value_or(false))
+    {
+        NVSmooth30Loader::TrySetup();
+    }
+
+    if (pDesc != nullptr && IsNvSmooth30DummyWindow(hWnd, pDesc->Width, pDesc->Height))
+    {
+        LOG_INFO("CreateSwapChainForHwnd: Intercepted NVSmooth30 dummy swapchain probe; neutralizing DXGI vtable "
+                 "hijack to protect D3D12/Streamline presentation.");
+        return DXGI_ERROR_INVALID_CALL;
+    }
 
     static bool firstCall = static_cast<bool>(State::Instance().gameQuirks & GameQuirk::NoFSRFGFirstSwapchain);
     if (firstCall)
