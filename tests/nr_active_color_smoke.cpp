@@ -60,14 +60,14 @@ ComPtr<ID3D12Resource> buffer(ID3D12Device* device, UINT64 size, bool readback)
 }
 
 void barrier(ID3D12GraphicsCommandList* commands, ID3D12Resource* resource, D3D12_RESOURCE_STATES from,
-             D3D12_RESOURCE_STATES to)
+             D3D12_RESOURCE_STATES to, UINT subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
 {
     if (from == to)
         return;
     D3D12_RESOURCE_BARRIER b {};
     b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     b.Transition.pResource = resource;
-    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.Subresource = subresource;
     b.Transition.StateBefore = from;
     b.Transition.StateAfter = to;
     commands->ResourceBarrier(1, &b);
@@ -82,9 +82,11 @@ D3D12_TEXTURE_COPY_LOCATION location(ID3D12Resource* resource)
 }
 
 void run(ID3D12Device* device, unsigned int allocationW, unsigned int allocationH, unsigned int activeW,
-         unsigned int activeH, bool uav, bool writeBack)
+         unsigned int activeH, bool uav, bool writeBack, unsigned int mipLevels = 1,
+         D3D12_RESOURCE_STATES arrival = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
 {
-    const auto desc = texture(allocationW, allocationH, uav);
+    auto desc = texture(allocationW, allocationH, uav);
+    desc.MipLevels = static_cast<UINT16>(mipLevels);
     const auto active = DlssNr::PreSrColorExtent(desc, activeW, activeH);
     expect(active.has_value(), "valid active extent rejected");
     auto game = create(device, desc, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -95,6 +97,26 @@ void run(ID3D12Device* device, unsigned int allocationW, unsigned int allocation
     device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &bytes);
     auto upload = buffer(device, bytes, false), edited = buffer(device, bytes, false);
     auto croppedReadback = buffer(device, bytes, true), finalReadback = buffer(device, bytes, true);
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT mip1Footprint {};
+    UINT64 mip1Bytes = 0;
+    ComPtr<ID3D12Resource> mip1Upload, mip1Readback;
+    constexpr uint32_t mip1Sentinel = 0xA1B2C3D4u;
+    if (mipLevels > 1)
+    {
+        device->GetCopyableFootprints(&desc, 1, 1, 0, &mip1Footprint, nullptr, nullptr, &mip1Bytes);
+        mip1Upload = buffer(device, mip1Bytes, false);
+        mip1Readback = buffer(device, mip1Bytes, true);
+        unsigned char* memory = nullptr;
+        D3D12_RANGE noRead { 0, 0 };
+        check(mip1Upload->Map(0, &noRead, (void**) &memory));
+        for (unsigned int y = 0; y < mip1Footprint.Footprint.Height; ++y)
+        {
+            auto* row = (uint32_t*) (memory + y * mip1Footprint.Footprint.RowPitch);
+            for (unsigned int x = 0; x < mip1Footprint.Footprint.Width; ++x)
+                row[x] = mip1Sentinel;
+        }
+        mip1Upload->Unmap(0, nullptr);
+    }
     constexpr uint32_t padding = 0xD00DF00Du;
     constexpr uint32_t edit = 0x12345678u;
     for (auto* resource : { upload.Get(), edited.Get() })
@@ -123,13 +145,29 @@ void run(ID3D12Device* device, unsigned int allocationW, unsigned int allocation
     src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
     src.PlacedFootprint = footprint;
     commands->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    if (mip1Upload)
+    {
+        auto mip1Source = location(mip1Upload.Get()), mip1Target = location(game.Get());
+        mip1Source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        mip1Source.PlacedFootprint = mip1Footprint;
+        mip1Target.SubresourceIndex = 1;
+        commands->CopyTextureRegion(&mip1Target, 0, 0, 0, &mip1Source, nullptr);
+    }
     // Match the production round trip, including restoring the game's readable state between copies.
-    const auto arrival = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     barrier(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_DEST, arrival);
-    barrier(commands.Get(), game.Get(), arrival, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    // A game can use another mip independently while NR reads/copies the base image.
+    const auto mip1State = arrival == D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
+                               ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                               : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    if (mipLevels > 1)
+        barrier(commands.Get(), game.Get(), arrival, mip1State, 1);
+    DlssNr::TransitionActiveColor(commands.Get(), game.Get(), arrival, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    DlssNr::TransitionActiveColor(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                  D3D12_RESOURCE_STATE_COPY_SOURCE);
     barrier(commands.Get(), compact.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
     DlssNr::CopyActiveColor(commands.Get(), compact.Get(), game.Get(), *active);
-    barrier(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, arrival);
+    DlssNr::TransitionActiveColor(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     barrier(commands.Get(), compact.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);
     src = location(compact.Get());
     dst = location(croppedReadback.Get());
@@ -150,18 +188,31 @@ void run(ID3D12Device* device, unsigned int allocationW, unsigned int allocation
     if (writeBack)
     {
         barrier(commands.Get(), compact.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        barrier(commands.Get(), game.Get(), arrival, D3D12_RESOURCE_STATE_COPY_DEST);
+        DlssNr::TransitionActiveColor(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                      D3D12_RESOURCE_STATE_COPY_DEST);
         DlssNr::CopyActiveColor(commands.Get(), game.Get(), compact.Get(), *active);
-        barrier(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_DEST, arrival);
+        DlssNr::TransitionActiveColor(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                                      D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         barrier(commands.Get(), compact.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
-    barrier(commands.Get(), game.Get(), arrival, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    DlssNr::TransitionActiveColor(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, arrival);
+    DlssNr::TransitionActiveColor(commands.Get(), game.Get(), arrival, D3D12_RESOURCE_STATE_COPY_SOURCE);
     src = location(game.Get());
     dst = location(finalReadback.Get());
     dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
     dst.PlacedFootprint = footprint;
     commands->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-    barrier(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, arrival);
+    DlssNr::TransitionActiveColor(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, arrival);
+    if (mip1Readback)
+    {
+        barrier(commands.Get(), game.Get(), mip1State, D3D12_RESOURCE_STATE_COPY_SOURCE, 1);
+        auto mip1Source = location(game.Get()), mip1Target = location(mip1Readback.Get());
+        mip1Source.SubresourceIndex = 1;
+        mip1Target.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        mip1Target.PlacedFootprint = mip1Footprint;
+        commands->CopyTextureRegion(&mip1Target, 0, 0, 0, &mip1Source, nullptr);
+        barrier(commands.Get(), game.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, mip1State, 1);
+    }
     check(commands->Close());
     ID3D12CommandList* lists[] = { commands.Get() };
     queue->ExecuteCommandLists(1, lists);
@@ -195,6 +246,20 @@ void run(ID3D12Device* device, unsigned int allocationW, unsigned int allocation
         D3D12_RANGE noWrite { 0, 0 };
         resource->Unmap(0, &noWrite);
     }
+    if (mip1Readback)
+    {
+        unsigned char* memory = nullptr;
+        D3D12_RANGE read { 0, (SIZE_T) mip1Bytes };
+        check(mip1Readback->Map(0, &read, (void**) &memory));
+        for (unsigned int y = 0; y < mip1Footprint.Footprint.Height; ++y)
+        {
+            const auto* row = (const uint32_t*) (memory + y * mip1Footprint.Footprint.RowPitch);
+            for (unsigned int x = 0; x < mip1Footprint.Footprint.Width; ++x)
+                expect(row[x] == mip1Sentinel, "another game-owned mip was changed");
+        }
+        D3D12_RANGE noWrite { 0, 0 };
+        mip1Readback->Unmap(0, &noWrite);
+    }
     std::printf("PASS: %ux%u in %ux%u, UAV=%d, copy-back=%d\n", activeW, activeH, allocationW, allocationH, uav,
                 writeBack);
 }
@@ -214,6 +279,15 @@ try
     desc.SampleDesc.Count = 1;
     desc.DepthOrArraySize = 2;
     expect(!PreSrColorExtent(desc, 2558, 1439), "array accepted");
+    auto multiMip = texture(2258, 1270);
+    multiMip.MipLevels = 12;
+    multiMip.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    expect(DlssNr::PreSrColorCanUseScratch(multiMip, 2258, 1270), "typed multi-mip input rejected");
+    multiMip.Format = DXGI_FORMAT_R16G16B16A16_TYPELESS;
+    expect(!DlssNr::PreSrColorCanUseScratch(multiMip, 2258, 1270),
+           "multi-mip format-changing scratch admitted without a post-SR fallback");
+    multiMip.MipLevels = 1;
+    expect(DlssNr::PreSrColorCanUseScratch(multiMip, 2258, 1270), "existing single-mip typeless admission changed");
     ComPtr<ID3D12Debug> debug;
     const bool debugLayer = SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
     if (debugLayer)
@@ -229,6 +303,8 @@ try
     run(device.Get(), 3840, 2160, 2227, 1253, false, true);
     run(device.Get(), 1920, 1080, 1920, 1080, false, true);
     run(device.Get(), 2560, 1440, 2558, 1439, false, false);
+    // CONTROL Resonant supplies a full mip chain; NR copies only mip 0 into its single-mip scratch.
+    run(device.Get(), 2258, 1270, 2258, 1270, false, false, 12, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     ComPtr<ID3D12InfoQueue> messages;
     if (debugLayer && SUCCEEDED(device.As(&messages)))
     {

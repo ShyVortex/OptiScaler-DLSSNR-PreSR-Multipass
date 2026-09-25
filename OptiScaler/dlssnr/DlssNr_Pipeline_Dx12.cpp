@@ -57,7 +57,9 @@ bool DlssNr::CanRunBeforeUpscale_Dx12(NVSDK_NGX_Parameter* parameters)
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
     const auto desc = color->GetDesc();
-    return desc.MipLevels == 1 && DlssNr::PreSrColorExtent(desc, width, height).has_value();
+    // The NR scratch has one mip and CopyActiveColor copies subresource 0. A multi-mip input can
+    // run before SR only when scratch normalization also preserves the source colour format.
+    return DlssNr::PreSrColorCanUseScratch(desc, width, height);
 }
 
 DlssNr::InputStates_Dx12 DlssNr::ResolveInputStates_Dx12(bool interop)
@@ -209,26 +211,43 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
             struct RestoreInputs
             {
                 ID3D12GraphicsCommandList* commandList;
-                std::vector<std::pair<ID3D12Resource*, D3D12_RESOURCE_STATES>> resources;
-                void Read(ID3D12Resource* resource, D3D12_RESOURCE_STATES state)
+                struct Entry
+                {
+                    ID3D12Resource* resource;
+                    D3D12_RESOURCE_STATES state;
+                    bool colorMip0;
+                };
+                std::vector<Entry> resources;
+                void Read(ID3D12Resource* resource, D3D12_RESOURCE_STATES state, bool colorMip0 = false)
                 {
                     if (resource == nullptr ||
                         std::any_of(resources.begin(), resources.end(),
-                                    [resource](const auto& entry) { return entry.first == resource; }))
+                                    [resource](const auto& entry) { return entry.resource == resource; }))
                         return;
-                    resources.emplace_back(resource, state);
-                    NrBarrier(commandList, resource, state, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    resources.push_back({ resource, state, colorMip0 });
+                    if (colorMip0)
+                        DlssNr::TransitionActiveColor(commandList, resource, state,
+                                                      D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    else
+                        NrBarrier(commandList, resource, state, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 }
                 ~RestoreInputs()
                 {
                     for (auto it = resources.rbegin(); it != resources.rend(); ++it)
-                        NrBarrier(commandList, it->first, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, it->second);
+                    {
+                        if (it->colorMip0)
+                            DlssNr::TransitionActiveColor(commandList, it->resource,
+                                                          D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, it->state);
+                        else
+                            NrBarrier(commandList, it->resource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                      it->state);
+                    }
                 }
             } restore { commandList };
 
             if (beforeUpscale)
             {
-                restore.Read(input, states.color);
+                restore.Read(input, states.color, input->GetDesc().MipLevels != 1);
                 shader.SetBufferState(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             }
             else

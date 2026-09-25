@@ -488,10 +488,17 @@ bool DlssNr_Dx12::Dispatch(ID3D12GraphicsCommandList* cmd, ID3D12Resource* colou
         const auto source = colour->GetDesc(), target = output->GetDesc();
         if (source.Width != target.Width || source.Height != target.Height || source.Format != target.Format)
             return false;
-        _state->Barrier(cmd, colour, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        const auto transitionColor = [&](D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
+        {
+            if (info.BeforeUpscale && source.MipLevels != 1)
+                DlssNr::TransitionActiveColor(cmd, colour, before, after);
+            else
+                _state->Barrier(cmd, colour, before, after);
+        };
+        transitionColor(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
         _state->Barrier(cmd, output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
         DlssNr::CopyActiveColor(cmd, output, colour, { (unsigned) target.Width, target.Height });
-        _state->Barrier(cmd, colour, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transitionColor(D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         _state->Barrier(cmd, output, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
     const auto before = _state->nr.successfulDispatches;
