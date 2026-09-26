@@ -748,7 +748,7 @@ class Config
     CustomOptional<bool> FGXeFGForceBorderless { false };
 
     // XeMFG Unlock
-    CustomOptional<bool> XeMfgUnlock { true };
+    CustomOptional<bool> XeMfgUnlock { false };
     CustomOptional<int> XeMfgMaxFrames { 3 };
     CustomOptional<bool> XeMfgExtraPacing { true };
 

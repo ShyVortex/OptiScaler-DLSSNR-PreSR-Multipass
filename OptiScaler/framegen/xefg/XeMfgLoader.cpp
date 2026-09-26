@@ -156,8 +156,8 @@ bool EnabledForSession()
 {
     auto config = Config::Instance();
     if (!config)
-        return true;
-    return config->XeMfgUnlock.value_or(true);
+        return false;
+    return config->XeMfgUnlock.value_or_default();
 }
 
 bool Pending()
