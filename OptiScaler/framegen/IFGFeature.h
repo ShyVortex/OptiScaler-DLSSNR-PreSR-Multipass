@@ -132,6 +132,7 @@ class IFGFeature
     bool IsJitteredMVs();
     bool IsInvertedDepth();
     bool IsInfiniteDepth();
+    virtual bool IsPassthrough() const { return false; }
 
     void SetFrameCount(UINT64 frameId);
     void SetJitter(float x, float y, int index = -1);

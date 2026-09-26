@@ -81,5 +81,5 @@ class XeFG_Dx12 : public virtual IFGFeature_Dx12
 
     // Inherited via IFGFeature_Dx12
     bool SetInterpolatedFrameCount(UINT interpolatedFrameCount) override;
-    bool IsPassthrough() const { return _passthrough; }
+    bool IsPassthrough() const override { return _passthrough; }
 };
