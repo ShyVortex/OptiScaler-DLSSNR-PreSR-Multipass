@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "SysUtils.h"
 #include "Util.h"
@@ -11,6 +11,7 @@
 #include <xefg_swapchain.h>
 #include <xefg_swapchain_d3d12.h>
 #include <xefg_swapchain_debug.h>
+#include <framegen/xefg/XeMfgLoader.h>
 
 #pragma comment(lib, "Version.lib")
 
@@ -255,6 +256,10 @@ class XeFGProxy
 
         bool loadResult = _xefgSwapChainGetVersion != nullptr;
         LOG_INFO("LoadResult: {}", loadResult);
+
+        if (loadResult && _dll != nullptr)
+            XeMfgLoader::TryApply(_dll);
+
         return loadResult;
     }
 

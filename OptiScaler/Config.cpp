@@ -357,6 +357,21 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGXeFGHighResMV.set_from_config(readBool("XeFG", "HighResMV"));
             FGXeFGDebugView.set_from_config(readBool("XeFG", "DebugView"));
             FGXeFGForceBorderless.set_from_config(readBool("XeFG", "ForceBorderless"));
+
+            // XeMFG Unlock
+            XeMfgUnlock.set_from_config(readBool("XeMFG", "UnlockMFG"));
+            if (!XeMfgUnlock.has_value())
+                XeMfgUnlock.set_from_config(readBool("XeFG", "UnlockMFG"));
+
+            XeMfgMaxFrames.set_from_config(readInt("XeMFG", "MaxInterpolatedFrames"));
+            if (!XeMfgMaxFrames.has_value())
+                XeMfgMaxFrames.set_from_config(readInt("XeFG", "MaxInterpolatedFrames"));
+            if (XeMfgMaxFrames.has_value() && (XeMfgMaxFrames.value() < 1 || XeMfgMaxFrames.value() > 5))
+                XeMfgMaxFrames.reset();
+
+            XeMfgExtraPacing.set_from_config(readBool("XeMFG", "ExtraPacing"));
+            if (!XeMfgExtraPacing.has_value())
+                XeMfgExtraPacing.set_from_config(readBool("XeFG", "ExtraPacing"));
         }
 
         {
@@ -1258,6 +1273,14 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("XeFG", "DebugView", GetBoolValue(Instance()->FGXeFGDebugView.value_for_config()).c_str());
         ini.SetValue("XeFG", "ForceBorderless",
                      GetBoolValue(Instance()->FGXeFGForceBorderless.value_for_config()).c_str());
+    }
+
+    // XeMFG Unlock
+    {
+        ini.SetValue("XeMFG", "UnlockMFG", GetBoolValue(Instance()->XeMfgUnlock.value_for_config()).c_str());
+        ini.SetValue("XeMFG", "MaxInterpolatedFrames",
+                     GetIntValue(Instance()->XeMfgMaxFrames.value_for_config()).c_str());
+        ini.SetValue("XeMFG", "ExtraPacing", GetBoolValue(Instance()->XeMfgExtraPacing.value_for_config()).c_str());
     }
 
     {

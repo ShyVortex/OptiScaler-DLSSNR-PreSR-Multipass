@@ -101,12 +101,13 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
     }
 
     constexpr T value_or_default() &&
-        requires(defaultState != NoDefault) {
-            return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
-        }
+        requires(defaultState != NoDefault)
+    {
+        return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
+    }
 
-        constexpr std::optional<T> value_for_config()
-            requires(defaultState == WithDefault)
+    constexpr std::optional<T> value_for_config()
+        requires(defaultState == WithDefault)
     {
         if (_volatile)
         {
@@ -745,6 +746,11 @@ class Config
     CustomOptional<bool> FGXeFGHighResMV { false };
     CustomOptional<bool> FGXeFGDebugView { false };
     CustomOptional<bool> FGXeFGForceBorderless { false };
+
+    // XeMFG Unlock
+    CustomOptional<bool> XeMfgUnlock { true };
+    CustomOptional<int> XeMfgMaxFrames { 3 };
+    CustomOptional<bool> XeMfgExtraPacing { true };
 
     // DLSSG
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance
