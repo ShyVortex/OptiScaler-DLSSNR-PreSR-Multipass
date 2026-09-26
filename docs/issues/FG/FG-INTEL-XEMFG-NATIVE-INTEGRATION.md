@@ -168,3 +168,42 @@ The plugin applies 5 distinct memory patches to `.text` in `libxess_fg.dll`:
    - All modified and new `.cpp` and `.h` files format cleanly with zero `clang-format --dry-run --Werror` violations.
    - UTF-8 BOM (`\xef\xbb\xbf`) preserved across all modified files.
 
+---
+
+## 7. Field Test Verification: Resident Evil Requiem (Windows 11, RTX 3080 Ti)
+
+### 7.1 Symptoms Observed
+During end-to-end testing in *Resident Evil Requiem* on Windows 11 with an NVIDIA RTX 3080 Ti Laptop GPU (`0x170` Ampere architecture), `XeMfgLoader` applied all 5 patches to `libxess_fg.dll` successfully (`DLL: found | Patches: active (5/5) | Pacing: verified`), but the in-game Frame Generation option (`Generazione dei frame`) remained locked to "No" with arrow selectors disabled.
+
+### 7.2 Root Cause Analysis from Game Logs
+Inspection of `OptiScaler.log` revealed three critical gating failures:
+1. **Pipeline Default State**:
+   - `Config::FGInput` and `Config::FGOutput` were set to `NoFG` (`Frame Generation: None / None`).
+   - Sideloading external FG proxies previously set `externalFrameGeneration = true`, but native XeMFG runs internally. Because `FGOutput` was not set, `FGHooks::CreateSwapChainForHwnd` failed with `Can't init FG Feature or invalid FGOutput setting!`.
+2. **Streamline Interposer Feature Interrogation Detachment**:
+   - `Streamline_Hooks.cpp` attached `slIsFeatureSupported`, `slIsFeatureLoaded`, `slGetFeatureRequirements`, `slGetFeatureVersion`, and `slGetFeatureFunction` only when `activeFgInput == FGInput::DLSSG || ampereMfgActive`.
+   - With `activeFgInput == NoFG` and `ampereMfgActive == false`, none of these hooks were attached.
+3. **NVIDIA NGX Feature 11 Rejection**:
+   - Streamline queried native NGX via `GetFeatureRequirements` for Feature 11 (`NVSDK_NGX_Feature_FrameGeneration`).
+   - Native NGX returned `0xbad00001 (AdapterUnsupported)` because the RTX 3080 Ti is Ampere (`0x170` < Ada `0x190`).
+   - Consequently, Streamline disabled DLSS-G: `Disabling DLSS-G since it is not supported on current hardware; Ignoring plugin 'sl.dlss_g' since it is not supported on this platform; slValidateFeatureContext: 'kFeatureDLSS_G' context is missing`.
+4. **Streamline State Synthesis & Native Forwarding Trap**:
+   - When OptiScaler replaces DLSS-G input (`activeFgInput == FGInput::DLSSG`), `sl.dlss_g.dll` is omitted or uninitialized.
+   - Invoking `o_slDLSSGGetState` or `o_slDLSSGSetOptions` directly causes null pointer dereferences or returns `eErrorFeatureMissing`, rejecting game option changes.
+
+### 7.3 Resolution Applied
+1. **Auto-Configuration on Startup (`dllmain.cpp`)**:
+   - When `XeMfgUnlock` is enabled and `!externalFrameGeneration`, OptiScaler automatically configures:
+     `FGEnabled = true`, `FGInput = FGInput::DLSSG`, `FGOutput = FGOutput::XeFG`, and `FGNvngxReplacement = None`.
+2. **NGX Feature 11 Interception (`NVNGX_Proxy.h`)**:
+   - Hooked `GetFeatureRequirements` for Feature 11 across DX12, DX11, and Vulkan to report `Supported`, `MinHWArchitecture = 0`, and `MinOSVersion = 10.0.10240.16384` whenever `xeMfgActive || activeFgInput == FGInput::DLSSG`.
+3. **Streamline Interposer Hook Attachment & Spoofing (`Streamline_Hooks.cpp`)**:
+   - Extended `hkslIsFeatureSupported`, `hkslIsFeatureLoaded`, `hkslGetFeatureRequirements`, `hkslGetFeatureVersion`, and `hkslGetFeatureFunction` attachment guards to include `xeMfgActive`.
+   - Added `xeMfgActive` to `shouldSpoofArch` during plugin loading to spoof Ada architecture to `sl.dlss_g.dll` and bypass hardware scheduling requirements.
+4. **Synthetic DLSSG State & Safe Options Handlers (`Streamline_Hooks.cpp`)**:
+   - `hkslDLSSGGetState`: When `activeFgInput == FGInput::DLSSG || o_slDLSSGGetState == nullptr`, directly returns `sl::Result::eOk` with `status = eOk`, `bIsVsyncSupportAvailable = eTrue`, `bIsDynamicMFGSupported = eTrue`, and `numFramesToGenerateMax = XeMfgLoader::EffectiveMax(1)`.
+   - `hkslDLSSGSetOptions`: Safely skips `o_slDLSSGSetOptions` when `activeFgInput == FGInput::DLSSG`, applies the multiplier to `currentFG->SetInterpolatedFrameCount()`, updates `state.dlssgDetectedInterpolationCount`, sets `FGXeFGInterpolationCount`, and syncs Reflex pacing.
+5. **NGX Parameter Advertising (`NVNGX_Parameter.cpp`)**:
+   - Included `xeMfgActive` in advertising `FrameGeneration.Available = 1`, `DLSSG.Available = 1`, and `DLSSG.MultiFrameCountMax = XeMfgLoader::EffectiveMax(1)`.
+
+
