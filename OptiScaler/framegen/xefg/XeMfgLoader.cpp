@@ -272,6 +272,7 @@ bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrame
         if (VerifyBytes(baseAddress + kRvaPacingGate, pacingExpected))
         {
             outStatus.PacingInstalled = true;
+            outStatus.VerifiedPacing = true;
             LOG_INFO("XeMFG unlock: burst frame pacing capability verified");
         }
     }
@@ -280,11 +281,15 @@ bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrame
     if (!TransactionalWrite(patches, outStatus))
     {
         LOG_ERROR("XeMFG unlock: transactional write failed, initiating complete rollback");
+        outStatus.ErrorMessage = "Memory protection or write failed";
         TransactionalRollback(patches, outStatus);
+        if (outStatus.RollbackFailed)
+            outStatus.ErrorMessage = "Rollback failed";
         return false;
     }
 
     outStatus.Patched = (outStatus.PatchesApplied == 5);
+    outStatus.Applied = outStatus.Patched;
     g_appliedRecords = patches;
     return outStatus.Patched;
 }
@@ -296,8 +301,46 @@ void RollbackMemory(uint8_t* baseAddress, Status& outStatus)
 
     TransactionalRollback(g_appliedRecords, outStatus);
     outStatus.Patched = false;
+    outStatus.Applied = false;
     outStatus.PatchesApplied = 0;
     g_appliedRecords.clear();
+}
+
+void SetMaxGeneratedFrames(unsigned int maxFrames)
+{
+    std::scoped_lock lock(g_mutex);
+    uint32_t clamped = std::clamp(maxFrames, 1u, kMaxSupportedFrames);
+    g_status.ConfiguredCeiling = clamped;
+
+    if (g_applied && !g_appliedRecords.empty())
+    {
+        uint8_t frameByte = static_cast<uint8_t>(clamped);
+        for (auto& rec : g_appliedRecords)
+        {
+            if (!rec.address || !rec.applied)
+                continue;
+
+            size_t byteOffset = 0;
+            if (strcmp(rec.name, "U3/default-ceiling") == 0)
+                byteOffset = 1;
+            else if (strcmp(rec.name, "U4/override-clamp") == 0)
+                byteOffset = 6;
+            else if (strcmp(rec.name, "U5/reported-maximum") == 0)
+                byteOffset = 1;
+            else
+                continue;
+
+            DWORD oldProtect = 0;
+            if (VirtualProtect(rec.address, rec.replacement.size(), PAGE_EXECUTE_READWRITE, &oldProtect))
+            {
+                rec.address[byteOffset] = frameByte;
+                rec.replacement[byteOffset] = frameByte;
+                DWORD restoredProtect = 0;
+                VirtualProtect(rec.address, rec.replacement.size(), oldProtect, &restoredProtect);
+                FlushInstructionCache(GetCurrentProcess(), rec.address, rec.replacement.size());
+            }
+        }
+    }
 }
 
 void TryApply(HMODULE module)

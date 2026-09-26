@@ -9,12 +9,15 @@ struct Status
 {
     bool ModuleFound = false;           // libxess_fg.dll or igxess_fg.dll was located
     bool Patched = false;               // all required unlock patches applied
+    bool Applied = false;               // alias for Patched
     unsigned int PatchesApplied = 0;    // count of applied patches (0..5)
     bool PacingInstalled = false;       // extra presentation pacing installed
+    bool VerifiedPacing = false;        // alias for PacingInstalled
     bool PatchFailed = false;           // memory protection or write operation failed
     bool RollbackFailed = false;        // at least one original byte state could not be restored
     unsigned int ConfiguredCeiling = 3; // configured max frames (1..5)
     std::string ModuleVersion;          // file version of libxess_fg.dll
+    std::string ErrorMessage;           // optional failure reason
 };
 
 enum class Failure
@@ -26,6 +29,7 @@ enum class Failure
 
 Status LastStatus();
 bool EnabledForSession();
+inline bool IsEnabled() { return EnabledForSession(); }
 bool Pending();
 
 // The generated frame ceiling the patches unlocked, or 1 when unpatched/stock
@@ -36,6 +40,9 @@ unsigned int EffectiveMax(unsigned int nativeMaximum = 1);
 
 // Applies the 5 patches and optional pacing hooks to libxess_fg.dll / igxess_fg.dll
 void TryApply(HMODULE module = nullptr);
+
+// Dynamically sets the max generated frames ceiling
+void SetMaxGeneratedFrames(unsigned int maxFrames);
 
 Failure LastFailure();
 
