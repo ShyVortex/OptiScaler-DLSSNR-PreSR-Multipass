@@ -263,15 +263,15 @@ int main()
         assert(DetectModVariant("", &name) == ModVariant::Unknown && name == "Unknown");
         assert(DetectModVariant("non_existent_dll.dll", &name) == ModVariant::Unknown && name == "Unknown");
 
-        // 10b: Synthetic SilyNoMeta v0.3.5-4
-        auto silyV0354Dll = tempDir / "sily_0354.dll";
+        // 10b: Synthetic SilyNoMeta v0.3.5-5
+        auto silyV0355Dll = tempDir / "sily_0355.dll";
         {
-            std::ofstream f(silyV0354Dll, std::ios::binary);
+            std::ofstream f(silyV0355Dll, std::ios::binary);
             f << "MZ\x90\x00\x03\x00\x00\x00";
-            f << "Control engine v0.3.5-4 integrated in the proxy; optional panel is independent.";
+            f << "Control engine v0.3.5-5 integrated in the proxy; optional panel is independent.";
         }
-        assert(DetectModVariant(silyV0354Dll, &name) == ModVariant::SilyNoMeta);
-        assert(name == "SilyNoMeta v0.3.5-4");
+        assert(DetectModVariant(silyV0355Dll, &name) == ModVariant::SilyNoMeta);
+        assert(name == "SilyNoMeta v0.3.5-5");
 
         // 10c: Synthetic sdli1995 with DlssgProxy exports
         auto sdliSynthDll = tempDir / "sdli_synth.dll";
@@ -283,7 +283,7 @@ int main()
         assert(DetectModVariant(sdliSynthDll, &name) == ModVariant::Sdli1995);
         assert(name == "sdli1995");
 
-        std::filesystem::remove(silyV0354Dll);
+        std::filesystem::remove(silyV0355Dll);
         std::filesystem::remove(sdliSynthDll);
         std::filesystem::remove_all(tempDir);
 

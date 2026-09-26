@@ -6,7 +6,7 @@ on:
       version:
         description: 'Package Version Tag'
         required: true
-        default: 'v0.9.31'
+        default: 'v0.9.32'
         type: string
       include_ampere_mfg:
         description: 'Include RTX 20/30 (SM75/SM86) MFG (dlssg_sm86.dll)'
@@ -59,8 +59,8 @@ jobs:
             Write-Host "dlssg_for_sm86 not found in working copy; cloning from SilyNoMeta fork..."
             git init dlssg_for_sm86
             git -C dlssg_for_sm86 remote add origin https://github.com/SilyNoMeta/dlssg_for_sm86.git
-            git -C dlssg_for_sm86 fetch --depth 1 origin tags/v0.3.5-4
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.3.5-4 runtime' }
+            git -C dlssg_for_sm86 fetch --depth 1 origin tags/v0.3.5-5
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.3.5-5 runtime' }
             git -C dlssg_for_sm86 checkout --detach FETCH_HEAD
         }
         if (-not (Test-Path "dlssg_for_sm86\version.dll")) {

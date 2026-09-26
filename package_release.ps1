@@ -10,7 +10,7 @@
 
 param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
-    [string]$Version = "v0.9.31",
+    [string]$Version = "v0.9.32",
     [switch]$SkipBuild,
     [switch]$IncludeDlssFrameGeneration,
     [switch]$AcceptNvidiaLicenses,
@@ -300,7 +300,7 @@ if ($IncludeAmpereMfg) {
         $sm86Dll = "$sm86Src\version.dll"
     }
     if ($UpdateAmpereMfg -or (-not (Test-Path -LiteralPath $sm86Dll))) {
-        Write-Host "Acquiring verified SM75/SM86 0.3.5-4 runtime from SilyNoMeta fork..."
+        Write-Host "Acquiring verified SM75/SM86 0.3.5-5 runtime from SilyNoMeta fork..."
         if (-not (Test-Path -LiteralPath $sm86Src)) {
             New-Item -ItemType Directory -Force -Path $sm86Src | Out-Null
         }
@@ -310,8 +310,8 @@ if ($IncludeAmpereMfg) {
         } else {
             git -C $sm86Src remote set-url origin https://github.com/SilyNoMeta/dlssg_for_sm86.git
         }
-        git -C $sm86Src fetch --depth 1 origin tags/v0.3.5-4
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.3.5-4 runtime from SilyNoMeta fork' }
+        git -C $sm86Src fetch --depth 1 origin tags/v0.3.5-5
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.3.5-5 runtime from SilyNoMeta fork' }
         git -C $sm86Src checkout --detach FETCH_HEAD
     }
     if (-not (Test-Path -LiteralPath $sm86Dll)) {
