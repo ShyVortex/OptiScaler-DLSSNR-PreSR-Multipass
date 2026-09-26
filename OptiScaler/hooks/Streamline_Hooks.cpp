@@ -15,6 +15,7 @@
 #include <menu/menu_overlay_base.h>
 #include <framegen/nvngx/Nvngx_FG.h>
 #include <framegen/dlssg/MfgUnlock.h>
+#include <framegen/xefg/XeMfgLoader.h>
 #include <proxies/KernelBase_Proxy.h>
 #include <imgui/ImGuiNotify.hpp>
 
@@ -1189,12 +1190,43 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                 newOptions.mode = sl::DLSSGMode::eOn;
         }
 #endif
+        if (state.activeFgOutput == FGOutput::XeFG)
+        {
+            const auto xeFailure = XeMfgLoader::LastFailure();
+            if (xeFailure == XeMfgLoader::Failure::RollbackFailed)
+            {
+                newOptions.mode = sl::DLSSGMode::eOff;
+            }
+            else if (xeFailure == XeMfgLoader::Failure::PatchFailed)
+            {
+                newOptions.numFramesToGenerate = 1;
+                if (newOptions.mode == sl::DLSSGMode::eDynamic)
+                    newOptions.mode = sl::DLSSGMode::eOn;
+            }
+        }
         const auto result = o_slDLSSGSetOptions(viewport, newOptions);
         if (result == sl::Result::eOk)
         {
             state.dlssgLastSetMode = newOptions.mode;
             ReflexHooks::setDlssgFrameCount(newOptions.mode == sl::DLSSGMode::eOff ? 0
                                                                                    : newOptions.numFramesToGenerate);
+
+            if (state.activeFgOutput == FGOutput::XeFG)
+            {
+                if (newOptions.mode == sl::DLSSGMode::eOff)
+                {
+                    if (state.currentFG != nullptr)
+                        state.currentFG->SetInterpolatedFrameCount(0);
+                    state.dlssgDetectedInterpolationCount = 0;
+                }
+                else
+                {
+                    if (state.currentFG != nullptr)
+                        state.currentFG->SetInterpolatedFrameCount(newOptions.numFramesToGenerate);
+                    state.dlssgDetectedInterpolationCount = newOptions.numFramesToGenerate;
+                    Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(newOptions.numFramesToGenerate);
+                }
+            }
             // The runtime can accept native/safety options while individual UI
             // overrides remain unapplied. Acknowledge only a fully applied request.
             const bool requestedActive =
@@ -1263,6 +1295,10 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 #if defined(OPTISCALER_RTX40_MFG)
         state.dlssgMfgMax = static_cast<int>(MfgUnlock::EffectiveMax(std::max(0, state.dlssgMfgMax.value_or(0))));
 #endif
+        if (state.activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+        {
+            state.dlssgMfgMax = static_cast<int>(XeMfgLoader::EffectiveMax(std::max(0, state.dlssgMfgMax.value_or(0))));
+        }
 
         // Do not issue an extra GetState here: it consumes the runtime's
         // numFramesActuallyPresented delta. Capability is learned from the
@@ -1366,6 +1402,10 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
 #if defined(OPTISCALER_RTX40_MFG)
     optiState.dlssgMfgMax = static_cast<int>(MfgUnlock::EffectiveMax(optiState.dlssgMfgMax.value_or(0)));
 #endif
+    if (optiState.activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+    {
+        optiState.dlssgMfgMax = static_cast<int>(XeMfgLoader::EffectiveMax(optiState.dlssgMfgMax.value_or(0)));
+    }
 
     if (optiState.activeFgInput == FGInput::DLSSG)
     {
@@ -1392,7 +1432,12 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
 
         // Struct version 1 ends at 56 bytes, ahead of this field.
         if (originalStructVersion >= 2)
-            state.numFramesToGenerateMax = 1;
+        {
+            if (optiState.activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+                state.numFramesToGenerateMax = XeMfgLoader::EffectiveMax(1);
+            else
+                state.numFramesToGenerateMax = 1;
+        }
 
         LOG_DEBUG("Status: {}, numFramesActuallyPresented: {}", magic_enum::enum_name(state.status),
                   state.numFramesActuallyPresented);
