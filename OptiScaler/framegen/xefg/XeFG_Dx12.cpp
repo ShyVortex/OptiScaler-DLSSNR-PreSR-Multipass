@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "XeFG_Dx12.h"
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
@@ -675,11 +675,15 @@ void XeFG_Dx12::Deactivate()
             auto closeResult = _uiCommandList[fIndex]->Close();
 
             if (closeResult == S_OK)
-                _gameCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**) &_uiCommandList[fIndex]);
+            {
+                if (_gameCommandQueue != nullptr && _uiCommandList[fIndex] != nullptr)
+                    _gameCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**) &_uiCommandList[fIndex]);
+            }
             else
                 LOG_ERROR("_uiCommandList[{}]->Close() error: {:X}", fIndex, (UINT) closeResult);
 
-            _gameCommandQueue->Signal(_uiFence, _uiAllocatorFenceValues[fIndex]);
+            if (_gameCommandQueue != nullptr && _uiFence != nullptr)
+                _gameCommandQueue->Signal(_uiFence, _uiAllocatorFenceValues[fIndex]);
 
             _uiCommandListResetted[fIndex] = false;
         }
@@ -1034,7 +1038,62 @@ void* XeFG_Dx12::SwapchainContext() { return _swapChainContext; }
 
 XeFG_Dx12::~XeFG_Dx12() { Shutdown(); }
 
-bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount) { return true; }
+bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
+{
+    LOG_INFO("XeFG SetInterpolatedFrameCount called with count: {}", interpolatedFrameCount);
+
+    if (interpolatedFrameCount == 0)
+    {
+        _passthrough = true;
+        _framesToInterpolate = 0;
+
+        if (_swapChainContext != nullptr && XeFGProxy::SetEnabled() != nullptr)
+        {
+#ifndef DONT_USE_XMX
+            ScopedSkipSpoofingGlobal skipSpoofingGlobal {};
+#endif
+            auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
+            LOG_DEBUG("XeFG SetEnabled(false) result: {} ({})", magic_enum::enum_name(result), (UINT) result);
+        }
+
+        return true;
+    }
+
+    _passthrough = false;
+
+    if (_maxInterpolationCount > 0 && interpolatedFrameCount > _maxInterpolationCount)
+    {
+        LOG_WARN("Requested interpolation count {} exceeds max supported {}, clamping", interpolatedFrameCount,
+                 _maxInterpolationCount);
+        interpolatedFrameCount = _maxInterpolationCount;
+    }
+
+    if (_framesToInterpolate != interpolatedFrameCount)
+    {
+        _framesToInterpolate = interpolatedFrameCount;
+
+        if (_swapChainContext != nullptr)
+        {
+#ifndef DONT_USE_XMX
+            ScopedSkipSpoofingGlobal skipSpoofingGlobal {};
+#endif
+            if (XeFGProxy::SetEnabled() != nullptr)
+                XeFGProxy::SetEnabled()(_swapChainContext, true);
+
+            if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
+            {
+                auto intResult = XeFGProxy::SetNumInterpolatedFrames()(_swapChainContext, interpolatedFrameCount);
+                if (intResult != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+                {
+                    LOG_ERROR("XeFG SetNumInterpolatedFrames error: {} ({})", magic_enum::enum_name(intResult),
+                              (UINT) intResult);
+                }
+            }
+        }
+    }
+
+    return true;
+}
 
 void XeFG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
 {
@@ -1269,6 +1328,12 @@ void XeFG_Dx12::CreateObjects(ID3D12Device* InDevice)
 
 bool XeFG_Dx12::Present()
 {
+    if (_passthrough)
+    {
+        LOG_DEBUG("XeFG is in passthrough mode, presenting base frame without interpolation");
+        return true;
+    }
+
     auto fIndex = GetIndexWillBeDispatched();
     LOG_DEBUG("fIndex: {}", fIndex);
 
