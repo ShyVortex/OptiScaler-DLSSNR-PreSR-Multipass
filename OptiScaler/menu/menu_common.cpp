@@ -3710,11 +3710,26 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             // In-game multiplier status
             int liveMultiplier = state.dlssgDetectedInterpolationCount;
+            if (liveMultiplier <= 0 && state.currentFG != nullptr && !state.currentFG->IsPassthrough())
+            {
+                liveMultiplier = static_cast<int>(state.currentFG->GetInterpolatedFrameCount());
+            }
+            if (liveMultiplier <= 0 && state.dlssgLastSetMode != sl::DLSSGMode::eOff &&
+                config->FGXeFGInterpolationCount.has_value() && config->FGXeFGInterpolationCount.value() > 0)
+            {
+                liveMultiplier = config->FGXeFGInterpolationCount.value();
+            }
+
             if (liveMultiplier > 0)
             {
                 ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
                                    liveMultiplier + 1);
                 ShowHelpMarker("Multiplier selected by the game engine or Streamline options call.");
+            }
+            else if (state.dlssgLastSetMode == sl::DLSSGMode::eOff)
+            {
+                ImGui::TextDisabled("In-Game Multiplier: Off (Disabled in-game)");
+                ShowHelpMarker("Frame generation is currently set to Off in the game's display settings.");
             }
             else
             {
@@ -4916,11 +4931,14 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
             ShowHelpMarker("Set XeFG interpolation count");
         }
 
-        if (state.activeFgInput == FGInput::DLSSG && state.dlssgDetectedInterpolationCount > 0)
+        int liveDetected = state.dlssgDetectedInterpolationCount;
+        if (liveDetected <= 0 && fgOutput != nullptr && !fgOutput->IsPassthrough())
+            liveDetected = static_cast<int>(fgOutput->GetInterpolatedFrameCount());
+
+        if (state.activeFgInput == FGInput::DLSSG && liveDetected > 0)
         {
             ImGui::SameLine(0.0f, 16.0f);
-            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "[In-Game: %dX]",
-                               state.dlssgDetectedInterpolationCount + 1);
+            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "[In-Game: %dX]", liveDetected + 1);
         }
 
         ImGui::SameLine(0.0f, 16.0f);

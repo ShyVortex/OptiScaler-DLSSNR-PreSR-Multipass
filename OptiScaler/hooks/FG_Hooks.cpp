@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include <dlssnr/DlssNr.h>
 #include "FG_Hooks.h"
 #include <Config.h>
@@ -1194,7 +1194,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
 
     sl::FrameToken* localToken = nullptr;
     sl::Result tokenResult = sl::Result::eErrorReflexAPI;
-    if (willPresent && fg != nullptr && !fgFeatureActive)
+    if (willPresent && fg != nullptr && !fgFeatureActive && state.activeFgOutput == FGOutput::DLSSG)
         state.dlssgDetectedInterpolationCount = 0;
 
     if (willPresent && fgFeatureActive && state.activeFgOutput == FGOutput::DLSSG)

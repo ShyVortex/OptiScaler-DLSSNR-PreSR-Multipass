@@ -1221,6 +1221,7 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                     if (state.currentFG != nullptr)
                         state.currentFG->SetInterpolatedFrameCount(0);
                     state.dlssgDetectedInterpolationCount = 0;
+                    LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is eOff, XeFG count set to 0 (passthrough)");
                 }
                 else
                 {
@@ -1228,6 +1229,9 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                         state.currentFG->SetInterpolatedFrameCount(newOptions.numFramesToGenerate);
                     state.dlssgDetectedInterpolationCount = newOptions.numFramesToGenerate;
                     Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(newOptions.numFramesToGenerate);
+                    LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is {}, numFramesToGenerate: {} ({}X FG)",
+                             magic_enum::enum_name(newOptions.mode), newOptions.numFramesToGenerate,
+                             newOptions.numFramesToGenerate + 1);
                 }
             }
             // The runtime can accept native/safety options while individual UI
