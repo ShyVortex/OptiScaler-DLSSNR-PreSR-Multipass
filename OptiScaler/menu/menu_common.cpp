@@ -5,6 +5,7 @@
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/xefg/XeMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 #include <nvapi/NvApiHooks.h>
 
@@ -3187,6 +3188,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& primaryGpu = *ctx.primaryGpu;
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    const bool xeActive = config->XeMfgUnlock.value_or_default();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
@@ -3223,7 +3225,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
     const bool isAda = primaryGpu.vendorId == VendorId::Nvidia &&
                        primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_AD100;
-    const bool disableAda = !isAda || ampereActive || state.externalFrameGeneration;
+    const bool disableAda = !isAda || ampereActive || xeActive || state.externalFrameGeneration;
 
     if (disableAda)
     {
@@ -3239,6 +3241,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("Disabled because the Ampere (RTX 30) SM86 MFG unlock is active.\n"
                            "Disable AmpereMfgUnlock first, Save Settings and restart.");
         }
+        else if (xeActive)
+        {
+            ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
+                           "Disable XeMfgUnlock first, Save Settings and restart.");
+        }
         else
         {
             ShowHelpMarker("Disabled because External frame generation is active.\n"
@@ -3253,6 +3260,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (adaUnlock)
             {
                 config->FGDLSSGAmpereMfgUnlock = false;
+                config->XeMfgUnlock = false;
                 config->FGDLSSGSmoothMotion = false;
                 NvApiHooks::ApplySmoothMotionDrs(false);
             }
@@ -3296,15 +3304,23 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         bool ampereUnlock = config->FGDLSSGAmpereMfgUnlock.value_or_default();
 
-        // Mutual exclusion: disable if Ada is already enabled
+        // Mutual exclusion: disable if Ada or XeMFG is already enabled
         const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-        if (adaActive)
+        if (adaActive || xeActive)
         {
             ImGui::BeginDisabled();
             ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock);
             ImGui::EndDisabled();
-            ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
-                           "Disable AdaMfgUnlock first, Save Settings and restart.");
+            if (adaActive)
+            {
+                ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
+                               "Disable AdaMfgUnlock first, Save Settings and restart.");
+            }
+            else
+            {
+                ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
+                               "Disable XeMfgUnlock first, Save Settings and restart.");
+            }
         }
         else
         {
@@ -3315,6 +3331,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     config->ExternalFrameGeneration = true;
                     config->FGDLSSGAdaMfgUnlock = false;
+                    config->XeMfgUnlock = false;
                     config->FGDLSSGSmoothMotion = false;
                     NvApiHooks::ApplySmoothMotionDrs(false);
                     AmpereMfgLoader::ProbeCandidate(true);
@@ -3621,13 +3638,128 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::Unindent();
     }
 
+    // ── Intel Xe Multi-Frame Generation (XeMFG) Unlock ──────────────
+    if (ImGui::CollapsingHeader("Intel Xe Multi-Frame Generation (XeMFG)"))
+    {
+        ImGui::Indent();
+
+        bool xeUnlock = config->XeMfgUnlock.value_or_default();
+
+        // Mutual exclusion: disable if Ada or Ampere is already active
+        const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
+        const bool disableXeMfg = adaActive || ampereActive;
+
+        if (disableXeMfg)
+        {
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("Enable XeMFG Unlocker (Multi-Frame Generation; restart)##xemfg", &xeUnlock);
+            ImGui::EndDisabled();
+            if (adaActive)
+            {
+                ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
+                               "Disable AdaMfgUnlock first, Save Settings and restart.");
+            }
+            else
+            {
+                ShowHelpMarker("Disabled because the Ampere (SM86) MFG unlock is active.\n"
+                               "Disable AmpereMfgUnlock first, Save Settings and restart.");
+            }
+        }
+        else
+        {
+            if (ImGui::Checkbox("Enable XeMFG Unlocker (Multi-Frame Generation; restart)##xemfg", &xeUnlock))
+            {
+                config->XeMfgUnlock = xeUnlock;
+                if (xeUnlock)
+                {
+                    config->FGDLSSGAdaMfgUnlock = false;
+                    config->FGDLSSGAmpereMfgUnlock = false;
+                    config->FGDLSSGSmoothMotion = false;
+                    NvApiHooks::ApplySmoothMotionDrs(false);
+                }
+            }
+            ShowHelpMarker("Natively unlocks Intel Xe Multi-Frame Generation (XeMFG) in libxess_fg.dll.\n"
+                           "Allows 3X, 4X, 5X, and 6X frame generation across Intel, AMD, and NVIDIA GPUs.\n"
+                           "When FG Input is set to DLSSG (Streamline) or OptiFG and FG Output is XeFG,\n"
+                           "in-game multiplier options are fully unlocked and routed to XeFG.\n"
+                           "Provides native Multi-Frame Generation on Linux (Proton/VKD3D) without 2X fallbacks.\n"
+                           "Save Settings and restart after changing.");
+        }
+
+        if (xeUnlock)
+        {
+            const auto& status = XeMfgLoader::LastStatus();
+
+            // Status display
+            if (!status.ErrorMessage.empty())
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s",
+                                   status.ErrorMessage.c_str());
+            }
+            else
+            {
+                std::string pacingStr = status.VerifiedPacing ? "verified" : "standard";
+                std::string patchStr =
+                    status.Applied
+                        ? "active (5/5)"
+                        : (status.PatchesApplied > 0 ? (std::to_string(status.PatchesApplied) + "/5") : "not applied");
+                ImGui::TextWrapped("DLL: %s | Patches: %s | Pacing: %s", status.ModuleFound ? "found" : "missing",
+                                   patchStr.c_str(), pacingStr.c_str());
+            }
+
+            // In-game multiplier status
+            int liveMultiplier = state.dlssgDetectedInterpolationCount;
+            if (liveMultiplier > 0)
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
+                                   liveMultiplier + 1);
+                ShowHelpMarker("Multiplier selected by the game engine or Streamline options call.");
+            }
+            else
+            {
+                ImGui::TextDisabled("In-Game Multiplier: Default / Unset");
+                ShowHelpMarker("In-game multiplier will be reported once the game's Streamline DLSS-G option is set.");
+            }
+
+            // MaxGeneratedFrames slider
+            int maxFrames = config->XeMfgMaxFrames.value_or(3);
+            const char* xeFrameLabels[] = { "1 (2X FG)", "2 (3X FG)", "3 (4X FG) [Default]", "4 (5X FG)", "5 (6X FG)" };
+            const char* currentLabel =
+                (maxFrames >= 1 && maxFrames <= 5) ? xeFrameLabels[maxFrames - 1] : xeFrameLabels[2];
+            if (ImGui::SliderInt("Max Generated Frames##xemfg", &maxFrames, 1, 5, currentLabel))
+            {
+                config->XeMfgMaxFrames = maxFrames;
+                if (XeMfgLoader::IsEnabled())
+                    XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(maxFrames));
+            }
+            ShowHelpMarker(
+                "Maximum generated frames advertised to the game engine via Streamline and allowed in XeFG.\n"
+                "1 = 2X FG (1 generated frame)\n"
+                "2 = 3X FG (2 generated frames)\n"
+                "3 = 4X FG (3 generated frames, default)\n"
+                "4 = 5X FG (4 generated frames)\n"
+                "5 = 6X FG (5 generated frames)\n"
+                "Save Settings and restart after changing.");
+
+            // Burst Frame Pacing (>2X) checkbox
+            bool extraPacing = config->XeMfgExtraPacing.value_or(true);
+            if (ImGui::Checkbox("Burst Frame Pacing (>2X)##xemfg", &extraPacing))
+                config->XeMfgExtraPacing = extraPacing;
+            ShowHelpMarker(
+                "Verifies burst presentation pacing anchors in libxess_fg.dll (RVAs 0x224cf0, 0x21ee30, 0x224b30).\n"
+                "Prevents jitter and pacing artifacts when generating 3X to 6X frames on VRR monitors.");
+        }
+
+        ImGui::Unindent();
+    }
+
     // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
     ImGui::Separator();
     bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
     const bool isAmpere = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_GA100);
     const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-    const bool fgConflict = ampereActive || adaActive || state.externalFrameGeneration;
+    const bool fgConflict = ampereActive || adaActive || xeActive || state.externalFrameGeneration;
     const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere) || fgConflict;
 
     if (disableSmoothMotion)
@@ -4781,6 +4913,13 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
             ImGui::PopItemWidth();
 
             ShowHelpMarker("Set XeFG interpolation count");
+        }
+
+        if (state.activeFgInput == FGInput::DLSSG && state.dlssgDetectedInterpolationCount > 0)
+        {
+            ImGui::SameLine(0.0f, 16.0f);
+            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "[In-Game: %dX]",
+                               state.dlssgDetectedInterpolationCount + 1);
         }
 
         ImGui::SameLine(0.0f, 16.0f);
