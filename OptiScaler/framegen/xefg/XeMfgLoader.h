@@ -11,6 +11,7 @@ struct Status
     bool Patched = false;               // all required unlock patches applied
     bool Applied = false;               // alias for Patched
     unsigned int PatchesApplied = 0;    // count of applied patches (0..5)
+    unsigned int PacingDetours = 0;     // count of applied pacing detours (0..3)
     bool PacingInstalled = false;       // extra presentation pacing installed
     bool VerifiedPacing = false;        // alias for PacingInstalled
     bool PatchFailed = false;           // memory protection or write operation failed

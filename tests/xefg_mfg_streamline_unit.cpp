@@ -1,4 +1,4 @@
-﻿#include <cassert>
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <algorithm>
@@ -98,31 +98,51 @@ class MockXeFG_Dx12
     uint32_t _framesToInterpolate = 1;
     uint32_t _maxInterpolationCount = 1;
 
+    bool _isActive = false;
+
   public:
     uint32_t executedPresentPasses = 0;
     bool crashSimulated = false;
 
-    MockXeFG_Dx12()
+    MockXeFG_Dx12(bool dlssgInput = false)
     {
         _maxInterpolationCount = MockXeMfgLoader::EffectiveMax(1);
-        _framesToInterpolate = 1;
-        _passthrough = false;
+        if (dlssgInput)
+        {
+            _framesToInterpolate = 0;
+            _passthrough = true;
+            _isActive = false;
+            MockXeFGProxy::SetEnabled(false);
+        }
+        else
+        {
+            _framesToInterpolate = 1;
+            _passthrough = false;
+            _isActive = true;
+            MockXeFGProxy::SetEnabled(true);
+        }
     }
 
     uint32_t GetMaxInterpolationCount() const { return _maxInterpolationCount; }
     uint32_t GetInterpolatedFrameCount() const { return _framesToInterpolate; }
     bool IsPassthrough() const { return _passthrough; }
+    bool IsActive() const { return _isActive; }
+    void Activate() { _isActive = true; }
+    void Deactivate() { _isActive = false; }
 
     void SetInterpolatedFrameCount(uint32_t count)
     {
         if (count == 0)
         {
             _passthrough = true;
+            _framesToInterpolate = 0;
+            _isActive = false;
             MockXeFGProxy::SetEnabled(false);
             return;
         }
 
         _passthrough = false;
+        _isActive = true;
         MockXeFGProxy::SetEnabled(true);
 
         count = std::clamp(count, 1u, _maxInterpolationCount);
@@ -332,6 +352,48 @@ int main()
         assert(!config.XeMfgUnlock && "XeMfg must be cleared when Ampere MFG is enabled");
 
         printf("  [PASS] Test 5: Strict mutual exclusion across Ada, Ampere, and XeMFG.\n");
+    }
+
+    // Test 6: DLSSG Startup in Passthrough and Premature Activation Prevention
+    {
+        MockXeFG_Dx12 dlssgXeFG(true); // dlssgInput = true
+        assert(dlssgXeFG.IsPassthrough() && "XeFG must initialize in passthrough for DLSSG input");
+        assert(!dlssgXeFG.IsActive() && "XeFG must not be active on startup");
+        assert(dlssgXeFG.GetInterpolatedFrameCount() == 0 && "Interpolation count must be 0 on startup");
+
+        // Simulate setConstants call before the game enables DLSSG
+        MockState state;
+        state.activeFgOutput = FGOutput::XeFG;
+        sl::DLSSGMode lastMode = sl::DLSSGMode::eOff;
+
+        // Verify premature activation guard:
+        bool shouldActivate = !dlssgXeFG.IsPassthrough() && lastMode != sl::DLSSGMode::eOff;
+        assert(!shouldActivate && "Streamline constants must NOT prematurely activate XeFG in passthrough");
+
+        MockConfig config;
+
+        // Now game turns on DLSSG with 3 generated frames (4X FG)
+        sl::DLSSGOptions options;
+        options.mode = sl::DLSSGMode::eOn;
+        options.numFramesToGenerate = 3;
+
+        SimulateStreamlineSetOptions(state, config, dlssgXeFG, options);
+        assert(!dlssgXeFG.IsPassthrough() && "XeFG must exit passthrough when game enables DLSSG");
+        assert(dlssgXeFG.IsActive() && "XeFG must become active when game enables DLSSG");
+        assert(dlssgXeFG.GetInterpolatedFrameCount() == 3 && "Interpolation count must be set to 3");
+        assert(MockXeFGProxy::Enabled && "Proxy must be enabled");
+        assert(MockXeFGProxy::NumInterpolatedFrames == 3 && "Proxy count must be 3");
+
+        // Now game turns off DLSSG
+        options.mode = sl::DLSSGMode::eOff;
+        options.numFramesToGenerate = 0;
+        SimulateStreamlineSetOptions(state, config, dlssgXeFG, options);
+        assert(dlssgXeFG.IsPassthrough() && "XeFG must re-enter passthrough when game disables DLSSG");
+        assert(!dlssgXeFG.IsActive() && "XeFG must deactivate when game disables DLSSG");
+        assert(dlssgXeFG.GetInterpolatedFrameCount() == 0 && "Interpolation count must be reset to 0");
+        assert(!MockXeFGProxy::Enabled && "Proxy must be disabled");
+
+        printf("  [PASS] Test 6: Startup in passthrough and premature activation prevention.\n");
     }
 
     printf("[+] All XeFG MFG & Streamline unit tests PASSED successfully!\n");

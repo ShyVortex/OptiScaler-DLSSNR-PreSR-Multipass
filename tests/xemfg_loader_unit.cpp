@@ -1,4 +1,4 @@
-﻿#include <cassert>
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -45,6 +45,13 @@ static const uint8_t U4_SIG[] = { 0xC7, 0x87, 0x6C, 0x01, 0x00, 0x00, 0x01, 0x00
                                   0x00, 0x00, 0xC6, 0x87, 0x68, 0x01, 0x00, 0x00 };
 static const uint8_t U5_SIG[] = { 0xB8, 0x01, 0x00, 0x00, 0x00, 0x89, 0x47, 0x20, 0x33, 0xC0, 0x48, 0x8B, 0x9C, 0x24 };
 
+static const uint8_t THUNK_GATE_ORIG[] = { 0xe9, 0x6b, 0xd1, 0x21, 0x00, 0xcc, 0xcc, 0xcc,
+                                           0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
+static const uint8_t THUNK_SCHED_ORIG[] = { 0xe9, 0x2b, 0xbd, 0x21, 0x00, 0xcc, 0xcc, 0xcc,
+                                            0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
+static const uint8_t THUNK_DEADLINE_ORIG[] = { 0xe9, 0xfb, 0x16, 0x22, 0x00, 0xcc, 0xcc, 0xcc,
+                                               0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
+
 static const uint8_t PACING_GATE_SIG[] = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74,
                                            0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20 };
 static const uint8_t PACING_SCHED_SIG[] = { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8 };
@@ -64,6 +71,8 @@ class SimulatedXeMfgEngine
     bool applied = false;
     bool lastFailure = false;
     uint32_t patchesApplied = 0;
+    uint32_t pacingDetours = 0;
+    bool pacingInstalled = false;
     bool verifiedPacing = false;
     uint32_t maxGeneratedFrames = 3;
     std::vector<PatchRecord> appliedRecords;
@@ -157,10 +166,40 @@ class SimulatedXeMfgEngine
 
         if (extraPacing)
         {
-            bool g1 = (FindSignature(baseAddress, imageSize, PACING_GATE_SIG, sizeof(PACING_GATE_SIG)) != nullptr);
-            bool g2 = (FindSignature(baseAddress, imageSize, PACING_SCHED_SIG, sizeof(PACING_SCHED_SIG)) != nullptr);
-            bool g3 = (FindSignature(baseAddress, imageSize, PACING_BURST_SIG, sizeof(PACING_BURST_SIG)) != nullptr);
-            verifiedPacing = (g1 && g2 && g3);
+            if (0x3430 + 16 <= imageSize && std::memcmp(baseAddress + 0x25c0, THUNK_GATE_ORIG, 16) == 0 &&
+                std::memcmp(baseAddress + 0x3100, THUNK_SCHED_ORIG, 16) == 0 &&
+                std::memcmp(baseAddress + 0x3430, THUNK_DEADLINE_ORIG, 16) == 0)
+            {
+                uint32_t thunkRvas[] = { 0x25c0, 0x3100, 0x3430 };
+                for (auto rva : thunkRvas)
+                {
+                    PatchRecord rec;
+                    rec.address = baseAddress + rva;
+                    rec.originalBytes.assign(baseAddress + rva, baseAddress + rva + 16);
+                    std::vector<uint8_t> thunkPatch(16, 0xcc);
+                    thunkPatch[0] = 0xff;
+                    thunkPatch[1] = 0x25;
+                    thunkPatch[2] = 0x00;
+                    thunkPatch[3] = 0x00;
+                    thunkPatch[4] = 0x00;
+                    thunkPatch[5] = 0x00;
+                    rec.patchedBytes = thunkPatch;
+                    std::memcpy(baseAddress + rva, thunkPatch.data(), 16);
+                    appliedRecords.push_back(rec);
+                }
+                pacingDetours = 3;
+                pacingInstalled = true;
+                verifiedPacing = true;
+            }
+            else
+            {
+                bool g1 = (FindSignature(baseAddress, imageSize, PACING_GATE_SIG, sizeof(PACING_GATE_SIG)) != nullptr);
+                bool g2 =
+                    (FindSignature(baseAddress, imageSize, PACING_SCHED_SIG, sizeof(PACING_SCHED_SIG)) != nullptr);
+                bool g3 =
+                    (FindSignature(baseAddress, imageSize, PACING_BURST_SIG, sizeof(PACING_BURST_SIG)) != nullptr);
+                verifiedPacing = (g1 && g2 && g3);
+            }
         }
 
         applied = true;
@@ -178,6 +217,9 @@ class SimulatedXeMfgEngine
         }
         appliedRecords.clear();
         patchesApplied = 0;
+        pacingDetours = 0;
+        pacingInstalled = false;
+        verifiedPacing = false;
         applied = false;
     }
 
@@ -206,6 +248,11 @@ static void PopulateValidImage(std::vector<uint8_t>& image)
     // U5 at 0x20973b
     std::memcpy(image.data() + 0x20973b, U5_SIG, sizeof(U5_SIG));
 
+    // Pacing thunks at 0x25c0, 0x3100, 0x3430
+    std::memcpy(image.data() + 0x25c0, THUNK_GATE_ORIG, sizeof(THUNK_GATE_ORIG));
+    std::memcpy(image.data() + 0x3100, THUNK_SCHED_ORIG, sizeof(THUNK_SCHED_ORIG));
+    std::memcpy(image.data() + 0x3430, THUNK_DEADLINE_ORIG, sizeof(THUNK_DEADLINE_ORIG));
+
     // Pacing anchors at 0x224cf0, 0x21ee30, 0x224b30
     std::memcpy(image.data() + 0x224cf0, PACING_GATE_SIG, sizeof(PACING_GATE_SIG));
     std::memcpy(image.data() + 0x21ee30, PACING_SCHED_SIG, sizeof(PACING_SCHED_SIG));
@@ -229,6 +276,8 @@ int main()
         assert(ok && "XeMfgEngine::Apply must succeed on valid image");
         assert(engine.applied && "Engine must be marked applied");
         assert(engine.patchesApplied == 5 && "Exactly 5 patches must be applied");
+        assert(engine.pacingDetours == 3 && "Exactly 3 pacing detours must be applied");
+        assert(engine.pacingInstalled && "Pacing must be marked installed");
         assert(engine.verifiedPacing && "Extra pacing anchors must be verified");
         assert(!engine.lastFailure && "Last failure must be false");
 
@@ -243,9 +292,14 @@ int main()
         // Verify U5 MaxFrames = 3
         assert(image[0x20973b + 1] == 3);
 
+        // Verify Pacing Thunks
+        assert(image[0x25c0] == 0xff && image[0x25c0 + 1] == 0x25 && "Thunk 1 must be detoured");
+        assert(image[0x3100] == 0xff && image[0x3100 + 1] == 0x25 && "Thunk 2 must be detoured");
+        assert(image[0x3430] == 0xff && image[0x3430 + 1] == 0x25 && "Thunk 3 must be detoured");
+
         // Check EffectiveMax
         assert(engine.EffectiveMax(1) == 3 && "EffectiveMax must report 3 (4X MFG)");
-        printf("  [PASS] Test 1: Fast-path RVA patch application and pacing verification.\n");
+        printf("  [PASS] Test 1: Fast-path RVA patch application and pacing detours.\n");
     }
 
     // Test 2: Clean Rollback
@@ -253,7 +307,14 @@ int main()
         engine.Rollback();
         assert(!engine.applied && "Engine must report not applied after rollback");
         assert(engine.patchesApplied == 0 && "Patches applied must be 0 after rollback");
-        assert(image == pristineImage && "Image after rollback must match pristine binary byte-for-byte");
+        assert(engine.pacingDetours == 0 && "Pacing detours must be 0 after rollback");
+        assert(!engine.pacingInstalled && "Pacing must not be marked installed after rollback");
+        assert(std::memcmp(image.data() + 0x25c0, XeMfgTest::THUNK_GATE_ORIG, 16) == 0 && "Thunk 1 must be restored");
+        assert(std::memcmp(image.data() + 0x3100, XeMfgTest::THUNK_SCHED_ORIG, 16) == 0 && "Thunk 2 must be restored");
+        assert(std::memcmp(image.data() + 0x3430, XeMfgTest::THUNK_DEADLINE_ORIG, 16) == 0 &&
+               "Thunk 3 must be restored");
+        assert(std::memcmp(image.data(), pristineImage.data(), image.size()) == 0 &&
+               "Rollback must restore image to pristine identity");
         assert(engine.EffectiveMax(1) == 1 && "EffectiveMax must revert to native reported count");
         printf("  [PASS] Test 2: Full rollback restores byte-for-byte image identity.\n");
     }

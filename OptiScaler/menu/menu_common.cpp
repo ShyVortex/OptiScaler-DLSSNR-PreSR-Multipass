@@ -3698,7 +3698,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else
             {
-                std::string pacingStr = status.VerifiedPacing ? "verified" : "standard";
+                std::string pacingStr =
+                    status.PacingInstalled ? "active (3/3 detours)" : (status.VerifiedPacing ? "verified" : "standard");
                 std::string patchStr =
                     status.Applied
                         ? "active (5/5)"

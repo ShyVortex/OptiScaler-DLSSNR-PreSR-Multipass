@@ -206,4 +206,43 @@ Inspection of `OptiScaler.log` revealed three critical gating failures:
 5. **NGX Parameter Advertising (`NVNGX_Parameter.cpp`)**:
    - Included `xeMfgActive` in advertising `FrameGeneration.Available = 1`, `DLSSG.Available = 1`, and `DLSSG.MultiFrameCountMax = XeMfgLoader::EffectiveMax(1)`.
 
+---
+
+## 8. Field Test 2 Verification & Presentation Pacing Fixes (Resident Evil Requiem)
+
+### 8.1 Second Test Symptoms
+After resolving menu locks and NGX Feature 11 rejection, a second field test in *Resident Evil Requiem* on Windows 11 (RTX 3080 Ti) revealed the following operational behaviors:
+1. **Startup Premature Activation**: When launching the game, XeFG was active (`_isActive = true`, generating frames) despite the game launching with Frame Generation set to "No".
+2. **In-Game Toggle Working**: Toggling DLSS FG on and off in-game correctly shut XeFG down and resumed without crashes.
+3. **2X XeFG Aggressive Stutter**: 2X frame generation functioned with good input latency, but suffered from aggressive micro-stuttering and uneven pacing.
+4. **Smoothness Failure Above 2X**: Multipliers $> 2X$ (3X to 6X) reported framerate increases in numerical counters only; visual frame interpolation was not achieved, creating a stuttering, clumped presentation worse than 2X.
+
+### 8.2 Root Cause Analysis
+1. **Startup Passthrough & Deactivation Thrashing**:
+   - In `XeFG_Dx12.cpp`, swapchain creation initialized `_passthrough = false`, `_framesToInterpolate = 1`, and `_isActive = true` by default.
+   - In `Streamline_Inputs_Dx12.cpp` and `Streamline_Inputs_Sl1_Dx12.cpp`, `setConstants` unconditionally called `fgOutput->Activate()` whenever `config->FGEnabled` was true, even before the game called `slDLSSGSetOptions` or when `state.dlssgLastSetMode == sl::DLSSGMode::eOff`.
+   - Furthermore, `XeFG_Dx12::Dispatch` continually synchronized `_framesToInterpolate` with `Config::Instance()->FGXeFGInterpolationCount` and set `state.WAR_xefgRequestFGToggle = false`, causing cyclic deactivation and reactivation thrashing during runtime.
+2. **Missing Presentation Pacing Detours**:
+   - The 5 memory patches (`U1` through `U5`) in `libxess_fg.dll` only bypass internal validation checks; they do not pace frames.
+   - Stock `libxess_fg.dll` only paces 2X generation (1 generated frame). For multipliers $> 2X$, generated frames were presented immediately in a sub-millisecond burst to the swapchain, resulting in clumped presentations and severe judder.
+   - Binary disassembly of `XeMFG/XeFGUnlock.asi` revealed 3 critical execution thunks required to synchronize presentations:
+     - **Thunk 1 (RVA `0x25c0`, targets `0x21f730`)**: Gate detour maintaining a 15-sample median filter ring buffer of real frame deltas (`CalculateMedianDelta`), computing per-frame intervals (`medianDelta / multiplier`), and running a hybrid QPC spin/sleep wait loop (`WaitForDeadline` with `Sleep(0)` for deltas $> 200,000$ ticks, `_mm_pause()` for deltas $\le 200,000$).
+     - **Thunk 2 (RVA `0x3100`, targets `0x21ee30`)**: Scheduler detour routing every generated frame through the internal provider scheduler.
+     - **Thunk 3 (RVA `0x3430`, targets `0x224b30`)**: Deadline rebase detour computing `*pDeadline = (*pDeadline) + frameIndex * (intervalPerFrame - adjust)`.
+
+### 8.3 Solutions Applied
+1. **Startup Passthrough & Guarded Activation**:
+   - `XeFG_Dx12::CreateSwapchain` and `CreateSwapchain1`: When `activeFgInput == FGInput::DLSSG`, initialize `_passthrough = true`, `_framesToInterpolate = 0`, and `_isActive = false`.
+   - `Streamline_Inputs_Dx12.cpp` and `Streamline_Inputs_Sl1_Dx12.cpp`: Added activation guard skipping `fgOutput->Activate()` when `activeFgInput == FGInput::DLSSG` and `(fgOutput->IsPassthrough() || state.dlssgLastSetMode == sl::DLSSGMode::eOff)`.
+   - `XeFG_Dx12::Dispatch`: Guarded interpolation count synchronization with `activeFgInput != FGInput::DLSSG`, preventing toggle thrashing.
+2. **Native Presentation Pacing Engine (`XeMfgLoader.cpp`)**:
+   - Implemented 16-byte absolute indirect JMP detours (`ff 25 00 00 00 00 <64-bit target> cc cc`) at RVAs `0x25c0`, `0x3100`, and `0x3430`.
+   - Integrated 15-sample median ring buffer filter for smooth real frame delta tracking.
+   - Implemented high-precision hybrid QPC wait loop (`WaitForDeadline`) combining zero-millisecond yield (`Sleep(0)`) and low-overhead spin loops (`_mm_pause()`).
+   - Added atomic transactional rollback restoring original thunk bytes if installation fails or upon deactivation.
+3. **UI Status Badge & Test Coverage**:
+   - `menu_common.cpp`: Displays `"active (3/3 detours)"` when pacing detours are installed.
+   - `tests/xemfg_loader_unit.cpp`: Validates all 3 pacing detours and clean rollback.
+   - `tests/xefg_mfg_streamline_unit.cpp`: Added Test 6 verifying DLSSG startup in passthrough and premature activation prevention.
+
 

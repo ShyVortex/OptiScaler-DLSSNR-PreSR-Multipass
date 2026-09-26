@@ -438,6 +438,13 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     {
         XeFGProxy::SetEnabled()(_swapChainContext, true);
     }
+    else if (State::Instance().activeFgInput == FGInput::DLSSG)
+    {
+        _passthrough = true;
+        _framesToInterpolate = 0;
+        _isActive = false;
+        LOG_INFO("XeFG initialized in passthrough mode for DLSSG input");
+    }
 
     _gameCommandQueue = realQueue;
     _swapChain = *swapChain;
@@ -606,6 +613,13 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     if (State::Instance().activeFgInput == FGInput::ForceXeLL)
     {
         XeFGProxy::SetEnabled()(_swapChainContext, true);
+    }
+    else if (State::Instance().activeFgInput == FGInput::DLSSG)
+    {
+        _passthrough = true;
+        _framesToInterpolate = 0;
+        _isActive = false;
+        LOG_INFO("XeFG swapchain1 initialized in passthrough mode for DLSSG input");
     }
 
     _gameCommandQueue = realQueue;
@@ -789,7 +803,8 @@ bool XeFG_Dx12::Dispatch()
                      _maxInterpolationCount);
         }
 
-        if (_framesToInterpolate != Config::Instance()->FGXeFGInterpolationCount.value_or_default())
+        if (State::Instance().activeFgInput != FGInput::DLSSG &&
+            _framesToInterpolate != Config::Instance()->FGXeFGInterpolationCount.value_or_default())
         {
             LOG_INFO("Interpolation count changed {} -> {}", _framesToInterpolate,
                      Config::Instance()->FGXeFGInterpolationCount.value_or_default());
@@ -814,7 +829,7 @@ bool XeFG_Dx12::Dispatch()
     }
 
     // Workaround for wrong frame limit
-    if (state.WAR_xefgRequestFGToggle)
+    if (State::Instance().activeFgInput != FGInput::DLSSG && state.WAR_xefgRequestFGToggle)
     {
         state.WAR_xefgRequestFGToggle = false;
 
@@ -1056,6 +1071,7 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
             LOG_DEBUG("XeFG SetEnabled(false) result: {} ({})", magic_enum::enum_name(result), (UINT) result);
         }
 
+        Deactivate();
         return true;
     }
 
@@ -1067,6 +1083,8 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
                  _maxInterpolationCount);
         interpolatedFrameCount = _maxInterpolationCount;
     }
+
+    Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(interpolatedFrameCount);
 
     if (_framesToInterpolate != interpolatedFrameCount)
     {
@@ -1090,6 +1108,11 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
                 }
             }
         }
+    }
+
+    if (!_isActive)
+    {
+        Activate();
     }
 
     return true;
