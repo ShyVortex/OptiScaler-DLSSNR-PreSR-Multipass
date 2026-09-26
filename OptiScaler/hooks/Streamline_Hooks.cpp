@@ -1205,7 +1205,9 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                     newOptions.mode = sl::DLSSGMode::eOn;
             }
         }
-        const auto result = o_slDLSSGSetOptions(viewport, newOptions);
+        const auto result = (state.activeFgInput == FGInput::DLSSG || o_slDLSSGSetOptions == nullptr)
+                                ? sl::Result::eOk
+                                : o_slDLSSGSetOptions(viewport, newOptions);
         if (result == sl::Result::eOk)
         {
             state.dlssgLastSetMode = newOptions.mode;
@@ -1347,6 +1349,41 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
     MfgUnlock::TryApply();
 #endif
     const auto originalStructVersion = state.structVersion;
+
+    // When OptiScaler is routing DLSSG input (e.g. to XeFG), or when native Streamline DLSSG is absent,
+    // synthesize valid state directly instead of failing through unloaded/disabled native DLSSG context.
+    if (State::Instance().activeFgInput == FGInput::DLSSG || o_slDLSSGGetState == nullptr)
+    {
+        state.status = sl::DLSSGStatus::eOk;
+        state.estimatedVRAMUsageInBytes = static_cast<uint64_t>(300 * 1024) * 1024;
+        state.numFramesActuallyPresented = 1;
+
+        auto fg = State::Instance().currentFG;
+        if (fg != nullptr && fg->IsActive() && !fg->IsPaused())
+        {
+            state.numFramesActuallyPresented = fg->GetInterpolatedFrameCount() + 1;
+        }
+
+        if (originalStructVersion >= 2)
+        {
+            state.bIsVsyncSupportAvailable = sl::Boolean::eTrue;
+            if (State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+                state.numFramesToGenerateMax = XeMfgLoader::EffectiveMax(1);
+            else
+                state.numFramesToGenerateMax = 1;
+        }
+
+        if (originalStructVersion >= 4)
+        {
+            state.bIsDynamicMFGSupported = sl::Boolean::eTrue;
+        }
+
+        State::Instance().dlssgGameDMFGSupported = true;
+        State::Instance().dlssgMfgMax = state.numFramesToGenerateMax;
+
+        return sl::Result::eOk;
+    }
+
     if (originalStructVersion < 4)
     {
         sl::DLSSGState newState {};
