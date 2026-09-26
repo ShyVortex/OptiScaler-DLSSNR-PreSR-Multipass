@@ -1929,6 +1929,20 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                      (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
+        const bool xeMfgUnlock = Config::Instance()->XeMfgUnlock.value_or_default();
+        if (xeMfgUnlock && !State::Instance().externalFrameGeneration)
+        {
+            auto* cfg = Config::Instance();
+            cfg->FGEnabled.set_volatile_value(true);
+            if (!cfg->FGInput.has_value() || cfg->FGInput.value() == FGInput::NoFG)
+                cfg->FGInput.set_volatile_value(FGInput::DLSSG);
+            if (!cfg->FGOutput.has_value() || cfg->FGOutput.value() == FGOutput::NoFG)
+                cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
+            cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
+            LOG_INFO("XeMfgLoader: XeMFG unlock active, auto-configuring pipeline (FGInput=DLSSG, FGOutput=XeFG, "
+                     "FGEnabled=true)");
+        }
+
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
         State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
         State::Instance().activeFgNvngx = Config::Instance()->FGNvngxReplacement.value_or_default();

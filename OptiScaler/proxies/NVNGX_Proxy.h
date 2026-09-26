@@ -3,6 +3,7 @@
 #include "SysUtils.h"
 #include "Util.h"
 #include "Config.h"
+#include "State.h"
 #include "Logger.h"
 #include <dlssnr/DlssNr_NgxDiagnostics.h>
 
@@ -32,14 +33,15 @@ inline static PFN_NVSDK_NGX_D3D1X_GetFeatureRequirements Original_D3D11_GetFeatu
 inline static PFN_NVSDK_NGX_D3D1X_GetFeatureRequirements Original_D3D12_GetFeatureRequirements = nullptr;
 inline static PFN_NVSDK_NGX_VULKAN_GetFeatureRequirements Original_Vulkan_GetFeatureRequirements = nullptr;
 
-inline static NVSDK_NGX_Result __stdcall Hooked_Dx12_GetFeatureRequirements(
-    IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
-    NVSDK_NGX_FeatureRequirement* OutSupported)
+inline static NVSDK_NGX_Result __stdcall
+Hooked_Dx12_GetFeatureRequirements(IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
+                                   NVSDK_NGX_FeatureRequirement* OutSupported)
 {
     LOG_FUNC();
 
     auto result = Original_D3D12_GetFeatureRequirements(Adapter, FeatureDiscoveryInfo, OutSupported);
 
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
     if (result == NVSDK_NGX_Result_Success && FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling)
     {
         LOG_INFO("Spoofing support!");
@@ -47,18 +49,31 @@ inline static NVSDK_NGX_Result __stdcall Hooked_Dx12_GetFeatureRequirements(
         OutSupported->MinHWArchitecture = 0;
         strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
     }
+    else if (FeatureDiscoveryInfo->FeatureID == (NVSDK_NGX_Feature) 11 ||
+             FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_FrameGeneration)
+    {
+        if (xeMfgActive || State::Instance().activeFgInput == FGInput::DLSSG)
+        {
+            LOG_INFO("Spoofing FrameGeneration support in NGX GetFeatureRequirements!");
+            OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
+            OutSupported->MinHWArchitecture = 0;
+            strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
+            result = NVSDK_NGX_Result_Success;
+        }
+    }
 
     return result;
 }
 
-inline static NVSDK_NGX_Result __stdcall Hooked_Dx11_GetFeatureRequirements(
-    IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
-    NVSDK_NGX_FeatureRequirement* OutSupported)
+inline static NVSDK_NGX_Result __stdcall
+Hooked_Dx11_GetFeatureRequirements(IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
+                                   NVSDK_NGX_FeatureRequirement* OutSupported)
 {
     LOG_FUNC();
 
     auto result = Original_D3D11_GetFeatureRequirements(Adapter, FeatureDiscoveryInfo, OutSupported);
 
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
     if (result == NVSDK_NGX_Result_Success && FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling)
     {
         LOG_INFO("Spoofing support!");
@@ -66,24 +81,50 @@ inline static NVSDK_NGX_Result __stdcall Hooked_Dx11_GetFeatureRequirements(
         OutSupported->MinHWArchitecture = 0;
         strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
     }
+    else if (FeatureDiscoveryInfo->FeatureID == (NVSDK_NGX_Feature) 11 ||
+             FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_FrameGeneration)
+    {
+        if (xeMfgActive || State::Instance().activeFgInput == FGInput::DLSSG)
+        {
+            LOG_INFO("Spoofing FrameGeneration support in NGX GetFeatureRequirements!");
+            OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
+            OutSupported->MinHWArchitecture = 0;
+            strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
+            result = NVSDK_NGX_Result_Success;
+        }
+    }
 
     return result;
 }
 
-inline static NVSDK_NGX_Result __stdcall Hooked_Vulkan_GetFeatureRequirements(
-    const VkInstance Instance, const VkPhysicalDevice PhysicalDevice,
-    const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo, NVSDK_NGX_FeatureRequirement* OutSupported)
+inline static NVSDK_NGX_Result __stdcall
+Hooked_Vulkan_GetFeatureRequirements(const VkInstance Instance, const VkPhysicalDevice PhysicalDevice,
+                                     const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
+                                     NVSDK_NGX_FeatureRequirement* OutSupported)
 {
     LOG_FUNC();
 
     auto result = Original_Vulkan_GetFeatureRequirements(Instance, PhysicalDevice, FeatureDiscoveryInfo, OutSupported);
 
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
     if (result == NVSDK_NGX_Result_Success && FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling)
     {
         LOG_INFO("Spoofing support!");
         OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
         OutSupported->MinHWArchitecture = 0;
         strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
+    }
+    else if (FeatureDiscoveryInfo->FeatureID == (NVSDK_NGX_Feature) 11 ||
+             FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_FrameGeneration)
+    {
+        if (xeMfgActive || State::Instance().activeFgInput == FGInput::DLSSG)
+        {
+            LOG_INFO("Spoofing FrameGeneration support in NGX GetFeatureRequirements!");
+            OutSupported->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
+            OutSupported->MinHWArchitecture = 0;
+            strcpy_s(OutSupported->MinOSVersion, "10.0.10240.16384");
+            result = NVSDK_NGX_Result_Success;
+        }
     }
 
     return result;

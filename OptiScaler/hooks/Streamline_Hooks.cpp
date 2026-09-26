@@ -344,14 +344,14 @@ sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const ch
     {
         if (strcmp(functionName, "slDLSSGSetOptions") == 0)
         {
-            function = &dummy_slDLSSGSetOptions;
+            function = &hkslDLSSGSetOptions;
 
             return sl::Result::eOk;
         }
 
         if (strcmp(functionName, "slDLSSGGetState") == 0)
         {
-            function = &dummy_slDLSSGGetState;
+            function = &hkslDLSSGGetState;
 
             return sl::Result::eOk;
         }
@@ -362,13 +362,13 @@ sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const ch
     {
         if (strcmp(functionName, "slDLSSGSetOptions") == 0)
         {
-            function = &dummy_slDLSSGSetOptions;
+            function = &hkslDLSSGSetOptions;
             return sl::Result::eOk;
         }
 
         if (strcmp(functionName, "slDLSSGGetState") == 0)
         {
-            function = &dummy_slDLSSGGetState;
+            function = &hkslDLSSGGetState;
             return sl::Result::eOk;
         }
     }
@@ -907,9 +907,10 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     static std::string config;
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
     bool shouldSpoofArch = Config::Instance()->StreamlineSpoofing.value_or_default() &&
                            (State::Instance().activeFgInput == FGInput::NvngxFG ||
-                            State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive);
+                            State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive);
 
     uint32_t currentArch = 0;
     if (shouldSpoofArch)
@@ -952,7 +953,7 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     }
 
     if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::NvngxFG ||
-        ampereMfgActive)
+        ampereMfgActive || xeMfgActive)
     {
         if (configJson.contains("/vsync/supported"_json_pointer))
             configJson["vsync"]["supported"] = true; // disable eVSyncOffRequired
@@ -2087,7 +2088,8 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
                 }
 
                 const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-                if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive)
+                const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+                if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive)
                 {
                     if (o_slIsFeatureSupported != nullptr)
                         DetourAttach(&(PVOID&) o_slIsFeatureSupported, hkslIsFeatureSupported);
@@ -2267,7 +2269,8 @@ void StreamlineHooks::unhookDlssg()
 void StreamlineHooks::hookDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
 
@@ -2321,7 +2324,8 @@ void StreamlineHooks::unhookLocalDlssg()
 void StreamlineHooks::hookLocalDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
 
@@ -2493,7 +2497,8 @@ void StreamlineHooks::unhookCommon()
 void StreamlineHooks::hookCommon(HMODULE slCommon)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
 
