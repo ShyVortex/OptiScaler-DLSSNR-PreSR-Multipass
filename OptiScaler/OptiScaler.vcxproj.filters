@@ -491,6 +491,9 @@
     <ClInclude Include="inputs\FG\Streamline_Inputs_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inputs\FG\DlssgParameterSanitizer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="framegen\xefg\XeFG_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>

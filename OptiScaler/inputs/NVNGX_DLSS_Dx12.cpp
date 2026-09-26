@@ -18,6 +18,7 @@
 #endif
 #include "FG/FSR3_Dx12_FG.h"
 #include "FG/Upscaler_Inputs_Dx12.h"
+#include "FG/DlssgParameterSanitizer.h"
 
 #include <imgui/ImGuiNotify.hpp>
 
@@ -1291,6 +1292,15 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
                    : result;
     };
 
+    NVSDK_NGX_Parameter* effectiveParameters = InParameters;
+    std::optional<DlssgParameterSanitizer> dlssgSanitizer;
+    if (feature == NVSDK_NGX_Feature_FrameGeneration && ShouldFilterDlssgOutputReal(InParameters))
+    {
+        LOG_DEBUG("DLSSG evaluation: intermediate subframe with null DLSSG.OutputReal detected; sanitizing parameter");
+        dlssgSanitizer.emplace(InParameters, true);
+        effectiveParameters = &dlssgSanitizer.value();
+    }
+
     // Native DLSS passthrough
     if (handleId < DLSS_MOD_ID_OFFSET)
     {
@@ -1301,7 +1311,7 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
             // SR and RR handles are always IFeature_Dx12 instances. This branch contains only
             // unrelated native NGX features, which must never run Neural Rendering.
             return finishEvaluation(
-                NVNGXProxy::D3D12_EvaluateFeature()(InCmdList, InFeatureHandle, InParameters, InCallback));
+                NVNGXProxy::D3D12_EvaluateFeature()(InCmdList, InFeatureHandle, effectiveParameters, InCallback));
         }
 
         LOG_DEBUG("Native DLSS EvaluateFeature not available for handle {}", handleId);
@@ -1312,18 +1322,19 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
     if (state.activeFgNvngx != FGNvngxReplacement::None && handleId >= NVNGX_PROVIDER_ID_OFFSET)
     {
         LOG_DEBUG("Passthrough to DLSSG Replacement's EvaluateFeature for handle {}", handleId);
-        return finishEvaluation(Nvngx_FG::D3D12_EvaluateFeature(InCmdList, InFeatureHandle, InParameters, InCallback));
+        return finishEvaluation(
+            Nvngx_FG::D3D12_EvaluateFeature(InCmdList, InFeatureHandle, effectiveParameters, InCallback));
     }
 
     if (lastDlssgCameraNear.has_value())
-        InParameters->Set("DLSSG.CameraNear", lastDlssgCameraNear.value());
+        effectiveParameters->Set("DLSSG.CameraNear", lastDlssgCameraNear.value());
 
     if (lastDlssgCameraFar.has_value())
-        InParameters->Set("DLSSG.CameraFar", lastDlssgCameraFar.value());
+        effectiveParameters->Set("DLSSG.CameraFar", lastDlssgCameraFar.value());
 
     // OptiScaler internal handling
     // NR is dispatched inside IFeature_Dx12, shared by NGX, FSR/XeSS inputs and the API bridges.
-    return finishEvaluation(TryEvaluateOptiFeature(InCmdList, InFeatureHandle, InParameters, InCallback));
+    return finishEvaluation(TryEvaluateOptiFeature(InCmdList, InFeatureHandle, effectiveParameters, InCallback));
 }
 
 #pragma endregion

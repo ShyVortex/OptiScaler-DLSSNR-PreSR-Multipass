@@ -479,6 +479,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="include\spdlog_sink\debug_sink.h" />
     <ClInclude Include="inputs\FG\FSR3_Dx12_FG.h" />
     <ClInclude Include="inputs\FG\Streamline_Inputs_Dx12.h" />
+    <ClInclude Include="inputs\FG\DlssgParameterSanitizer.h" />
     <ClInclude Include="framegen\xefg\XeFG_Dx12.h" />
     <ClInclude Include="hooks\Advapi32_Hooks.h" />
     <ClInclude Include="hooks\Crypt32_Hooks.h" />
