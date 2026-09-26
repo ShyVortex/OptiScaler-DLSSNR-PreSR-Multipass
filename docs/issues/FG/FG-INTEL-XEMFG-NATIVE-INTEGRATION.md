@@ -150,14 +150,21 @@ The plugin applies 5 distinct memory patches to `.text` in `libxess_fg.dll`:
 
 ---
 
-## 6. Verification & Automated Test Plan
+## 6. Verification & Automated Test Results
 
-1. **`tests/xemfg_loader_unit.cpp`**:
-   - Unit test simulating memory patching of `libxess_fg.dll` text section.
-   - Validates U1, U2, U3, U4, U5 byte transformations, bounds validation, dynamic ceiling clamping, and rollback consistency.
-2. **`tests/xefg_mfg_streamline_unit.cpp`**:
-   - Unit test validating Streamline `hkslDLSSGGetState` advertising and `hkslDLSSGSetOptions` forwarding to `SetInterpolatedFrameCount`.
-   - Validates transition to passthrough mode when `mode == eOff` and restoration upon re-enablement.
-3. **Format & MSVC Rule Checks**:
-   - Ensure all files adhere strictly to `.clang-format`.
-   - Ensure UTF-8 BOM (`\xef\xbb\xbf`) is preserved across all modified files.
+1. **`tests/xemfg_loader_unit.cpp`** (PASSED):
+   - Fast-path RVA patch application (`U1` to `U5`) and burst presentation pacing verification (`0x224cf0`, `0x21ee30`, `0x224b30`).
+   - Clean byte-for-byte rollback restoring pristine binary state.
+   - Relocated image fallback with signature scanning and dynamic 6X multiplier verification.
+   - Atomic transaction rollback on patch target corruption preventing half-patched state.
+   - Multiplier ceiling parameterization and clamping (1 to 5).
+2. **`tests/xefg_mfg_streamline_unit.cpp`** (PASSED):
+   - Streamline `hkslDLSSGGetState` capability advertising (`numFramesToGenerateMax = EffectiveMax(1)`) when `FGOutput == FGOutput::XeFG`, with safety clamping to 1 for non-XeFG outputs or patch failures.
+   - Streamline `hkslDLSSGSetOptions` multiplier routing directly to `XeFG_Dx12::SetInterpolatedFrameCount()` and state synchronization.
+   - In-game disable (`mode == eOff` / `count == 0`) safely entering passthrough mode (`_passthrough = true`) and skipping presentation passes, resolving the in-game disable crash.
+   - Multi-frame generation re-enablement cleanly exiting passthrough mode.
+   - Strict mutual exclusion enforcement between Ada MFG, Ampere SM86 MFG, and Intel XeMFG.
+3. **Format & MSVC Rule Checks** (PASSED):
+   - All modified and new `.cpp` and `.h` files format cleanly with zero `clang-format --dry-run --Werror` violations.
+   - UTF-8 BOM (`\xef\xbb\xbf`) preserved across all modified files.
+
