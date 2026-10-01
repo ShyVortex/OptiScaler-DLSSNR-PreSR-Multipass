@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
 
-void DlssNr_Dx12::State::EncodeInput(EncodeContext& context)
+bool DlssNr_Dx12::State::EncodeInput(EncodeContext& context)
 {
     const auto& cfg = *Config::Instance();
     const auto& frame = context.frame;
@@ -11,6 +11,8 @@ void DlssNr_Dx12::State::EncodeInput(EncodeContext& context)
     auto& targetState = context.targetState;
     auto& whitePoint = context.whitePoint;
     auto& modelInput = context.modelInput;
+    modelInput = nullptr;
+    const auto initialTargetState = targetState;
     const auto width = nr.width, height = nr.height;
     const auto workWidth = nr.workWidth, workHeight = nr.workHeight;
     const auto workScale = context.workScale;
@@ -174,6 +176,11 @@ void DlssNr_Dx12::State::EncodeInput(EncodeContext& context)
     TransitionTarget(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     context.encodeSucceeded = shader.DispatchPass(cmdList, encodeParams, target, nullptr, nullptr, context.exposure,
                                                   nullptr, nr.colorCopy, nr.hdrCopy);
+    if (!context.encodeSucceeded)
+    {
+        TransitionTarget(initialTargetState);
+        return false;
+    }
 
     if (targetSupportsUav)
         TransitionTarget(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -238,13 +245,27 @@ void DlssNr_Dx12::State::EncodeInput(EncodeContext& context)
             down.Mode = DlssNrMode_Downsample;
             down.Width = workWidth;
             down.Height = workHeight;
-            shader.DispatchPass(cmdList, down, modelInput, nullptr, nullptr, nullptr, nullptr, nr.colorSmall, nullptr);
+            if (!shader.DispatchPass(cmdList, down, modelInput, nullptr, nullptr, nullptr, nullptr, nr.colorSmall,
+                                     nullptr))
+            {
+                // Only the successful encode made these copies readable. The
+                // failed resample left colorSmall in its original UAV state.
+                Barrier(cmdList, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                TransitionTarget(initialTargetState);
+                modelInput = nullptr;
+                return false;
+            }
             Barrier(cmdList, nr.colorSmall, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         }
 
         modelInput = nr.colorSmall;
     }
+
+    return true;
 }
 
 DlssNrConstants DlssNr_Dx12::State::MakeResolveConstants(const EncodeContext& context, unsigned int effectivePasses)
