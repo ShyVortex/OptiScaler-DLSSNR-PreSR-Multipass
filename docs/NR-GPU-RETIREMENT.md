@@ -10,6 +10,18 @@ Resources retire only after recordings close and submitted fences complete:
 
 Notifications use stable owner snapshots and defer destruction. Child retirement is allowed; unresolved teardown work survives until process exit.
 
+Preparation happens before the application's queue call. If allocation fails,
+the hook still submits the application batch, so all matching owner generations
+are quarantined before the registry lock is released, including owners not yet
+visited. The fallback does not allocate or collect; it invalidates unsubmitted
+finished-picture/enlarger/hold metadata rather than advertising those inputs as
+ready. A failed preparation can retain storage until process exit. Notification
+cleanup defers failed collection instead of throwing from a scope destructor.
+
+Tracker operations retain their shared implementation through collection and
+mutex unlock, including when a retirement callback destroys the wrapper. The
+destructor's unresolved-retention decision uses that same tracker lock.
+
 ## Finished-picture copy slots
 
 Each finished-picture slot also tracks its producer recording with `GpuLifetime`.

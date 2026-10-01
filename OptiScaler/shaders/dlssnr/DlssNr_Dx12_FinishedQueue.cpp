@@ -216,6 +216,41 @@ auto DlssNr_Dx12::State::BeginFinishedPictureSubmission(UINT count, ID3D12Comman
     return submission;
 }
 
+void DlssNr_Dx12::State::QuarantineFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists)
+{
+    std::lock_guard lock(mutex);
+    lifetime.QuarantineSubmission(count, lists);
+    deferredSr.lifetime.QuarantineSubmission(count, lists);
+    captureFrames.QuarantineSubmission(count, lists);
+    if (gpuTime)
+        gpuTime->QuarantineSubmission(count, lists);
+    if (ngxTime)
+        ngxTime->QuarantineSubmission(count, lists);
+    for (auto& model : nr.models)
+        model.QuarantineSubmission(count, lists);
+    if (enlarger && enlarger->lifetime.QuarantineSubmission(count, lists) && !enlarger->submitted)
+        enlarger->failed = true;
+    for (auto& old : retiredEnlargers)
+        old->lifetime.QuarantineSubmission(count, lists);
+    for (auto& slot : late.slots)
+        if (slot.producerLifetime.QuarantineSubmission(count, lists))
+        {
+            slot.quarantined = true;
+            slot.pending = false;
+        }
+    if (lists)
+        for (UINT i = 0; i < count; ++i)
+        {
+            ID3D12CommandList* real = nullptr;
+            auto* identity = Util::CheckForRealObject(__FUNCTION__, lists[i], (IUnknown**) &real) ? real : lists[i];
+            if (inputHold.captureCommands && inputHold.captureCommands == identity)
+            {
+                inputHold.active = false;
+                nr.heldActive = false;
+            }
+        }
+}
+
 auto DlssNr_Dx12::State::FinishedColorSpace(IDXGISwapChain* swapchain, DXGI_FORMAT format) -> DXGI_COLOR_SPACE_TYPE
 {
     auto space = format == DXGI_FORMAT_R16G16B16A16_FLOAT ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709

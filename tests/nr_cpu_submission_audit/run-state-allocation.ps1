@@ -20,6 +20,8 @@ $build = Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Path $build -Force | Out-Null
 Extract-ProductionMethod (Join-Path $repo 'OptiScaler\shaders\dlssnr\DlssNr_Dx12_FinishedQueue.cpp') `
     'auto DlssNr_Dx12::State::BeginFinishedPictureSubmission(' (Join-Path $build 'state-method-under-test.inc')
+Extract-ProductionMethod (Join-Path $repo 'OptiScaler\shaders\dlssnr\DlssNr_Dx12_FinishedQueue.cpp') `
+    'void DlssNr_Dx12::State::QuarantineFinishedPictureSubmission(' (Join-Path $build 'state-quarantine-under-test.inc')
 Extract-ProductionMethod (Join-Path $repo 'OptiScaler\shaders\dlssnr\DlssNr_Dx12_Enlarge.cpp') `
     'void DlssNr_Dx12::State::CollectEnlargers(' (Join-Path $build 'enlarger-collector-under-test.inc')
 foreach ($method in @('Arm', 'Cancel', 'Finished', 'DiscardUnsubmitted')) {

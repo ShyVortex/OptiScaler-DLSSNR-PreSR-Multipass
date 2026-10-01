@@ -266,6 +266,7 @@ struct DlssNr_Dx12
             return latest;
         }
         DlssNr::GpuSubmission BeginFinishedPictureSubmission(UINT, ID3D12CommandList* const*);
+        void QuarantineFinishedPictureSubmission(UINT, ID3D12CommandList* const*);
     };
     State* _state = nullptr;
     struct DescriptorOwner
@@ -276,6 +277,7 @@ struct DlssNr_Dx12
 };
 
 #include "state-method-under-test.inc"
+#include "state-quarantine-under-test.inc"
 #include "enlarger-collector-under-test.inc"
 #include "late-Arm-under-test.inc"
 #include "late-Cancel-under-test.inc"
@@ -618,8 +620,88 @@ bool CollectorFaultSweepDoesNotLeaveMovedFromEntries()
     return ok;
 }
 
+bool PreparationAllocationFailureRetainsRecording()
+{
+    unsigned injected = 0, failures = 0;
+    for (int allocation = 0; allocation < 32; ++allocation)
+    {
+        ComPtr<CpuCommands> commands;
+        commands.Attach(new CpuCommands);
+        DlssNr::GpuLifetime lifetime;
+        auto released = std::make_shared<bool>(false);
+        lifetime.Record(commands.Get());
+        lifetime.Retire([released] { *released = true; });
+        ID3D12CommandList* lists[] { commands.Get() };
+        bool threw = false;
+        failAllocationAfter = allocation;
+        try
+        {
+            auto submission = lifetime.BeginSubmission(1, lists);
+        }
+        catch (const std::bad_alloc&)
+        {
+            threw = true;
+            ++injected;
+        }
+        failAllocationAfter = -1;
+        if (!threw)
+            break;
+        // The hook still executes the application's batch. A reset during that
+        // Execute must not release ownership just because no token was returned.
+        lifetime.ResetRecording(commands.Get());
+        lifetime.Collect();
+        if (*released || lifetime.Idle())
+            ++failures;
+    }
+    std::printf("tracker preparation allocation failure retains submitted ownership: %u sites, %u failures\n", injected,
+                failures);
+    return injected > 0 && !failures;
+}
+
+bool FailedOwnerPreparationQuarantinesUnvisitedChildren()
+{
+    LateFixture f;
+    auto& state = f.state;
+    auto* commands = f.commands.Get();
+    state.lifetime.Record(commands);
+    state.deferredSr.lifetime.Record(commands);
+    state.captureFrames.Record(commands);
+    state.nr.models[0].Record(commands);
+    state.enlarger = std::make_unique<DlssNr_Dx12::State::Enlarger>();
+    state.enlarger->creation = commands;
+    state.enlarger->lifetime.Record(commands);
+    state.inputHold.captureCommands = commands;
+    auto& slot = state.late.slots[0];
+    state.late.Arm(slot, commands);
+    ID3D12CommandList* lists[] { commands };
+    failAllocationAfter = 0; // Failure before any metadata pins exist.
+    bool threw = false;
+    try
+    {
+        auto submission = state.BeginFinishedPictureSubmission(1, lists);
+    }
+    catch (const std::bad_alloc&)
+    {
+        threw = true;
+    }
+    failAllocationAfter = -1;
+    state.QuarantineFinishedPictureSubmission(1, lists);
+    state.FinishedPictureResetCommandList(commands);
+    const bool ok = threw && !state.lifetime.Idle() && !state.deferredSr.lifetime.Idle() &&
+                    !state.captureFrames.Idle() && !state.nr.models[0].Idle() && !state.enlarger->lifetime.Idle() &&
+                    state.enlarger->failed && !slot.producerLifetime.Idle() && slot.quarantined && !slot.pending &&
+                    !state.inputHold.active && !state.nr.heldActive;
+    std::printf("failed owner preparation quarantines unvisited child storage and metadata: %s\n",
+                ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 int main()
 {
+    if (!PreparationAllocationFailureRetainsRecording())
+        return 1;
+    if (!FailedOwnerPreparationQuarantinesUnvisitedChildren())
+        return 1;
     unsigned failures = 0, injected = 0;
     bool reachedSuccess = false;
     for (int allocation = 0; allocation < 64; ++allocation)

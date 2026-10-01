@@ -298,6 +298,10 @@ GpuSubmission Context::BeginSubmission(UINT count, ID3D12CommandList* const* lis
 {
     return _impl->lifetime.BeginSubmission(count, lists);
 }
+void Context::QuarantineSubmission(UINT count, ID3D12CommandList* const* lists)
+{
+    _impl->lifetime.QuarantineSubmission(count, lists);
+}
 void Context::Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
     _impl->lifetime.Submitted(queue, count, lists);

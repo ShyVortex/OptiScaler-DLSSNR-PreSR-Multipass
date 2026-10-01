@@ -20,6 +20,15 @@ These checks demonstrate source-level lifetime and failure-handling behavior.
 They do not reproduce or identify the cause of a game hang or operating-system
 watchdog event.
 
+Submission preparation faults now have allocation-injection regressions: a
+tracker whose token cannot be allocated remains quarantined through the real
+submission/reset boundary, and the registry also protects throwing and unvisited
+owners before unlocking. Tests cover the fork's deferred-SR/capture children and
+invalidated late/enlarger/hold metadata, plus nonthrowing notification cleanup.
+Wrapper self-destruction from retirement callbacks and teardown racing escaped
+tokens/probes exercise shared tracker-state ownership. Descriptor tests cover
+both the original 96-slot regression and this fork's 132-slot/8-bit-index layout.
+
 Finished-picture late-copy slots now have production-backed CPU regressions for
 per-slot producer ownership, replay on every queue, reset races, cancellation,
 discarded recordings, reused addresses, normal/held composition selection and

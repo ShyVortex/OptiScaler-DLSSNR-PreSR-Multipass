@@ -190,6 +190,13 @@ template <unsigned Capacity> class DescriptorSlots
                 }
             });
     }
+    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists)
+    {
+        std::lock_guard lock(mutex);
+        for (auto& recording : recordings)
+            if (recording->active)
+                recording->lifetime.QuarantineSubmission(count, lists);
+    }
     void FinishSubmitted()
     {
         std::lock_guard lock(mutex);

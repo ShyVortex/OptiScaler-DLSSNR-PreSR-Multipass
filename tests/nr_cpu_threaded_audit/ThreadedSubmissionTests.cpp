@@ -89,6 +89,41 @@ struct CpuCommands final : CpuObject<ID3D12GraphicsCommandList>
     }
 };
 
+static bool teardownRacesCapturedCompletion()
+{
+    for (unsigned iteration = 0; iteration < 128; ++iteration)
+    {
+        ComPtr<CpuDevice> device;
+        device.Attach(new CpuDevice);
+        ComPtr<CpuQueue> queue;
+        queue.Attach(new CpuQueue(device.Get()));
+        ComPtr<CpuCommands> commands;
+        commands.Attach(new CpuCommands);
+        auto* tracker = new DlssNr::GpuLifetime;
+        tracker->Record(commands.Get());
+        auto released = std::make_shared<std::atomic<unsigned>>(0);
+        tracker->Retire([released] { ++*released; });
+        auto probe = tracker->CompletionProbe(commands.Get());
+        ID3D12CommandList* lists[] { commands.Get() };
+        auto pending = tracker->BeginSubmission(1, lists);
+        tracker->ResetRecording(commands.Get());
+        std::barrier start(2);
+        std::thread complete(
+            [&]
+            {
+                start.arrive_and_wait();
+                pending.Complete(queue.Get());
+                queue->CompleteGpu();
+            });
+        start.arrive_and_wait();
+        delete tracker;
+        complete.join();
+        if (released->load() > 1 || !probe())
+            return false;
+    }
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     // Test-local negative control emulates a call site that omits pre-submit capture.
@@ -176,5 +211,8 @@ int main(int argc, char** argv)
                 earlyRelease.load());
     std::puts(passed ? "PASS: threaded handoff retains each generation through its own completion"
                      : "FAIL: threaded handoff violated generation ownership");
-    return passed ? 0 : 1;
+    const bool teardownSafe = postOnly || teardownRacesCapturedCompletion();
+    if (!postOnly)
+        std::printf("wrapper teardown racing captured token completion/probe: %s\n", teardownSafe ? "PASS" : "FAIL");
+    return passed && teardownSafe ? 0 : 1;
 }

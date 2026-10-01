@@ -79,6 +79,10 @@ class FrameCapture
     {
         return lifetime_.BeginSubmission(count, lists);
     }
+    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists)
+    {
+        lifetime_.QuarantineSubmission(count, lists);
+    }
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
     {
         lifetime_.Submitted(queue, count, lists);

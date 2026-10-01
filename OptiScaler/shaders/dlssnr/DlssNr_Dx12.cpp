@@ -28,6 +28,11 @@ void CollectRetiredNrOwners()
     if (collecting || nrNotificationDepth)
         return;
     collecting = true;
+    struct CollectionScope
+    {
+        bool& active;
+        ~CollectionScope() { active = false; }
+    } scope { collecting };
     auto& owners = RetiredNrOwners();
     for (auto it = owners.begin(); it != owners.end();)
     {
@@ -41,15 +46,21 @@ void CollectRetiredNrOwners()
         finished.reset(); // May enqueue a child codec; list iterators remain valid.
         LOG_INFO("DLSS-NR: reclaimed retired GPU owner; {} waiting", owners.size());
     }
-    collecting = false;
 }
 struct NrNotificationScope
 {
     NrNotificationScope() { ++nrNotificationDepth; }
-    ~NrNotificationScope()
+    ~NrNotificationScope() noexcept
     {
         --nrNotificationDepth;
-        CollectRetiredNrOwners();
+        try
+        {
+            CollectRetiredNrOwners();
+        }
+        catch (...)
+        {
+            // Failed collection is not completion; retain owners for a later retry.
+        }
     }
 };
 DlssNr_Dx12* activeNrOwner = nullptr;
@@ -740,6 +751,11 @@ DlssNr::GpuSubmission DlssNr_Dx12::BeginFinishedCommands(UINT count, ID3D12Comma
             }
         });
 }
+void DlssNr_Dx12::QuarantineFinishedCommands(UINT count, ID3D12CommandList* const* lists)
+{
+    _state->QuarantineFinishedPictureSubmission(count, lists);
+    _descriptorSlots.QuarantineSubmission(count, lists);
+}
 bool DlssNr_Dx12::WaitFinished() { return _state->WaitForFinishedPicture(); }
 void DlssNr_Dx12::ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE space,
                                 bool gameFrameHandoff)
@@ -784,44 +800,56 @@ GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* cons
     {
         std::lock_guard lock(nrOwnersMutex);
         NrNotificationScope notification;
-        const auto owners = nrOwners;
-        std::shared_ptr<std::vector<GpuSubmission>> pending;
-        for (auto* owner : owners)
+        try
         {
-            auto submission = owner->BeginFinishedCommands(count, lists);
-            if (!submission)
-                continue;
-            if (!pending)
-                pending = std::make_shared<std::vector<GpuSubmission>>();
-            pending->push_back(std::move(submission));
-        }
-        if (!pending)
-            return {};
-        return GpuSubmission(
-            [pending](ID3D12CommandQueue* queue)
+            const auto owners = nrOwners;
+            std::shared_ptr<std::vector<GpuSubmission>> pending;
+            for (auto* owner : owners)
             {
-                std::lock_guard lock(nrOwnersMutex);
-                NrNotificationScope notification;
-                try
+                auto submission = owner->BeginFinishedCommands(count, lists);
+                if (!submission)
+                    continue;
+                if (!pending)
+                    pending = std::make_shared<std::vector<GpuSubmission>>();
+                pending->push_back(std::move(submission));
+            }
+            if (!pending)
+                return {};
+            return GpuSubmission(
+                [pending](ID3D12CommandQueue* queue)
                 {
-                    for (auto& submission : *pending)
-                        submission.Complete(queue);
-                }
-                catch (...)
-                {
-                    // Drain under the registry lock and notification scope: child cleanup
-                    // can release NGX objects and re-enter queue/reset hooks.
-                    for (auto& submission : *pending)
-                        try
-                        {
-                            submission.Complete(nullptr);
-                        }
-                        catch (...)
-                        {
-                        }
-                    throw; // Preserve the original failure; failed child pins stay quarantined.
-                }
-            });
+                    std::lock_guard lock(nrOwnersMutex);
+                    NrNotificationScope notification;
+                    try
+                    {
+                        for (auto& submission : *pending)
+                            submission.Complete(queue);
+                    }
+                    catch (...)
+                    {
+                        // Drain under the registry lock and notification scope: child cleanup
+                        // can release NGX objects and re-enter queue/reset hooks.
+                        for (auto& submission : *pending)
+                            try
+                            {
+                                submission.Complete(nullptr);
+                            }
+                            catch (...)
+                            {
+                            }
+                        throw; // Preserve the original failure; failed child pins stay quarantined.
+                    }
+                });
+        }
+        catch (...)
+        {
+            // The application still executes its batch. Cover the throwing and
+            // unvisited owners before reset/retirement can acquire the registry.
+            // Walk directly: allocating another snapshot would repeat the failure.
+            for (auto* owner : nrOwners)
+                owner->QuarantineFinishedCommands(count, lists);
+            throw;
+        }
     }
     catch (...)
     {
@@ -829,7 +857,7 @@ GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* cons
         // must not prevent the application submission or cross the COM hook.
         try
         {
-            LOG_ERROR("DLSS-NR submission preparation failed; captured ownership remains quarantined");
+            LOG_ERROR("DLSS-NR submission preparation failed; matching ownership remains quarantined");
         }
         catch (...)
         {

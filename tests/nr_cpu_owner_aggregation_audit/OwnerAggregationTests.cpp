@@ -22,7 +22,13 @@ static void Expect(bool condition, const char* message)
 std::recursive_mutex nrOwnersMutex;
 unsigned nrNotificationDepth = 0;
 static unsigned collections = 0;
-void CollectRetiredNrOwners() { ++collections; }
+static bool throwCollection = false;
+void CollectRetiredNrOwners()
+{
+    ++collections;
+    if (throwCollection)
+        throw std::bad_alloc();
+}
 
 // Probe from another thread because try_lock on this recursive mutex would
 // succeed on the submitting thread even while it owns the lock.
@@ -54,6 +60,13 @@ struct Owner
     unsigned begins = 0, completions = 0;
     ID3D12CommandQueue* seenQueue = nullptr;
     std::vector<unsigned>& order;
+    unsigned quarantines = 0;
+    void QuarantineFinishedCommands(UINT, ID3D12CommandList* const*)
+    {
+        ++quarantines;
+        Expect(RegistryLocked(), "preparation quarantine must precede registry unlock");
+        Expect(nrNotificationDepth > 0, "quarantine must precede notification cleanup");
+    }
     DlssNr::GpuSubmission BeginFinishedCommands(UINT, ID3D12CommandList* const*)
     {
         ++begins;
@@ -153,7 +166,8 @@ int main()
     std::vector<unsigned> order;
     Owner first { 1, false, false, 0, 0, nullptr, order };
     Owner second { 2, false, true, 0, 0, nullptr, order };
-    nrOwners = { &first, &second };
+    Owner third { 3, false, false, 0, 0, nullptr, order };
+    nrOwners = { &first, &second, &third };
     bool escaped = false;
     try
     {
@@ -166,9 +180,24 @@ int main()
     Expect(!escaped, "pre-submit bookkeeping failures must not cross the COM hook boundary");
     Expect(first.completions == 1 && first.seenQueue == nullptr,
            "already captured owners must be abandoned when later preparation fails");
+    Expect(first.quarantines == 1 && second.quarantines == 1 && third.quarantines == 1,
+           "failed preparation must quarantine captured, throwing and unvisited owners");
+    Expect(third.begins == 0, "the unvisited owner's protection must not depend on creating its token");
     Expect(!RegistryLocked() && nrNotificationDepth == 0,
            "preparation failure must release the registry lock and notification scope");
     Expect(nrNotificationDepth == 0 && collections == 10, "preparation and callback scopes must unwind exactly once");
+    nrOwners.clear();
+    scenario = "notification cleanup allocation failure";
+    throwCollection = true;
+    {
+        NrNotificationScope scope;
+    }
+    Expect(nrNotificationDepth == 0, "failed collection must not terminate or strand notification depth");
+    throwCollection = false;
+    {
+        NrNotificationScope scope;
+    }
+    Expect(collections == 12, "later notification cleanup must retry collection");
     std::printf("%u checks, %u failures (CPU-only production owner aggregation)\n", checks, failures);
     return failures ? 1 : 0;
 }

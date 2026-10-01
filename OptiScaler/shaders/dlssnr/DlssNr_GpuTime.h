@@ -162,6 +162,13 @@ class DlssNrGpuTime
             });
     }
 
+    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists)
+    {
+        for (auto& s : *samples)
+            if (s.occupied)
+                s.lifetime.QuarantineSubmission(count, lists);
+    }
+
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
     {
         BeginSubmission(count, lists).Complete(queue);

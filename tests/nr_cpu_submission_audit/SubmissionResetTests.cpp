@@ -283,6 +283,52 @@ bool completionExceptionsCanBeContainedAtHookBoundary()
     return invoked && contained && !pending;
 }
 
+bool collectionCanDestroyItsWrapper()
+{
+    auto* immediate = new DlssNr::GpuLifetime;
+    bool retired = false;
+    immediate->Retire(
+        [&]
+        {
+            retired = true;
+            delete immediate;
+        });
+    if (!retired)
+        return false;
+    for (unsigned mode = 0; mode < 4; ++mode)
+    {
+        ComPtr<CpuCommands> commands;
+        commands.Attach(new CpuCommands);
+        auto* tracker = new DlssNr::GpuLifetime;
+        tracker->Record(commands.Get());
+        bool destroyed = false;
+        tracker->Retire(
+            [&]
+            {
+                destroyed = true;
+                delete tracker;
+            });
+        if (mode == 0)
+        {
+            tracker->ResetRecording(commands.Get());
+        }
+        else
+        {
+            // Closing the watch is allocation-free and does not collect yet.
+            commands->watch.Reset();
+            if (mode == 1)
+                (void) tracker->Idle();
+            else if (mode == 2)
+                tracker->BeginGeneration();
+            else
+                tracker->FinishSubmitted();
+        }
+        if (!destroyed)
+            return false;
+    }
+    return true;
+}
+
 int main()
 {
     const auto control = exercise(false);
@@ -314,6 +360,8 @@ int main()
     check("device removal quarantines ownership", unprovableCompletionIsQuarantined(1));
     check("abandoned token quarantines ownership", unprovableCompletionIsQuarantined(2));
     check("completed token is idempotent", completedTokenIsIdempotent());
+    check("collection can destroy its wrapper without releasing its active operation state",
+          collectionCanDestroyItsWrapper());
     check("completion exceptions can be contained at hook boundary",
           completionExceptionsCanBeContainedAtHookBoundary());
     return passed ? 0 : 1;

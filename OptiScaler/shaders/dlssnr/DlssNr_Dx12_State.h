@@ -377,6 +377,7 @@ struct DlssNr_Dx12::State
 
     void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     DlssNr::GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists);
+    void QuarantineFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists);
 
     DXGI_COLOR_SPACE_TYPE FinishedColorSpace(IDXGISwapChain* swapchain, DXGI_FORMAT format);
 

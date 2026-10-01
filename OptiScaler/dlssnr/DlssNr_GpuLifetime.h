@@ -26,6 +26,9 @@ class GpuLifetime
     // One reusable monotonic fence per queue; aliases are normalized at every notification.
     // Capture before the real ExecuteCommandLists; complete after it, including on replay.
     GpuSubmission BeginSubmission(UINT count, ID3D12CommandList* const* lists);
+    // Allocation-free failure path, while the real application batch will still
+    // execute. Matching generations cannot retire/reuse storage after Reset.
+    bool QuarantineSubmission(UINT count, ID3D12CommandList* const* lists);
     // Convenience for callers which already serialize Execute and Reset themselves.
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     void ResetRecording(ID3D12CommandList* commands);

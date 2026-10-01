@@ -12,7 +12,8 @@ returned an already-owned slot instead of refusing it. All seven initial ownersh
 checks failed. This tests the extracted production allocator, not the complete
 GPU dispatch functions or a parallel test-only copy of the algorithm.
 
-The replacement keeps 96 physical slots. It groups their leases by recording, polls
+The replacement preserves this fork's 132 physical slots; the original 96-slot
+regression also remains covered. It groups their leases by recording, polls
 actual completion, and returns no slot while a prior recording can still use it.
 Tracker objects are reused so GUID/fence allocation does not grow each frame.
 Opaque immutable handles encode physical index and generation, reject invalid or
@@ -28,7 +29,9 @@ production destruction callback), then reuses the same fake object's address.
 That final case was separately observed failing before the live-recording check.
 
 Observed final result: MSVC C++20 `/W4` compilation succeeded without warnings;
-all nine cases passed and the executable exited 0. The allocator only calls the
+all cases passed and the executable exited 0. Additional port cases cover the
+132-slot capacity, upper-index immutable handles, and preparation quarantine.
+The allocator only calls the
 live-recording query with the current live `Acquire` argument, never a stored
 identity pointer that may refer to a destroyed object.
 

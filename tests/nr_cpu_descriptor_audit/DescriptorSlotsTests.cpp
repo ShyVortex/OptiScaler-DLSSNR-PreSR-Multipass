@@ -97,19 +97,49 @@ struct Fixture
     }
 };
 
-bool bounded96()
+template <unsigned Capacity> bool bounded()
 {
     Fixture f;
-    DlssNr::DescriptorSlots<96> slots;
-    std::array<bool, 96> seen {};
-    for (unsigned i = 0; i < 96; ++i)
+    DlssNr::DescriptorSlots<Capacity> slots;
+    std::array<bool, Capacity> seen {};
+    for (unsigned i = 0; i < Capacity; ++i)
     {
         auto slot = slots.Acquire(f.commands.Get());
-        if (!slot || *slot >= 96 || seen[*slot])
+        if (!slot || *slot >= Capacity || seen[*slot])
             return false;
         seen[*slot] = true;
     }
     return !slots.Acquire(f.commands.Get());
+}
+bool upper132ImmutableHandle()
+{
+    Fixture f;
+    DlssNr::DescriptorSlots<132> slots;
+    for (unsigned i = 0; i < 131; ++i)
+        if (!slots.Acquire(f.commands.Get()))
+            return false;
+    uint32_t handle = UINT32_MAX;
+    auto upper = slots.Acquire(f.commands.Get(), &handle);
+    if (!upper || *upper != 131 || !slots.PublishImmutable(f.commands.Get(), *upper, handle) ||
+        slots.Acquire(f.commands.Get(), &handle) != upper)
+        return false;
+    uint32_t invalid = (1u << 8) | 255u;
+    if (slots.Acquire(f.commands.Get(), &invalid))
+        return false;
+    slots.ResetRecording(f.commands.Get());
+    return !slots.Acquire(f.commands.Get(), &handle);
+}
+bool quarantineAllDescriptorRecordings()
+{
+    Fixture f;
+    DlssNr::DescriptorSlots<2> slots;
+    if (!slots.Acquire(f.commands.Get()) || !slots.Acquire(f.other.Get()))
+        return false;
+    ID3D12CommandList* lists[] { f.commands.Get(), f.other.Get() };
+    slots.QuarantineSubmission(2, lists);
+    slots.ResetRecording(f.commands.Get());
+    slots.ResetRecording(f.other.Get());
+    return !slots.Idle() && !slots.Acquire(f.commands.Get());
 }
 bool resetAndCompletion()
 {
@@ -250,7 +280,11 @@ int main()
         std::printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
         passed &= ok;
     };
-    check("97th allocation does not overwrite 96 pending slots", bounded96());
+    check("97th allocation does not overwrite 96 pending slots", bounded<96>());
+    check("133rd allocation does not overwrite 132 pending slots", bounded<132>());
+    check("132-slot immutable handles support upper indices and reject invalid/stale values",
+          upper132ImmutableHandle());
+    check("preparation quarantine covers every descriptor recording", quarantineAllDescriptorRecordings());
     check("reset and actual fence completion are both required", resetAndCompletion());
     check("immutable reuse rejects foreign, invalid and stale handles", handles());
     check("immutable handles publish only after descriptor initialization", immutablePublicationIsTransactional());

@@ -109,6 +109,7 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     void ResetFinishedCommands(ID3D12CommandList* cmd);
     void SubmitFinishedCommands(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     DlssNr::GpuSubmission BeginFinishedCommands(UINT count, ID3D12CommandList* const* lists);
+    void QuarantineFinishedCommands(UINT count, ID3D12CommandList* const* lists);
     bool WaitFinished();
     void ApplyFinished(ID3D12Resource* picture, ID3D12CommandQueue* queue, DXGI_COLOR_SPACE_TYPE space,
                        bool gameFrameHandoff = false);

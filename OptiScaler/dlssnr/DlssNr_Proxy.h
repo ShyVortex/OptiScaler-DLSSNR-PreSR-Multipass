@@ -54,6 +54,7 @@ class Context
     void RetryAfterFailure();
 
     GpuSubmission BeginSubmission(UINT count, ID3D12CommandList* const* lists);
+    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists);
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     void ResetRecording(ID3D12CommandList* commands);
     bool Idle();
