@@ -1,5 +1,7 @@
 #include "../OptiScaler/low_latency/input/ConcurrentInputSelection.h"
 
+// Standalone regression checks must stay enabled in Release-mode invocations.
+#undef NDEBUG
 #include <cassert>
 #include <thread>
 
