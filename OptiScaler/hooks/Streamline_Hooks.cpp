@@ -1210,28 +1210,35 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                                 : o_slDLSSGSetOptions(viewport, newOptions);
         if (result == sl::Result::eOk)
         {
+            const auto previousMode = state.dlssgLastSetMode;
             state.dlssgLastSetMode = newOptions.mode;
             ReflexHooks::setDlssgFrameCount(newOptions.mode == sl::DLSSGMode::eOff ? 0
                                                                                    : newOptions.numFramesToGenerate);
 
             if (state.activeFgOutput == FGOutput::XeFG)
             {
-                if (newOptions.mode == sl::DLSSGMode::eOff)
+                const uint32_t targetCount =
+                    (newOptions.mode == sl::DLSSGMode::eOff) ? 0 : newOptions.numFramesToGenerate;
+                const bool modeChanged = !previousMode.has_value() || previousMode.value() != newOptions.mode;
+                const bool countChanged = state.dlssgDetectedInterpolationCount != targetCount;
+
+                if (modeChanged || countChanged)
                 {
                     if (state.currentFG != nullptr)
-                        state.currentFG->SetInterpolatedFrameCount(0);
-                    state.dlssgDetectedInterpolationCount = 0;
-                    LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is eOff, XeFG count set to 0 (passthrough)");
-                }
-                else
-                {
-                    if (state.currentFG != nullptr)
-                        state.currentFG->SetInterpolatedFrameCount(newOptions.numFramesToGenerate);
-                    state.dlssgDetectedInterpolationCount = newOptions.numFramesToGenerate;
-                    Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(newOptions.numFramesToGenerate);
-                    LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is {}, numFramesToGenerate: {} ({}X FG)",
-                             magic_enum::enum_name(newOptions.mode), newOptions.numFramesToGenerate,
-                             newOptions.numFramesToGenerate + 1);
+                        state.currentFG->SetInterpolatedFrameCount(targetCount);
+
+                    state.dlssgDetectedInterpolationCount = targetCount;
+
+                    if (targetCount == 0)
+                    {
+                        LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is eOff, XeFG count set to 0 (passthrough)");
+                    }
+                    else
+                    {
+                        Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(targetCount);
+                        LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is {}, numFramesToGenerate: {} ({}X FG)",
+                                 magic_enum::enum_name(newOptions.mode), targetCount, targetCount + 1);
+                    }
                 }
             }
             // The runtime can accept native/safety options while individual UI
