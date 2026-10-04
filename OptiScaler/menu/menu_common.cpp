@@ -3759,14 +3759,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "4 = 5X FG (4 generated frames)\n"
                 "5 = 6X FG (5 generated frames)\n"
                 "Save Settings and restart after changing.");
-
-            // Burst Frame Pacing (>2X) checkbox
-            bool extraPacing = config->XeMfgExtraPacing.value_or(true);
-            if (ImGui::Checkbox("Burst Frame Pacing (>2X)##xemfg", &extraPacing))
-                config->XeMfgExtraPacing = extraPacing;
-            ShowHelpMarker(
-                "Verifies burst presentation pacing anchors in libxess_fg.dll (RVAs 0x224cf0, 0x21ee30, 0x224b30).\n"
-                "Prevents jitter and pacing artifacts when generating 3X to 6X frames on VRR monitors.");
         }
 
         ImGui::Unindent();

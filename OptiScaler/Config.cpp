@@ -1280,7 +1280,6 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("XeMFG", "UnlockMFG", GetBoolValue(Instance()->XeMfgUnlock.value_for_config()).c_str());
         ini.SetValue("XeMFG", "MaxInterpolatedFrames",
                      GetIntValue(Instance()->XeMfgMaxFrames.value_for_config()).c_str());
-        ini.SetValue("XeMFG", "ExtraPacing", GetBoolValue(Instance()->XeMfgExtraPacing.value_for_config()).c_str());
     }
 
     {

@@ -11,9 +11,9 @@ struct Status
     bool Patched = false;               // all required unlock patches applied
     bool Applied = false;               // alias for Patched
     unsigned int PatchesApplied = 0;    // count of applied patches (0..5)
-    unsigned int PacingDetours = 0;     // count of applied pacing detours (0..3)
-    bool PacingInstalled = false;       // extra presentation pacing installed
-    bool VerifiedPacing = false;        // alias for PacingInstalled
+    unsigned int PacingDetours = 0;     // deprecated: always 0 (native presentation preserved)
+    bool PacingInstalled = false;       // deprecated: always false
+    bool VerifiedPacing = false;        // deprecated: always false
     bool PatchFailed = false;           // memory protection or write operation failed
     bool RollbackFailed = false;        // at least one original byte state could not be restored
     unsigned int ConfiguredCeiling = 3; // configured max frames (1..5)
@@ -39,7 +39,7 @@ unsigned int UnlockedMax();
 // Clamps or reports effective maximum given native capability
 unsigned int EffectiveMax(unsigned int nativeMaximum = 1);
 
-// Applies the 5 patches and optional pacing hooks to libxess_fg.dll / igxess_fg.dll
+// Applies the 5 unlock patches to libxess_fg.dll / igxess_fg.dll
 void TryApply(HMODULE module = nullptr);
 
 // Dynamically sets the max generated frames ceiling
@@ -47,10 +47,10 @@ void SetMaxGeneratedFrames(unsigned int maxFrames);
 
 Failure LastFailure();
 
-// Resets and nullifies cached pacing context pointer
+// Resets and nullifies cached pacing context pointer (no-op)
 void ResetPacingContext();
 
-// Cleanly shuts down XeMFG, clears contexts, and rolls back all memory patches and detours
+// Cleanly shuts down XeMFG and rolls back all memory patches
 void Shutdown();
 
 // Transactional memory patch test helper for automated unit tests

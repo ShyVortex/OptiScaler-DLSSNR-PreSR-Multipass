@@ -33,166 +33,6 @@ constexpr uintptr_t kRvaU3 = 0x1a517d;
 constexpr uintptr_t kRvaU4 = 0x1a45c2;
 constexpr uintptr_t kRvaU5 = 0x20973b;
 
-// Pacing thunks in libxess_fg.dll v1.3.1.78
-constexpr uintptr_t kRvaThunkGate = 0x25c0;     // Thunk 1 -> Target 0x21f730
-constexpr uintptr_t kRvaThunkSched = 0x3100;    // Thunk 2 -> Target 0x21ee30
-constexpr uintptr_t kRvaThunkDeadline = 0x3430; // Thunk 3 -> Target 0x224b30
-
-constexpr uintptr_t kRvaTargetGate = 0x21f730;
-constexpr uintptr_t kRvaTargetSched = 0x21ee30;
-constexpr uintptr_t kRvaTargetDeadline = 0x224b30;
-
-// Original 16-byte thunks in libxess_fg.dll
-const std::vector<uint8_t> kThunkGateExpected = { 0xe9, 0x6b, 0xd1, 0x21, 0x00, 0xcc, 0xcc, 0xcc,
-                                                  0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
-const std::vector<uint8_t> kThunkSchedExpected = { 0xe9, 0x2b, 0xbd, 0x21, 0x00, 0xcc, 0xcc, 0xcc,
-                                                   0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
-const std::vector<uint8_t> kThunkDeadlineExpected = { 0xe9, 0xfb, 0x16, 0x22, 0x00, 0xcc, 0xcc, 0xcc,
-                                                      0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
-
-// Target function signatures
-typedef uint64_t (*PacingGateFn)(void* rcx, uint32_t edx, uint32_t r8d, void* r9, void* arg5, void* arg6, uint8_t arg7);
-typedef uint64_t (*PacingSchedFn)(void* rcx, void* rdx, uint8_t r8b, void* r9, void* arg5);
-typedef void* (*PacingDeadlineFn)(void* rcx, int64_t* pDeadline, void* r8, void* cycleInfo, uint32_t frameIndex,
-                                  uint32_t totalFrames);
-
-PacingGateFn g_originalGateFn = nullptr;
-PacingSchedFn g_originalSchedFn = nullptr;
-PacingDeadlineFn g_originalDeadlineFn = nullptr;
-
-constexpr size_t kPacingRingSize = 15;
-int64_t g_deltaRingBuffer[kPacingRingSize] = {};
-size_t g_ringIndex = 0;
-size_t g_ringCount = 0;
-int64_t g_lastRealFrameQpc = 0;
-int64_t g_qpcFrequency = 0;
-int64_t g_medianDeltaNs = 0;
-void* g_pacingContext = nullptr;
-
-int64_t CalculateMedianDelta(int64_t newDeltaNs)
-{
-    g_deltaRingBuffer[g_ringIndex] = newDeltaNs;
-    g_ringIndex = (g_ringIndex + 1) % kPacingRingSize;
-    if (g_ringCount < kPacingRingSize)
-        g_ringCount++;
-
-    int64_t sorted[kPacingRingSize];
-    memcpy(sorted, g_deltaRingBuffer, g_ringCount * sizeof(int64_t));
-    std::sort(sorted, sorted + g_ringCount);
-    return sorted[g_ringCount / 2];
-}
-
-uint64_t PacingHookGate(void* rcx, uint32_t edx, uint32_t r8d, void* r9, void* arg5, void* arg6, uint8_t arg7)
-{
-    if (State::Instance().isShuttingDown)
-        return 0;
-
-    if (g_qpcFrequency == 0)
-    {
-        LARGE_INTEGER freq;
-        QueryPerformanceFrequency(&freq);
-        g_qpcFrequency = freq.QuadPart;
-    }
-
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-
-    if (rcx != nullptr)
-        g_pacingContext = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(rcx) + 0x168);
-
-    if (g_lastRealFrameQpc > 0 && g_qpcFrequency > 0)
-    {
-        int64_t deltaNs = (now.QuadPart - g_lastRealFrameQpc) * 1000000000LL / g_qpcFrequency;
-        if (deltaNs > 0 && deltaNs < 500000000LL)
-        {
-            g_medianDeltaNs = CalculateMedianDelta(deltaNs);
-        }
-    }
-    g_lastRealFrameQpc = now.QuadPart;
-
-    if (g_originalGateFn)
-        return g_originalGateFn(rcx, edx, r8d, r9, arg5, arg6, arg7);
-    return 0;
-}
-
-uint64_t PacingHookSched(void* rcx, void* rdx, uint8_t r8b, void* r9, void* arg5)
-{
-    if (State::Instance().isShuttingDown)
-        return 0;
-
-    if (g_originalSchedFn)
-        return g_originalSchedFn(rcx, rdx, r8b, r9, arg5);
-    return 0;
-}
-
-void* PacingHookDeadline(void* rcx, int64_t* pDeadline, void* r8, void* cycleInfo, uint32_t frameIndex,
-                         uint32_t totalFrames)
-{
-    if (State::Instance().isShuttingDown)
-        return nullptr;
-
-    void* res = nullptr;
-    if (g_originalDeadlineFn)
-        res = g_originalDeadlineFn(rcx, pDeadline, r8, cycleInfo, frameIndex, totalFrames);
-
-    if (!pDeadline || !cycleInfo)
-        return res;
-
-    if (frameIndex < 1 || frameIndex > 5 || totalFrames < 2)
-        return res;
-
-    int64_t totalInterval = *reinterpret_cast<int64_t*>(reinterpret_cast<uintptr_t>(cycleInfo) + 8);
-    if (totalInterval <= 0)
-        return res;
-
-    int64_t intervalPerFrame = totalInterval / totalFrames;
-
-    int64_t adjust = 0;
-    void* pacingCtx = g_pacingContext;
-    if (pacingCtx != nullptr)
-    {
-#ifdef _MSC_VER
-        __try
-        {
-            float renderEst = *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pacingCtx) + 0x1b8);
-            renderEst = std::clamp(renderEst, 0.1f, 100.0f);
-            int64_t renderTicks = static_cast<int64_t>(renderEst * 10000.0f) / totalFrames;
-            if (renderTicks < intervalPerFrame)
-                adjust = renderTicks;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            g_pacingContext = nullptr;
-            adjust = 0;
-        }
-#else
-        float renderEst = *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pacingCtx) + 0x1b8);
-        renderEst = std::clamp(renderEst, 0.1f, 100.0f);
-        int64_t renderTicks = static_cast<int64_t>(renderEst * 10000.0f) / totalFrames;
-        if (renderTicks < intervalPerFrame)
-            adjust = renderTicks;
-#endif
-    }
-
-    *pDeadline = (*pDeadline) + frameIndex * (intervalPerFrame - adjust);
-
-    return res;
-}
-
-std::vector<uint8_t> CreateJmpIndirect64(void* target)
-{
-    std::vector<uint8_t> bytes(16, 0xcc);
-    bytes[0] = 0xff;
-    bytes[1] = 0x25;
-    bytes[2] = 0x00;
-    bytes[3] = 0x00;
-    bytes[4] = 0x00;
-    bytes[5] = 0x00;
-    uint64_t addr = reinterpret_cast<uint64_t>(target);
-    memcpy(&bytes[6], &addr, sizeof(uint64_t));
-    return bytes;
-}
-
 struct PatchRecord
 {
     const char* name = nullptr;
@@ -267,10 +107,7 @@ bool TransactionalWrite(std::vector<PatchRecord>& records, XeMfgLoader::Status& 
         }
 
         FlushInstructionCache(GetCurrentProcess(), rec.address, rec.replacement.size());
-        if (strncmp(rec.name, "Pacing/", 7) == 0)
-            status.PacingDetours++;
-        else
-            status.PatchesApplied++;
+        status.PatchesApplied++;
         LOG_INFO("XeMFG unlock: patch {} applied successfully at {:p}", rec.name, (void*) rec.address);
     }
 
@@ -301,9 +138,6 @@ void TransactionalRollback(std::vector<PatchRecord>& records, XeMfgLoader::Statu
         FlushInstructionCache(GetCurrentProcess(), rec.address, rec.original.size());
         LOG_INFO("XeMFG unlock: patch {} rolled back at {:p}", rec.name, (void*) rec.address);
     }
-    g_originalGateFn = nullptr;
-    g_originalSchedFn = nullptr;
-    g_originalDeadlineFn = nullptr;
     status.PacingDetours = 0;
     status.PacingInstalled = false;
     status.VerifiedPacing = false;
@@ -430,35 +264,6 @@ bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrame
     }
     patches.push_back({ "U5/reported-maximum", u5Addr, u5Expected, u5Replace });
 
-    // Optional Presentation Pacing Detours (Thunk 1, 2, 3)
-    if (enablePacing && kRvaThunkDeadline + 16 <= imageSize)
-    {
-        uint8_t* thunkGateAddr = baseAddress + kRvaThunkGate;
-        uint8_t* thunkSchedAddr = baseAddress + kRvaThunkSched;
-        uint8_t* thunkDeadlineAddr = baseAddress + kRvaThunkDeadline;
-
-        if (VerifyBytes(thunkGateAddr, kThunkGateExpected) && VerifyBytes(thunkSchedAddr, kThunkSchedExpected) &&
-            VerifyBytes(thunkDeadlineAddr, kThunkDeadlineExpected))
-        {
-            g_originalGateFn = reinterpret_cast<PacingGateFn>(baseAddress + kRvaTargetGate);
-            g_originalSchedFn = reinterpret_cast<PacingSchedFn>(baseAddress + kRvaTargetSched);
-            g_originalDeadlineFn = reinterpret_cast<PacingDeadlineFn>(baseAddress + kRvaTargetDeadline);
-
-            patches.push_back({ "Pacing/thunk-gate", thunkGateAddr, kThunkGateExpected,
-                                CreateJmpIndirect64(reinterpret_cast<void*>(&PacingHookGate)) });
-            patches.push_back({ "Pacing/thunk-sched", thunkSchedAddr, kThunkSchedExpected,
-                                CreateJmpIndirect64(reinterpret_cast<void*>(&PacingHookSched)) });
-            patches.push_back({ "Pacing/thunk-deadline", thunkDeadlineAddr, kThunkDeadlineExpected,
-                                CreateJmpIndirect64(reinterpret_cast<void*>(&PacingHookDeadline)) });
-
-            LOG_INFO("XeMFG unlock: presentation pacing detours prepared (Thunks 1, 2, 3)");
-        }
-        else
-        {
-            LOG_WARN("XeMFG unlock: pacing thunks byte verification mismatch, skipping pacing detours");
-        }
-    }
-
     // Apply all patches atomically
     if (!TransactionalWrite(patches, outStatus))
     {
@@ -472,11 +277,9 @@ bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrame
 
     outStatus.Patched = (outStatus.PatchesApplied == 5);
     outStatus.Applied = outStatus.Patched;
-    if (outStatus.PacingDetours == 3)
-    {
-        outStatus.PacingInstalled = true;
-        outStatus.VerifiedPacing = true;
-    }
+    outStatus.PacingDetours = 0;
+    outStatus.PacingInstalled = false;
+    outStatus.VerifiedPacing = false;
     g_appliedRecords = patches;
     return outStatus.Patched;
 }
@@ -584,9 +387,8 @@ void TryApply(HMODULE module)
     }
 
     unsigned int targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
-    bool enablePacing = Config::Instance()->XeMfgExtraPacing.value_or(true);
 
-    bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, enablePacing, g_status);
+    bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, false, g_status);
     if (result)
     {
         g_applied = true;
@@ -599,23 +401,15 @@ void TryApply(HMODULE module)
     }
 }
 
-void ResetPacingContext()
-{
-    std::scoped_lock lock(g_mutex);
-    g_pacingContext = nullptr;
-}
+void ResetPacingContext() {}
 
 void Shutdown()
 {
     std::scoped_lock lock(g_mutex);
-    g_pacingContext = nullptr;
-    g_originalGateFn = nullptr;
-    g_originalSchedFn = nullptr;
-    g_originalDeadlineFn = nullptr;
 
     if (!g_appliedRecords.empty())
     {
-        LOG_INFO("XeMfgLoader: Shutting down, rolling back all patches and detours");
+        LOG_INFO("XeMfgLoader: Shutting down, rolling back all memory patches");
         TransactionalRollback(g_appliedRecords, g_status);
         g_appliedRecords.clear();
     }

@@ -750,7 +750,7 @@ class Config
     // XeMFG Unlock
     CustomOptional<bool> XeMfgUnlock { false };
     CustomOptional<int> XeMfgMaxFrames { 3 };
-    CustomOptional<bool> XeMfgExtraPacing { true };
+    CustomOptional<bool> XeMfgExtraPacing { false }; // Deprecated: native presentation pacing preserved
 
     // DLSSG
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance
