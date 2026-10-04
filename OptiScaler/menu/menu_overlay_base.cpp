@@ -30,12 +30,12 @@ void MenuOverlayBase::Init(HWND InHandle, bool isUWP)
     MenuCommon::Init(InHandle, isUWP);
 }
 
-bool MenuOverlayBase::RenderMenu()
+bool MenuOverlayBase::RenderMenu(ImVec2 framebufferSize)
 {
     if (!Config::Instance()->OverlayMenu.value_or_default())
         return false;
 
-    return MenuCommon::RenderMenu();
+    return MenuCommon::RenderMenu(framebufferSize);
 }
 
 void MenuOverlayBase::Present() { MenuCommon::Present(); }

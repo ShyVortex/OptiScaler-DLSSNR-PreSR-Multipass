@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include <dlssnr/DlssNr_MenuOverlay.h>
 #include "menu_common.h"
+#include "menu_viewport.h"
 #if defined(OPTISCALER_RTX40_MFG)
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
@@ -1405,6 +1406,7 @@ struct MenuCommon::RenderMenuContext
     double frameRate = 0.0;
     float menuResScale = 1.0f;
     float fpsScale = 1.0f;
+    ImVec2 framebufferSize { 0.0f, 0.0f };
     float averageFrameTime = 0.0f;
     float averageUpscalerFT = 0.0f;
 
@@ -1683,6 +1685,7 @@ void MenuCommon::BeginMenuFrameIfNeeded(RenderMenuContext& ctx)
             ImGui_ImplUwp_NewFrame(displaySize);
         }
 
+        MenuViewport::SetFramebufferScale(ctx.framebufferSize);
         OptiInput::FeedImGui(_isVisible);
 
         MenuHdrCheck(io);
@@ -8556,6 +8559,7 @@ void MenuCommon::RenderMainMenuWindow(RenderMenuContext& ctx)
                              (state.detectedQuirks.size() > 0) ? "(Q)" : "", state.isOptiPatcherSucceed ? "(OP)" : "");
     }
 
+    MenuViewport::ConstrainWindow(windowTitle.c_str());
     if (ImGui::Begin(windowTitle.c_str(), NULL, flags))
     {
         // Header/status messages shown above the two-column settings table.
@@ -8587,12 +8591,13 @@ void KeyUp(UINT vKey)
     inputFpsCycle = vKey == Config::Instance()->FpsCycleShortcutKey.value_or_default();
 }
 
-bool MenuCommon::RenderMenu()
+bool MenuCommon::RenderMenu(ImVec2 framebufferSize)
 {
     if (!_isInited)
         return false;
 
     RenderMenuContext ctx { State::Instance(), Config::Instance(), ImGui::GetIO() };
+    ctx.framebufferSize = framebufferSize;
     ctx.now = Util::MillisecondsNow();
     ctx.currentFeature = ctx.state.currentFeature;
 

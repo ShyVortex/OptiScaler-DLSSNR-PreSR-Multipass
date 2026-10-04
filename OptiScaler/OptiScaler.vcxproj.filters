@@ -281,6 +281,9 @@
     <ClInclude Include="menu\menu_common.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="menu\menu_viewport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="menu\menu_dx11.h">
       <Filter>Header Files</Filter>
     </ClInclude>

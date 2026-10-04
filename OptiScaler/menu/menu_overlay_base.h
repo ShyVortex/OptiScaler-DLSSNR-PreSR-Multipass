@@ -4,6 +4,7 @@
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <imgui/imgui.h>
 
 class MenuOverlayBase
 {
@@ -18,7 +19,7 @@ class MenuOverlayBase
     static bool IsVisible();
 
     static void Init(HWND InHandle, bool isUWP);
-    static bool RenderMenu();
+    static bool RenderMenu(ImVec2 framebufferSize = { 0.0f, 0.0f });
     static void Shutdown();
     static void HideMenu();
     static void Present();

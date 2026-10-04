@@ -124,7 +124,7 @@ bool Menu_Dx12::Render(ID3D12GraphicsCommandList* pCmdList, ID3D12Resource* outT
         // ImGui_ImplWin32_NewFrame();
 
         // Render
-        if (MenuDxBase::RenderMenu())
+        if (MenuDxBase::RenderMenu({ static_cast<float>(outDesc.Width), static_cast<float>(outDesc.Height) }))
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), pCmdList);
 
         outBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -171,7 +171,7 @@ bool Menu_Dx12::Render(ID3D12GraphicsCommandList* pCmdList, ID3D12Resource* outT
     // ImGui_ImplWin32_NewFrame();
 
     // Render to buffer
-    if (MenuDxBase::RenderMenu())
+    if (MenuDxBase::RenderMenu({ static_cast<float>(outDesc.Width), static_cast<float>(outDesc.Height) }))
     {
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), pCmdList);
 
