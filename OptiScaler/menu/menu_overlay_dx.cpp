@@ -433,7 +433,9 @@ static void RenderImGui_DX12(IDXGISwapChain* pSwapChainPlain)
 
             ImGui_ImplDX12_NewFrame();
 
-            if (MenuOverlayBase::RenderMenu())
+            const auto targetDesc = g_mainRenderTargetResource[0]->GetDesc();
+            if (MenuOverlayBase::RenderMenu(
+                    { static_cast<float>(targetDesc.Width), static_cast<float>(targetDesc.Height) }))
             {
                 ImGui::Render();
 

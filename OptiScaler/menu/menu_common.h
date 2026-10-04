@@ -192,7 +192,7 @@ class MenuCommon
     static bool IsVisible() { return _isVisible; }
     static HWND Handle() { return _handle; }
 
-    static bool RenderMenu();
+    static bool RenderMenu(ImVec2 framebufferSize = { 0.0f, 0.0f });
     static void Init(HWND InHwnd, bool isUWP);
     static void Shutdown();
     static void HideMenu();

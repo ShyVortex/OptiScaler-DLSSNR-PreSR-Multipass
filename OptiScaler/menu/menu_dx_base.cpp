@@ -10,12 +10,12 @@
 
 #include <imgui/imgui_impl_win32.h>
 
-bool MenuDxBase::RenderMenu()
+bool MenuDxBase::RenderMenu(ImVec2 framebufferSize)
 {
     if (Config::Instance()->OverlayMenu.value_or_default())
         return false;
 
-    if (MenuCommon::RenderMenu())
+    if (MenuCommon::RenderMenu(framebufferSize))
     {
         ImGui::Render();
         return true;
