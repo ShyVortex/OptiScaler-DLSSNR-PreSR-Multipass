@@ -1,13 +1,13 @@
+﻿#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
 
 // Standalone unit test for XeFG Multi-Frame Generation, Streamline option routing,
-// passthrough mode crash prevention, and mutual exclusion.
+// transition gating deduplication, passthrough mode crash prevention, and mutual exclusion.
 
 namespace sl
 {
@@ -102,6 +102,7 @@ class MockXeFG_Dx12
 
   public:
     uint32_t executedPresentPasses = 0;
+    uint32_t setInterpolatedCountCalls = 0;
     bool crashSimulated = false;
 
     MockXeFG_Dx12(bool dlssgInput = false)
@@ -132,6 +133,8 @@ class MockXeFG_Dx12
 
     void SetInterpolatedFrameCount(uint32_t count)
     {
+        setInterpolatedCountCalls++;
+
         if (count == 0)
         {
             _passthrough = true;
@@ -187,6 +190,10 @@ struct MockConfig
     bool FGDLSSGSmoothMotion = false;
 };
 
+static sl::DLSSGMode g_previousMode = sl::DLSSGMode::eOff;
+
+void ResetStreamlineSetOptionsState() { g_previousMode = sl::DLSSGMode::eOff; }
+
 // Simulated Streamline DLSSG GetState logic
 sl::Result SimulateStreamlineGetState(MockState& state, sl::DLSSGState& outState)
 {
@@ -202,10 +209,22 @@ sl::Result SimulateStreamlineGetState(MockState& state, sl::DLSSGState& outState
     return sl::Result::eOk;
 }
 
-// Simulated Streamline DLSSG SetOptions logic
+// Simulated Streamline DLSSG SetOptions logic with transition gating
 sl::Result SimulateStreamlineSetOptions(MockState& state, MockConfig& config, MockXeFG_Dx12& currentFG,
                                         const sl::DLSSGOptions& options)
 {
+    bool modeChanged = (options.mode != g_previousMode);
+    bool countChanged = (options.mode == sl::DLSSGMode::eOff)
+                            ? (state.dlssgDetectedInterpolationCount != 0)
+                            : (state.dlssgDetectedInterpolationCount != static_cast<int>(options.numFramesToGenerate));
+
+    if (!modeChanged && !countChanged)
+    {
+        return sl::Result::eOk;
+    }
+
+    g_previousMode = options.mode;
+
     if (options.mode == sl::DLSSGMode::eOff)
     {
         state.dlssgDetectedInterpolationCount = 0;
@@ -371,6 +390,7 @@ int main()
         assert(!shouldActivate && "Streamline constants must NOT prematurely activate XeFG in passthrough");
 
         MockConfig config;
+        ResetStreamlineSetOptionsState();
 
         // Now game turns on DLSSG with 3 generated frames (4X FG)
         sl::DLSSGOptions options;
@@ -394,6 +414,57 @@ int main()
         assert(!MockXeFGProxy::Enabled && "Proxy must be disabled");
 
         printf("  [PASS] Test 6: Startup in passthrough and premature activation prevention.\n");
+    }
+
+    // Test 7: Streamline SetOptions Transition Gating & State Deduplication
+    {
+        ResetStreamlineSetOptionsState();
+        MockState gateState;
+        MockConfig gateConfig;
+        MockXeFG_Dx12 gateXeFG;
+        gateXeFG.setInterpolatedCountCalls = 0;
+
+        sl::DLSSGOptions offOpt;
+        offOpt.mode = sl::DLSSGMode::eOff;
+        offOpt.numFramesToGenerate = 0;
+
+        // Call SetOptions 100 times while eOff
+        for (int i = 0; i < 100; ++i)
+        {
+            SimulateStreamlineSetOptions(gateState, gateConfig, gateXeFG, offOpt);
+        }
+        // Since initial g_previousMode was eOff and count was 0, zero updates were needed!
+        assert(gateXeFG.setInterpolatedCountCalls == 0 && "eOff without state change must NOT trigger updates");
+
+        // Game turns FG on with 3 generated frames
+        sl::DLSSGOptions onOpt;
+        onOpt.mode = sl::DLSSGMode::eOn;
+        onOpt.numFramesToGenerate = 3;
+
+        // First frame enabling FG
+        SimulateStreamlineSetOptions(gateState, gateConfig, gateXeFG, onOpt);
+        assert(gateXeFG.setInterpolatedCountCalls == 1 && "First frame enabling FG must trigger update");
+
+        // Next 99 frames keeping same state
+        for (int i = 0; i < 99; ++i)
+        {
+            SimulateStreamlineSetOptions(gateState, gateConfig, gateXeFG, onOpt);
+        }
+        assert(gateXeFG.setInterpolatedCountCalls == 1 && "99 identical frames must NOT trigger updates");
+
+        // Game changes multiplier from 3 to 2 (count changed)
+        onOpt.numFramesToGenerate = 2;
+        SimulateStreamlineSetOptions(gateState, gateConfig, gateXeFG, onOpt);
+        assert(gateXeFG.setInterpolatedCountCalls == 2 && "Changing frame count must trigger update");
+
+        // 50 more identical frames with 2
+        for (int i = 0; i < 50; ++i)
+        {
+            SimulateStreamlineSetOptions(gateState, gateConfig, gateXeFG, onOpt);
+        }
+        assert(gateXeFG.setInterpolatedCountCalls == 2 && "Redundant frames must be completely deduplicated");
+
+        printf("  [PASS] Test 7: Streamline SetOptions transition gating and state deduplication.\n");
     }
 
     printf("[+] All XeFG MFG & Streamline unit tests PASSED successfully!\n");

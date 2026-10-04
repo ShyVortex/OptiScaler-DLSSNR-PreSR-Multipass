@@ -1,13 +1,13 @@
-﻿#include <cassert>
+﻿#include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <algorithm>
 #include <string>
 #include <vector>
 
 // Standalone unit test for XeMfgLoader memory patching, transaction safety,
-// signature fallbacks, and pacing verification.
+// signature fallbacks, and clean native execution.
 
 namespace XeMfgTest
 {
@@ -45,19 +45,6 @@ static const uint8_t U4_SIG[] = { 0xC7, 0x87, 0x6C, 0x01, 0x00, 0x00, 0x01, 0x00
                                   0x00, 0x00, 0xC6, 0x87, 0x68, 0x01, 0x00, 0x00 };
 static const uint8_t U5_SIG[] = { 0xB8, 0x01, 0x00, 0x00, 0x00, 0x89, 0x47, 0x20, 0x33, 0xC0, 0x48, 0x8B, 0x9C, 0x24 };
 
-static const uint8_t THUNK_GATE_ORIG[] = { 0xe9, 0x6b, 0xd1, 0x21, 0x00, 0xcc, 0xcc, 0xcc,
-                                           0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
-static const uint8_t THUNK_SCHED_ORIG[] = { 0xe9, 0x2b, 0xbd, 0x21, 0x00, 0xcc, 0xcc, 0xcc,
-                                            0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
-static const uint8_t THUNK_DEADLINE_ORIG[] = { 0xe9, 0xfb, 0x16, 0x22, 0x00, 0xcc, 0xcc, 0xcc,
-                                               0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc };
-
-static const uint8_t PACING_GATE_SIG[] = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74,
-                                           0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20 };
-static const uint8_t PACING_SCHED_SIG[] = { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8 };
-static const uint8_t PACING_BURST_SIG[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74,
-                                            0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30 };
-
 struct PatchRecord
 {
     uint8_t* address = nullptr;
@@ -71,9 +58,6 @@ class SimulatedXeMfgEngine
     bool applied = false;
     bool lastFailure = false;
     uint32_t patchesApplied = 0;
-    uint32_t pacingDetours = 0;
-    bool pacingInstalled = false;
-    bool verifiedPacing = false;
     uint32_t maxGeneratedFrames = 3;
     std::vector<PatchRecord> appliedRecords;
 
@@ -102,7 +86,7 @@ class SimulatedXeMfgEngine
         return nullptr;
     }
 
-    bool Apply(uint8_t* baseAddress, size_t imageSize, uint32_t maxFrames, bool extraPacing)
+    bool Apply(uint8_t* baseAddress, size_t imageSize, uint32_t maxFrames)
     {
         applied = false;
         lastFailure = false;
@@ -164,44 +148,6 @@ class SimulatedXeMfgEngine
             patchesApplied++;
         }
 
-        if (extraPacing)
-        {
-            if (0x3430 + 16 <= imageSize && std::memcmp(baseAddress + 0x25c0, THUNK_GATE_ORIG, 16) == 0 &&
-                std::memcmp(baseAddress + 0x3100, THUNK_SCHED_ORIG, 16) == 0 &&
-                std::memcmp(baseAddress + 0x3430, THUNK_DEADLINE_ORIG, 16) == 0)
-            {
-                uint32_t thunkRvas[] = { 0x25c0, 0x3100, 0x3430 };
-                for (auto rva : thunkRvas)
-                {
-                    PatchRecord rec;
-                    rec.address = baseAddress + rva;
-                    rec.originalBytes.assign(baseAddress + rva, baseAddress + rva + 16);
-                    std::vector<uint8_t> thunkPatch(16, 0xcc);
-                    thunkPatch[0] = 0xff;
-                    thunkPatch[1] = 0x25;
-                    thunkPatch[2] = 0x00;
-                    thunkPatch[3] = 0x00;
-                    thunkPatch[4] = 0x00;
-                    thunkPatch[5] = 0x00;
-                    rec.patchedBytes = thunkPatch;
-                    std::memcpy(baseAddress + rva, thunkPatch.data(), 16);
-                    appliedRecords.push_back(rec);
-                }
-                pacingDetours = 3;
-                pacingInstalled = true;
-                verifiedPacing = true;
-            }
-            else
-            {
-                bool g1 = (FindSignature(baseAddress, imageSize, PACING_GATE_SIG, sizeof(PACING_GATE_SIG)) != nullptr);
-                bool g2 =
-                    (FindSignature(baseAddress, imageSize, PACING_SCHED_SIG, sizeof(PACING_SCHED_SIG)) != nullptr);
-                bool g3 =
-                    (FindSignature(baseAddress, imageSize, PACING_BURST_SIG, sizeof(PACING_BURST_SIG)) != nullptr);
-                verifiedPacing = (g1 && g2 && g3);
-            }
-        }
-
         applied = true;
         return true;
     }
@@ -217,21 +163,10 @@ class SimulatedXeMfgEngine
         }
         appliedRecords.clear();
         patchesApplied = 0;
-        pacingDetours = 0;
-        pacingInstalled = false;
-        verifiedPacing = false;
         applied = false;
     }
 
-    void* pacingContext = nullptr;
-
-    void ResetPacingContext() { pacingContext = nullptr; }
-
-    void Shutdown()
-    {
-        ResetPacingContext();
-        Rollback();
-    }
+    void Shutdown() { Rollback(); }
 
     uint32_t EffectiveMax(uint32_t nativeReported) const
     {
@@ -257,16 +192,6 @@ static void PopulateValidImage(std::vector<uint8_t>& image)
     std::memcpy(image.data() + 0x1a45c2, U4_SIG, sizeof(U4_SIG));
     // U5 at 0x20973b
     std::memcpy(image.data() + 0x20973b, U5_SIG, sizeof(U5_SIG));
-
-    // Pacing thunks at 0x25c0, 0x3100, 0x3430
-    std::memcpy(image.data() + 0x25c0, THUNK_GATE_ORIG, sizeof(THUNK_GATE_ORIG));
-    std::memcpy(image.data() + 0x3100, THUNK_SCHED_ORIG, sizeof(THUNK_SCHED_ORIG));
-    std::memcpy(image.data() + 0x3430, THUNK_DEADLINE_ORIG, sizeof(THUNK_DEADLINE_ORIG));
-
-    // Pacing anchors at 0x224cf0, 0x21ee30, 0x224b30
-    std::memcpy(image.data() + 0x224cf0, PACING_GATE_SIG, sizeof(PACING_GATE_SIG));
-    std::memcpy(image.data() + 0x21ee30, PACING_SCHED_SIG, sizeof(PACING_SCHED_SIG));
-    std::memcpy(image.data() + 0x224b30, PACING_BURST_SIG, sizeof(PACING_BURST_SIG));
 }
 } // namespace XeMfgTest
 
@@ -282,13 +207,10 @@ int main()
 
     // Test 1: Standard Application on Valid Image
     {
-        bool ok = engine.Apply(image.data(), image.size(), 3, true);
+        bool ok = engine.Apply(image.data(), image.size(), 3);
         assert(ok && "XeMfgEngine::Apply must succeed on valid image");
         assert(engine.applied && "Engine must be marked applied");
         assert(engine.patchesApplied == 5 && "Exactly 5 patches must be applied");
-        assert(engine.pacingDetours == 3 && "Exactly 3 pacing detours must be applied");
-        assert(engine.pacingInstalled && "Pacing must be marked installed");
-        assert(engine.verifiedPacing && "Extra pacing anchors must be verified");
         assert(!engine.lastFailure && "Last failure must be false");
 
         // Verify U1
@@ -302,14 +224,9 @@ int main()
         // Verify U5 MaxFrames = 3
         assert(image[0x20973b + 1] == 3);
 
-        // Verify Pacing Thunks
-        assert(image[0x25c0] == 0xff && image[0x25c0 + 1] == 0x25 && "Thunk 1 must be detoured");
-        assert(image[0x3100] == 0xff && image[0x3100 + 1] == 0x25 && "Thunk 2 must be detoured");
-        assert(image[0x3430] == 0xff && image[0x3430 + 1] == 0x25 && "Thunk 3 must be detoured");
-
         // Check EffectiveMax
         assert(engine.EffectiveMax(1) == 3 && "EffectiveMax must report 3 (4X MFG)");
-        printf("  [PASS] Test 1: Fast-path RVA patch application and pacing detours.\n");
+        printf("  [PASS] Test 1: Fast-path RVA parameter unlock patch application (clean engine).\n");
     }
 
     // Test 2: Clean Rollback
@@ -317,12 +234,6 @@ int main()
         engine.Rollback();
         assert(!engine.applied && "Engine must report not applied after rollback");
         assert(engine.patchesApplied == 0 && "Patches applied must be 0 after rollback");
-        assert(engine.pacingDetours == 0 && "Pacing detours must be 0 after rollback");
-        assert(!engine.pacingInstalled && "Pacing must not be marked installed after rollback");
-        assert(std::memcmp(image.data() + 0x25c0, XeMfgTest::THUNK_GATE_ORIG, 16) == 0 && "Thunk 1 must be restored");
-        assert(std::memcmp(image.data() + 0x3100, XeMfgTest::THUNK_SCHED_ORIG, 16) == 0 && "Thunk 2 must be restored");
-        assert(std::memcmp(image.data() + 0x3430, XeMfgTest::THUNK_DEADLINE_ORIG, 16) == 0 &&
-               "Thunk 3 must be restored");
         assert(std::memcmp(image.data(), pristineImage.data(), image.size()) == 0 &&
                "Rollback must restore image to pristine identity");
         assert(engine.EffectiveMax(1) == 1 && "EffectiveMax must revert to native reported count");
@@ -338,20 +249,13 @@ int main()
         std::memcpy(shiftedImage.data() + 0x1a517d + 0x100, XeMfgTest::U3_SIG, sizeof(XeMfgTest::U3_SIG));
         std::memcpy(shiftedImage.data() + 0x1a45c2 + 0x100, XeMfgTest::U4_SIG, sizeof(XeMfgTest::U4_SIG));
         std::memcpy(shiftedImage.data() + 0x20973b + 0x100, XeMfgTest::U5_SIG, sizeof(XeMfgTest::U5_SIG));
-        std::memcpy(shiftedImage.data() + 0x224cf0 + 0x100, XeMfgTest::PACING_GATE_SIG,
-                    sizeof(XeMfgTest::PACING_GATE_SIG));
-        std::memcpy(shiftedImage.data() + 0x21ee30 + 0x100, XeMfgTest::PACING_SCHED_SIG,
-                    sizeof(XeMfgTest::PACING_SCHED_SIG));
-        std::memcpy(shiftedImage.data() + 0x224b30 + 0x100, XeMfgTest::PACING_BURST_SIG,
-                    sizeof(XeMfgTest::PACING_BURST_SIG));
 
         std::vector<uint8_t> shiftedPristine = shiftedImage;
 
-        bool ok = engine.Apply(shiftedImage.data(), shiftedImage.size(), 5, true);
+        bool ok = engine.Apply(shiftedImage.data(), shiftedImage.size(), 5);
         assert(ok && "Apply must succeed via signature scanning fallback");
         assert(engine.applied && "Engine must be applied");
         assert(engine.patchesApplied == 5 && "All 5 patches must be applied via signatures");
-        assert(engine.verifiedPacing && "Pacing anchors must be located via signatures");
 
         // Verify U3, U4, U5 with MaxFrames = 5 (6X FG)
         assert(shiftedImage[0x1a517d + 0x100 + 1] == 5);
@@ -372,7 +276,7 @@ int main()
         std::memset(corruptImage.data() + 0x1a45c2, 0xCC, 64);
         std::vector<uint8_t> corruptPristine = corruptImage;
 
-        bool ok = engine.Apply(corruptImage.data(), corruptImage.size(), 4, true);
+        bool ok = engine.Apply(corruptImage.data(), corruptImage.size(), 4);
         assert(!ok && "Apply must fail when a patch target cannot be resolved");
         assert(!engine.applied && "Engine must not be marked applied");
         assert(engine.lastFailure && "lastFailure must be set to true");
@@ -388,43 +292,34 @@ int main()
         XeMfgTest::PopulateValidImage(testImg);
 
         // Clamp below 1 -> 1
-        engine.Apply(testImg.data(), testImg.size(), 0, false);
+        engine.Apply(testImg.data(), testImg.size(), 0);
         assert(engine.maxGeneratedFrames == 1);
         assert(engine.EffectiveMax(1) == 1);
         engine.Rollback();
 
         // Clamp above 5 -> 5
-        engine.Apply(testImg.data(), testImg.size(), 99, false);
+        engine.Apply(testImg.data(), testImg.size(), 99);
         assert(engine.maxGeneratedFrames == 5);
         assert(engine.EffectiveMax(1) == 5);
         engine.Rollback();
         printf("  [PASS] Test 5: Multiplier range clamping (1 to 5).\n");
     }
 
-    // Test 6: Safe Teardown & Context Invalidation (Shutdown & ResetPacingContext)
+    // Test 6: Safe Teardown & Lifecycle Rollback (Shutdown)
     {
         std::vector<uint8_t> testImg;
         XeMfgTest::PopulateValidImage(testImg);
         std::vector<uint8_t> pristine = testImg;
 
-        bool ok = engine.Apply(testImg.data(), testImg.size(), 4, true);
+        bool ok = engine.Apply(testImg.data(), testImg.size(), 4);
         assert(ok);
         assert(engine.applied);
-        assert(engine.pacingDetours == 3);
 
-        int dummyContext = 42;
-        engine.pacingContext = &dummyContext;
-
-        engine.ResetPacingContext();
-        assert(engine.pacingContext == nullptr && "ResetPacingContext must nullify cached context");
-
-        engine.pacingContext = &dummyContext;
         engine.Shutdown();
-        assert(engine.pacingContext == nullptr && "Shutdown must nullify cached context");
         assert(!engine.applied && "Shutdown must mark engine as unapplied");
-        assert(engine.pacingDetours == 0 && "Shutdown must clear pacing detours");
+        assert(engine.patchesApplied == 0 && "Shutdown must clear applied patches");
         assert(testImg == pristine && "Shutdown must restore image byte-for-byte");
-        printf("  [PASS] Test 6: Safe lifecycle teardown and pacing context invalidation.\n");
+        printf("  [PASS] Test 6: Safe lifecycle teardown restores pristine image byte-for-byte.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");

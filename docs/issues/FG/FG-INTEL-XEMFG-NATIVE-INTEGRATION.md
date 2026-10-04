@@ -297,5 +297,72 @@ Analysis of `OptiScaler_test3.log` (42 MB trace) revealed four critical defects:
    - `tests/xemfg_loader_unit.cpp`: Added Test 6 validating `Shutdown()`, `ResetPacingContext()`, and full transactional image rollback.
    - `tests/xemfg_menu_exclusion_unit.cpp`: Created comprehensive unit tests validating menu UI conflict suppression, notice rendering, and strict 3-way mutual exclusion across Ada, Ampere, and XeMFG.
 
+---
+
+## 10. Field Test 4 Verification: Presentation Pacing Detour Elimination, Log Spam Throttling, Pipeline Isolation & Final Results (Resident Evil Requiem)
+
+### 10.1 Fourth Test Symptoms & User Report
+Following Field Test 3 adjustments, end-to-end testing in *Resident Evil Requiem* on Windows 11 with an RTX 3080 Ti Laptop GPU revealed persistent issues documented in `OptiScaler_test4.log`:
+1. **Aggressive Stuttering Across All Multipliers (including 2X)**:
+   - Even when generating a single intermediate frame (2X XeFG), the game experienced severe stuttering and judder on Windows.
+   - In stark contrast, running 2X XeFG on Linux via OptiScaler's FSR FG fallback executes flawlessly with zero stutter, excellent pacing, and complete stability.
+2. **Process Shutdown Crash**:
+   - Exiting the game produced an unhandled exception dialog from Windows (`re9.exe` crash in `KERNELBASE.dll` / `ntdll.dll`).
+3. **Pipeline Configuration Leakage & Menu Overwrites**:
+   - Users could still overwrite `FGInput` and `FGOutput` in the standard Frame Generation menu section or in `OptiScaler.ini`, breaking the XeMFG pipeline.
+
+### 10.2 Root Cause Analysis from Session Traces (`OptiScaler_test4.log`)
+Detailed trace analysis of `OptiScaler_test4.log` and reverse engineering of `libxess_fg.dll` revealed four critical defects:
+1. **Destructive Presentation Detours in `libxess_fg.dll`**:
+   - RVAs `0x25c0`, `0x3100`, and `0x3430` in `libxess_fg.dll` are not innocent entry trampolines; they are core internal presentation scheduling, frame pacing, and deadline functions.
+   - Overwriting these locations with 16-byte absolute indirect JMP stubs (`ff 25 00 00 00 00 ...`) clobbered Intel's native presentation engine, corrupting internal state machines and breaking hardware-accelerated presentation queueing even for native 2X generation.
+   - On Linux, OptiScaler routes standard XeFG without modifying these locations; `libxess_fg.dll` runs 100% native with perfect presentation pacing. Removing the pacing detours restores this identical native behavior on Windows.
+2. **Streamline `hkslDLSSGSetOptions` Log Saturation & Render Thread Stalling**:
+   - The game engine calls `slDLSSGSetOptions` on every rendered frame.
+   - Without transition gating, OptiScaler executed `currentFG->SetInterpolatedFrameCount(0)` on every frame during `eOff`, writing over 500,000 log lines to disk in 5 minutes (~1,600 synchronous lines/second) on the main render thread.
+   - This continuous I/O saturation caused massive frametime spikes and presentation stalls.
+3. **Exit Crash from Corrupted Internal Functions and Thread Pool Teardown**:
+   - Because internal presentation functions in `libxess_fg.dll` had been overwritten with jump stubs, worker threads and DXGI waitables during DLL unload attempted to access clobbered code during process termination, triggering access violations in `ntdll.dll` / `KERNELBASE.dll`.
+4. **Persistent Pipeline Coupling**:
+   - Unlike Ada and Ampere MFG unlocks which operate independently of `FGInput` and `FGOutput` in `OptiScaler.ini`, XeMFG was coupled to persistent settings, and the in-game UI permitted users to overwrite them while XeMFG was active.
+
+### 10.3 Solutions Applied
+1. **Presentation Pacing Detour Elimination & Clean Engine (`XeMfgLoader.h` & `XeMfgLoader.cpp`)**:
+   - Completely stripped all destructive presentation pacing detours (`PacingHookGate`, `PacingHookSched`, `PacingHookDeadline`, `CreateJmpIndirect64`, and the median filter ring buffer).
+   - Preserved strictly the 5 clean parameter unlock patches (`U1` through `U5`), which modify only limits and validation flags without altering presentation code flow.
+   - Deprecated `XeMfgExtraPacing` (default `false`, no-op) in `Config.h`, removed serialization from `Config.cpp` and `OptiScaler.ini`.
+   - Removed the "Burst Frame Pacing (>2X)" checkbox from `menu_common.cpp`.
+2. **Transition Gating & Deduplication in Streamline Hooks (`Streamline_Hooks.cpp`)**:
+   - Added comparison against `previousMode` and `state.dlssgDetectedInterpolationCount` in `hkslDLSSGSetOptions`.
+   - Only invokes `currentFG->SetInterpolatedFrameCount()` and writes informational logs upon genuine state transitions (`modeChanged || countChanged`), eliminating 500,000 lines of synchronous disk write spam.
+3. **Independent XeMFG Pipeline Isolation & Menu Lockout (`dllmain.cpp` & `menu_common.cpp`)**:
+   - In `dllmain.cpp`, made volatile overrides (`FGInput = DLSSG`, `FGOutput = XeFG`, `FGEnabled = true`) unconditional when `XeMfgUnlock = true`, decoupling runtime execution from saved `OptiScaler.ini` settings.
+   - In `menu_common.cpp` (`RenderFrameGenerationSelection`), added `xeActive` to the early-return guard: displays an explanatory notice that XeMFG is active and returns early, completely suppressing and locking out the legacy Frame Generation section (`FG Input`, `FG Output`, `FG Nvngx Replacement`, etc.).
+
+### 10.4 Verification & Automated Test Results
+1. **`tests/xemfg_loader_unit.cpp`** (PASSED - 6/6 tests):
+   - Validates fast-path RVA parameter unlock patches (`U1`–`U5`) on a clean engine without pacing detours.
+   - Validates clean byte-for-byte rollback restoring pristine binary state.
+   - Validates relocated signature scanning fallback up to 6X Multi-Frame Generation (5 generated frames).
+   - Validates atomic transaction rollback on patch corruption.
+   - Validates multiplier range clamping (1 to 5).
+   - Validates safe lifecycle teardown (`Shutdown()`).
+2. **`tests/xefg_mfg_streamline_unit.cpp`** (PASSED - 7/7 tests):
+   - Validates Streamline GetState capability advertising and safety clamping.
+   - Validates Streamline SetOptions multiplier routing and XeFG execution.
+   - Validates in-game disable entering passthrough mode without crashing.
+   - Validates re-enabling Multi-Frame Generation smoothly from passthrough.
+   - Validates strict mutual exclusion across Ada, Ampere, and XeMFG.
+   - Validates startup in passthrough and premature activation prevention.
+   - Validates Streamline SetOptions transition gating and state deduplication across 100+ frames.
+3. **`tests/xemfg_menu_exclusion_unit.cpp`** (PASSED - 3/3 tests):
+   - Validates active XeMFG locking out standard FG selection controls and displaying explanatory notice.
+   - Validates inactive XeMFG rendering standard FG selection and legacy controls normally.
+   - Validates strict 3-way mutual exclusion enforcement between Ada, Ampere, and XeMFG.
+4. **Code Quality & MSVC Standards**:
+   - UTF-8 BOM (`\xef\xbb\xbf`) preserved across all modified files.
+   - Zero violations on `clang-format --dry-run --Werror`.
+
+
 
 

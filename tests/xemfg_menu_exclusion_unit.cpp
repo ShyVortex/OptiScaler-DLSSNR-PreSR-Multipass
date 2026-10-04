@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-// Standalone unit test validating XeMFG menu UI conflict suppression below
-// Advanced FG Settings, notice rendering, and strict mutual exclusion.
+// Standalone unit test validating XeMFG menu UI conflict suppression,
+// standard FG selection lockout, notice rendering, and strict mutual exclusion.
 
 template <class T> class TestCustomOptional : public std::optional<T>
 {
@@ -62,20 +62,31 @@ struct SimulatedConfig
 
 struct SimulatedState
 {
+    bool externalFrameGeneration = false;
     FGInput activeFgInput = FGInput::NoFG;
     FGOutput activeFgOutput = FGOutput::NoFG;
     bool currentFGSwapchain = false;
-    bool dlssgDetectedInterpolationCount = 0;
+    int dlssgDetectedInterpolationCount = 0;
 };
 
 struct MenuUiOutput
 {
+    // 1. Dedicated XeMFG section
     bool xeMfgDedicatedSectionRendered = false;
+
+    // 2. Standard Frame Generation Selection (RenderFrameGenerationSelection)
+    bool standardFgSelectionRendered = false;
+    bool standardFgLockedNoticeRendered = false;
+    std::string standardFgLockedNoticeText;
+
+    // 3. Legacy XeFG Runtime section below Advanced FG Settings
     bool legacyXeFgSectionRendered = false;
     bool legacyXeFgNoticeRendered = false;
     bool legacyXeFgControlsInteractive = false;
+    std::string runtimeNoticeText;
+
+    // 4. Streamline FG Inputs section
     bool streamlineInputsSectionRendered = false;
-    std::string noticeText;
 };
 
 static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const SimulatedState& state)
@@ -90,12 +101,30 @@ static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const Simu
         out.xeMfgDedicatedSectionRendered = true;
     }
 
-    // 2. XeFG controls below Advanced FG Settings
+    // 2. Standard Frame Generation Selection (RenderFrameGenerationSelection)
+    if (state.externalFrameGeneration || xeMfgActive)
+    {
+        if (xeMfgActive)
+        {
+            out.standardFgLockedNoticeRendered = true;
+            out.standardFgLockedNoticeText =
+                "Intel Xe Multi-Frame Generation (XeMFG) is active. Standard Frame Generation controls are locked and "
+                "managed automatically.";
+        }
+        out.standardFgSelectionRendered = false; // Early return prevents rendering FG Enabled, Input, Output
+    }
+    else
+    {
+        out.standardFgSelectionRendered = true;
+        out.standardFgLockedNoticeRendered = false;
+    }
+
+    // 3. XeFG controls below Advanced FG Settings (RenderFrameGenerationRuntimeSettings)
     if (xeMfgActive && state.activeFgOutput == FGOutput::XeFG)
     {
         out.legacyXeFgSectionRendered = true;
         out.legacyXeFgNoticeRendered = true;
-        out.noticeText = "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above.";
+        out.runtimeNoticeText = "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above.";
         out.legacyXeFgControlsInteractive = false; // Controls are suppressed!
     }
     else if (!xeMfgActive && state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
@@ -106,7 +135,7 @@ static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const Simu
         out.legacyXeFgControlsInteractive = true; // Interactive Active##3 and MFG combo
     }
 
-    // 3. Streamline FG Inputs
+    // 4. Streamline FG Inputs
     if (!xeMfgActive && state.currentFGSwapchain && state.activeFgInput == FGInput::DLSSG)
     {
         out.streamlineInputsSectionRendered = true;
@@ -119,7 +148,7 @@ int main()
 {
     printf("[+] Starting XeMFG Menu UI Conflict Suppression & Exclusion Tests...\n");
 
-    // Test 1: Active XeMFG suppresses legacy XeFG controls and Streamline prompt
+    // Test 1: Active XeMFG locks out standard FG selection and suppresses legacy XeFG controls
     {
         SimulatedConfig config;
         config.XeMfgUnlock = true;
@@ -135,15 +164,16 @@ int main()
         auto ui = SimulateRenderMenu(config, state);
 
         assert(ui.xeMfgDedicatedSectionRendered && "Dedicated XeMFG section must be rendered");
+        assert(!ui.standardFgSelectionRendered && "Standard FG selection controls must be locked out and suppressed");
+        assert(ui.standardFgLockedNoticeRendered && "Lockout notice must be displayed in standard FG selection");
         assert(ui.legacyXeFgSectionRendered && "Legacy XeFG header rendered with notice");
-        assert(ui.legacyXeFgNoticeRendered && "Managed notice must be displayed");
+        assert(ui.legacyXeFgNoticeRendered && "Managed notice must be displayed in runtime settings");
         assert(!ui.legacyXeFgControlsInteractive && "Legacy Active##3 and MFG controls must be suppressed");
         assert(!ui.streamlineInputsSectionRendered && "Redundant Streamline FG Inputs section must be suppressed");
-        assert(ui.noticeText == "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above.");
-        printf("  [PASS] Test 1: Active XeMFG suppresses legacy XeFG controls and Streamline prompt.\n");
+        printf("  [PASS] Test 1: Active XeMFG locks standard FG selection and suppresses duplicate controls.\n");
     }
 
-    // Test 2: Inactive XeMFG allows legacy XeFG controls and Streamline prompt
+    // Test 2: Inactive XeMFG restores standard FG selection and allows legacy XeFG controls
     {
         SimulatedConfig config;
         config.XeMfgUnlock = false;
@@ -159,11 +189,13 @@ int main()
         auto ui = SimulateRenderMenu(config, state);
 
         assert(!ui.xeMfgDedicatedSectionRendered && "XeMFG section must not be rendered when disabled");
+        assert(ui.standardFgSelectionRendered && "Standard FG selection controls must be rendered normally");
+        assert(!ui.standardFgLockedNoticeRendered && "No lockout notice when XeMFG is disabled");
         assert(ui.legacyXeFgSectionRendered && "Legacy XeFG section rendered");
         assert(!ui.legacyXeFgNoticeRendered && "Managed notice must not be rendered when XeMFG is disabled");
         assert(ui.legacyXeFgControlsInteractive && "Legacy Active##3 and MFG controls must remain interactive");
         assert(ui.streamlineInputsSectionRendered && "Streamline FG Inputs section must be rendered for stock usage");
-        printf("  [PASS] Test 2: Inactive XeMFG allows legacy XeFG controls and Streamline prompt.\n");
+        printf("  [PASS] Test 2: Inactive XeMFG renders standard FG selection and legacy controls normally.\n");
     }
 
     // Test 3: Strict mutual exclusion enforcement between Ada, Ampere, and XeMFG
