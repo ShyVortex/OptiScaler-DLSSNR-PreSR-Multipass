@@ -3923,7 +3923,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         }
     }
 
-    if (state.externalFrameGeneration || ampereFallbackToFsrFg)
+    if (state.externalFrameGeneration || ampereFallbackToFsrFg || xeActive)
     {
         if (state.externalFrameGeneration)
             ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
@@ -3935,6 +3935,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ImGui::TextWrapped("Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames "
                                "above or in-game settings.",
                                fallbackTypeName);
+        }
+        else if (xeActive)
+        {
+            ImGui::TextWrapped(
+                "Intel XeMFG is active. Multiplier is controlled via the Intel Xe Multi-Frame Generation (XeMFG) "
+                "section above or in-game settings.");
         }
         return;
     }

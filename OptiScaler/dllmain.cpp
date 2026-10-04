@@ -1935,10 +1935,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         {
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
-            if (!cfg->FGInput.has_value() || cfg->FGInput.value() == FGInput::NoFG)
-                cfg->FGInput.set_volatile_value(FGInput::DLSSG);
-            if (!cfg->FGOutput.has_value() || cfg->FGOutput.value() == FGOutput::NoFG)
-                cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
+            cfg->FGInput.set_volatile_value(FGInput::DLSSG);
+            cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
             LOG_INFO("XeMfgLoader: XeMFG unlock active, auto-configuring pipeline (FGInput=DLSSG, FGOutput=XeFG, "
                      "FGEnabled=true)");
