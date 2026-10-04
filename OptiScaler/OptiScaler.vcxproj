@@ -729,6 +729,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="spoofing\User32_Spoofing.cpp" />
     <ClCompile Include="spoofing\Vulkan_Spoofing.cpp" />
     <ClCompile Include="low_latency\input\input_uell.cpp" />
+    <ClInclude Include="low_latency\input\ConcurrentInputSelection.h" />
     <ClCompile Include="upscalers\fsr2_212\FSR2Feature_VkOnDx12_212.cpp" />
     <ClCompile Include="upscalers\ffx\FFXFeature_VkOn12.cpp" />
     <ClCompile Include="upscalers\fsr31\FSR31Feature.cpp" />
