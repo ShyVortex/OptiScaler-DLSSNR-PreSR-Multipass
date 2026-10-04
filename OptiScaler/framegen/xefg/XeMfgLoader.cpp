@@ -84,6 +84,9 @@ int64_t CalculateMedianDelta(int64_t newDeltaNs)
 
 uint64_t PacingHookGate(void* rcx, uint32_t edx, uint32_t r8d, void* r9, void* arg5, void* arg6, uint8_t arg7)
 {
+    if (State::Instance().isShuttingDown)
+        return 0;
+
     if (g_qpcFrequency == 0)
     {
         LARGE_INTEGER freq;
@@ -114,6 +117,9 @@ uint64_t PacingHookGate(void* rcx, uint32_t edx, uint32_t r8d, void* r9, void* a
 
 uint64_t PacingHookSched(void* rcx, void* rdx, uint8_t r8b, void* r9, void* arg5)
 {
+    if (State::Instance().isShuttingDown)
+        return 0;
+
     if (g_originalSchedFn)
         return g_originalSchedFn(rcx, rdx, r8b, r9, arg5);
     return 0;
@@ -122,6 +128,9 @@ uint64_t PacingHookSched(void* rcx, void* rdx, uint8_t r8b, void* r9, void* arg5
 void* PacingHookDeadline(void* rcx, int64_t* pDeadline, void* r8, void* cycleInfo, uint32_t frameIndex,
                          uint32_t totalFrames)
 {
+    if (State::Instance().isShuttingDown)
+        return nullptr;
+
     void* res = nullptr;
     if (g_originalDeadlineFn)
         res = g_originalDeadlineFn(rcx, pDeadline, r8, cycleInfo, frameIndex, totalFrames);
@@ -139,13 +148,30 @@ void* PacingHookDeadline(void* rcx, int64_t* pDeadline, void* r8, void* cycleInf
     int64_t intervalPerFrame = totalInterval / totalFrames;
 
     int64_t adjust = 0;
-    if (g_pacingContext != nullptr)
+    void* pacingCtx = g_pacingContext;
+    if (pacingCtx != nullptr)
     {
-        float renderEst = *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(g_pacingContext) + 0x1b8);
+#ifdef _MSC_VER
+        __try
+        {
+            float renderEst = *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pacingCtx) + 0x1b8);
+            renderEst = std::clamp(renderEst, 0.1f, 100.0f);
+            int64_t renderTicks = static_cast<int64_t>(renderEst * 10000.0f) / totalFrames;
+            if (renderTicks < intervalPerFrame)
+                adjust = renderTicks;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            g_pacingContext = nullptr;
+            adjust = 0;
+        }
+#else
+        float renderEst = *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pacingCtx) + 0x1b8);
         renderEst = std::clamp(renderEst, 0.1f, 100.0f);
         int64_t renderTicks = static_cast<int64_t>(renderEst * 10000.0f) / totalFrames;
         if (renderTicks < intervalPerFrame)
             adjust = renderTicks;
+#endif
     }
 
     *pDeadline = (*pDeadline) + frameIndex * (intervalPerFrame - adjust);
@@ -571,6 +597,36 @@ void TryApply(HMODULE module)
     {
         LOG_WARN("XeMFG unlock: patch application failed or signature mismatch");
     }
+}
+
+void ResetPacingContext()
+{
+    std::scoped_lock lock(g_mutex);
+    g_pacingContext = nullptr;
+}
+
+void Shutdown()
+{
+    std::scoped_lock lock(g_mutex);
+    g_pacingContext = nullptr;
+    g_originalGateFn = nullptr;
+    g_originalSchedFn = nullptr;
+    g_originalDeadlineFn = nullptr;
+
+    if (!g_appliedRecords.empty())
+    {
+        LOG_INFO("XeMfgLoader: Shutting down, rolling back all patches and detours");
+        TransactionalRollback(g_appliedRecords, g_status);
+        g_appliedRecords.clear();
+    }
+
+    g_applied = false;
+    g_status.Patched = false;
+    g_status.Applied = false;
+    g_status.PatchesApplied = 0;
+    g_status.PacingDetours = 0;
+    g_status.PacingInstalled = false;
+    g_status.VerifiedPacing = false;
 }
 
 } // namespace XeMfgLoader

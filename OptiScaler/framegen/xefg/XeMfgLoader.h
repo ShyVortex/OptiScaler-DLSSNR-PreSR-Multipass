@@ -47,6 +47,12 @@ void SetMaxGeneratedFrames(unsigned int maxFrames);
 
 Failure LastFailure();
 
+// Resets and nullifies cached pacing context pointer
+void ResetPacingContext();
+
+// Cleanly shuts down XeMFG, clears contexts, and rolls back all memory patches and detours
+void Shutdown();
+
 // Transactional memory patch test helper for automated unit tests
 bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrames, bool enablePacing,
                    Status& outStatus);

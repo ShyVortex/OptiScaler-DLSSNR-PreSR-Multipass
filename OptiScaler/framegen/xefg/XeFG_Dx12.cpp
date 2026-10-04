@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "XeFG_Dx12.h"
+#include "XeMfgLoader.h"
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
 #include <resource_tracking/ResTrack_dx12.h>
@@ -165,6 +166,8 @@ HWND XeFG_Dx12::Hwnd() { return _hwnd; }
 bool XeFG_Dx12::DestroySwapchainContext()
 {
     LOG_DEBUG("");
+
+    XeMfgLoader::ResetPacingContext();
 
     if (_swapChainContext != nullptr && !State::Instance().isShuttingDown)
     {

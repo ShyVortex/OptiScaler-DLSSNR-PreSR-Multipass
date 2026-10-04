@@ -28,6 +28,7 @@
 #include <fsr4/FSR4ModelSelection.h>
 #include <framegen/dlssg/AmpereMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
+#include <framegen/xefg/XeMfgLoader.h>
 
 #include <hooks/Dxgi_Hooks.h>
 #include <hooks/D3D11_Hooks.h>
@@ -2244,6 +2245,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
     case DLL_PROCESS_DETACH:
         State::Instance().isShuttingDown = true;
+        XeMfgLoader::Shutdown();
         // ExitProcess has already stopped other threads. No DLL unloading, logging,
         // thread joins or GPU cleanup is safe here; the OS reclaims process resources.
         if (lpReserved != nullptr)
