@@ -10,6 +10,38 @@ Resources retire only after recordings close and submitted fences complete:
 
 Notifications use stable owner snapshots and defer destruction. Child retirement is allowed; unresolved teardown work survives until process exit.
 
+Preparation happens before the application's queue call. If allocation fails,
+the hook still submits the application batch, so all matching owner generations
+are quarantined before the registry lock is released, including owners not yet
+visited. The fallback does not allocate or collect; it invalidates unsubmitted
+finished-picture/enlarger/hold metadata rather than advertising those inputs as
+ready. A failed preparation can retain storage until process exit. Notification
+cleanup defers failed collection instead of throwing from a scope destructor.
+
+Tracker operations retain their shared implementation through collection and
+mutex unlock, including when a retirement callback destroys the wrapper. The
+destructor's unresolved-retention decision uses that same tracker lock.
+
+## Finished-picture copy slots
+
+Each finished-picture slot also tracks its producer recording with `GpuLifetime`.
+Every execution, including replay after presentation or cancellation, contributes
+its actual queue completion. Texture reuse and normal/held composition require
+producer reset/destruction and completion of all captured executions. This prevents
+a later replay from overwriting inputs while late composition reads them. The
+original per-slot fence still protects the late commands.
+
+Acquisition reclaims unsubmitted captures after recording destruction or reset,
+without waiting for a signal that was never promised. Failed late-command closure
+remains explicitly quarantined. Submission metadata requires a captured producer
+recording, so an unrelated command list at a reused address cannot claim an old slot.
+
+This rule can delay or skip finished-picture processing when a game retains
+replayable command lists. The status explains the wait and suggests pre-SR if it
+persists. No new queue or CPU waits are added, and the NR pre-SR route does not use
+these slots. CPU regressions exercise production ownership and selection; they do
+not validate GPU scheduling, visual results, or game-specific compatibility.
+
 ## Reentrant destruction
 
 A Cyberpunk access violation was traced to retired-vector compaction. Calling NGX destruction inside `std::erase_if` could re-enter hooks and mutate that vector.

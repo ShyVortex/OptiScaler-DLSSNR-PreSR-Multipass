@@ -252,18 +252,18 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
     };
 
     EncodeContext encoded { cmdList, device, target, targetState, frame, workScale, targetSupportsUav, spatial };
-    EncodeInput(encoded);
+    const bool inputEncoded = EncodeInput(encoded);
     targetState = encoded.targetState;
-    if (spatial && !encoded.encodeSucceeded)
+    if (!inputEncoded)
     {
-        nr.spatialFallback = true;
-        nr.spatialFallbackReason = "the spatial frame's colour encode dispatch failed";
+        if (spatial)
+        {
+            nr.spatialFallback = true;
+            nr.spatialFallbackReason = "the spatial frame's colour encode dispatch failed";
+        }
         nr.reset = true;
         modelRunning = false;
-        Barrier(cmdList, nr.hdrCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        Barrier(cmdList, nr.colorCopy, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        ReportSkipOnce("the colour input could not be encoded this frame");
         FinishColor(false);
         EndGpuTiming(cmdList);
         return;

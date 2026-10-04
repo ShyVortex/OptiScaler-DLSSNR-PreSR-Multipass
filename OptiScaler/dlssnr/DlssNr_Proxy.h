@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // Neural Rendering uses the existing NVIDIA NGX driver dispatcher.
 
@@ -6,6 +6,7 @@
 #include "DlssNr_ModelParameters.h"
 #include <memory>
 #include <cstdint>
+#include "DlssNr_GpuSubmission.h"
 
 namespace DlssNr
 {
@@ -52,6 +53,8 @@ class Context
     // Retires the current feature and clears the failure latch without immediately freeing GPU work.
     void RetryAfterFailure();
 
+    GpuSubmission BeginSubmission(UINT count, ID3D12CommandList* const* lists);
+    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists);
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     void ResetRecording(ID3D12CommandList* commands);
     bool Idle();

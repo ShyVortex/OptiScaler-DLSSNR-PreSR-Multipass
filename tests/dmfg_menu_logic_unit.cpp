@@ -171,8 +171,8 @@ int main()
                    " | Loaded: " + (loaded ? "yes" : "no") + " | Live: " + liveStr;
         };
 
-        std::string silyStatus = formatStatusLine("SilyNoMeta v0.3.5-4", true, "Auto", true, true, "ready");
-        assert(silyStatus.find("Mod: SilyNoMeta v0.3.5-4") != std::string::npos);
+        std::string silyStatus = formatStatusLine("SilyNoMeta v0.3.5-5", true, "Auto", true, true, "ready");
+        assert(silyStatus.find("Mod: SilyNoMeta v0.3.5-5") != std::string::npos);
 
         std::string sdliStatus = formatStatusLine("sdli1995", true, "SM86", true, true, "n/a");
         assert(sdliStatus.find("Mod: sdli1995") != std::string::npos);

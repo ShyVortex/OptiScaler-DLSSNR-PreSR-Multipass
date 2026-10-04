@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include <dlssnr/DlssNr.h>
 
@@ -701,8 +701,11 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
 
         if (!found.empty())
         {
+            auto nrSubmission = DlssNr::BeginFinishedPictureSubmission(NumCommandLists, ppCommandLists);
             o_ExecuteCommandLists(This, NumCommandLists, ppCommandLists);
-            DlssNr::FinishedPictureSubmitted(This, NumCommandLists, ppCommandLists);
+            if (!nrSubmission.CompleteNoThrow(This))
+                LOG_ERROR("DLSS-NR submission bookkeeping failed after ExecuteCommandLists; affected ownership remains "
+                          "quarantined");
 
             for (size_t i = 0; i < found.size(); i++)
             {
@@ -715,8 +718,11 @@ void ResTrack_Dx12::hkExecuteCommandLists(ID3D12CommandQueue* This, UINT NumComm
 
     LOG_TRACK("Done NumCommandLists: {}", NumCommandLists);
 
+    auto nrSubmission = DlssNr::BeginFinishedPictureSubmission(NumCommandLists, ppCommandLists);
     o_ExecuteCommandLists(This, NumCommandLists, ppCommandLists);
-    DlssNr::FinishedPictureSubmitted(This, NumCommandLists, ppCommandLists);
+    if (!nrSubmission.CompleteNoThrow(This))
+        LOG_ERROR(
+            "DLSS-NR submission bookkeeping failed after ExecuteCommandLists; affected ownership remains quarantined");
 }
 
 #pragma region Heap hooks

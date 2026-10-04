@@ -30,8 +30,8 @@ struct Status
     bool HasDynamicMfgSupport =
         false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
     ModVariant Variant = ModVariant::Unknown; // Detected mod variant (Unknown, Sdli1995, SilyNoMeta)
-    std::string ModName;               // Human-readable mod name/version (e.g. "SilyNoMeta v0.3.5-4", "sdli1995")
-    bool AsiInitInvoked = false;       // True if InitializeASI / DLSSG_UniversalProxy export was invoked
+    std::string ModName;                      // Human-readable mod name/version (e.g. "SilyNoMeta", "sdli1995")
+    bool AsiInitInvoked = false;              // True if InitializeASI / DLSSG_UniversalProxy export was invoked
     bool LiveControlSupported = false; // True if DLSSG_RequestControl / DLSSG_SetDisplayTarget exports are available
     bool LiveControlActive = false;    // True if a live control command has been dispatched to the running module
     std::wstring LoadedDllPath;        // Absolute path of loaded DLL
@@ -648,7 +648,7 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
         return out;
     };
 
-    const std::string needleEngineV0354 = "Control engine v0.3.5-4";
+    const std::string needleEngineV0354 = "Control engine v0.3.5-5";
     const std::string needleEngineV0354_16 = makeUtf16Le(needleEngineV0354);
     const std::string needleEngineV035 = "Control engine v0.3.5";
     const std::string needleEngineV035_16 = makeUtf16Le(needleEngineV035);
@@ -693,7 +693,7 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
                 chunk.find(needleEngineV0354_16) != std::string::npos)
             {
                 isSily = true;
-                detectedName = "SilyNoMeta v0.3.5-4";
+                detectedName = "SilyNoMeta v0.3.5-5";
                 break;
             }
             if (chunk.find(needleEngineV035) != std::string::npos ||
