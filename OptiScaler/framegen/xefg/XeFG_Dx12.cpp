@@ -1354,6 +1354,7 @@ bool XeFG_Dx12::Present()
     if (_passthrough)
     {
         LOG_DEBUG("XeFG is in passthrough mode, presenting base frame without interpolation");
+        _lastDispatchedFrame = _frameCount;
         return true;
     }
 

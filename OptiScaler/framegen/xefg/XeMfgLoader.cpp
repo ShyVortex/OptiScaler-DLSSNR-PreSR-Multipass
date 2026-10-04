@@ -82,22 +82,6 @@ int64_t CalculateMedianDelta(int64_t newDeltaNs)
     return sorted[g_ringCount / 2];
 }
 
-void WaitForDeadline(int64_t targetDeadlineQpc)
-{
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-    while (now.QuadPart < targetDeadlineQpc)
-    {
-        int64_t remaining = targetDeadlineQpc - now.QuadPart;
-        int64_t threshold = (g_qpcFrequency > 0) ? (g_qpcFrequency / 500) : 200000;
-        if (remaining > threshold)
-            Sleep(0);
-        else
-            _mm_pause();
-        QueryPerformanceCounter(&now);
-    }
-}
-
 uint64_t PacingHookGate(void* rcx, uint32_t edx, uint32_t r8d, void* r9, void* arg5, void* arg6, uint8_t arg7)
 {
     if (g_qpcFrequency == 0)
@@ -165,13 +149,6 @@ void* PacingHookDeadline(void* rcx, int64_t* pDeadline, void* r8, void* cycleInf
     }
 
     *pDeadline = (*pDeadline) + frameIndex * (intervalPerFrame - adjust);
-
-    if (g_lastRealFrameQpc > 0 && g_qpcFrequency > 0 && g_medianDeltaNs > 0)
-    {
-        int64_t targetIntervalTicks = (g_medianDeltaNs * g_qpcFrequency) / (1000000000LL * totalFrames);
-        int64_t targetDeadlineQpc = g_lastRealFrameQpc + frameIndex * targetIntervalTicks;
-        WaitForDeadline(targetDeadlineQpc);
-    }
 
     return res;
 }
