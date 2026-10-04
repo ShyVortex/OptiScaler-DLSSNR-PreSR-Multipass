@@ -1,4 +1,4 @@
-#include <cassert>
+﻿#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -223,6 +223,16 @@ class SimulatedXeMfgEngine
         applied = false;
     }
 
+    void* pacingContext = nullptr;
+
+    void ResetPacingContext() { pacingContext = nullptr; }
+
+    void Shutdown()
+    {
+        ResetPacingContext();
+        Rollback();
+    }
+
     uint32_t EffectiveMax(uint32_t nativeReported) const
     {
         if (lastFailure)
@@ -389,6 +399,32 @@ int main()
         assert(engine.EffectiveMax(1) == 5);
         engine.Rollback();
         printf("  [PASS] Test 5: Multiplier range clamping (1 to 5).\n");
+    }
+
+    // Test 6: Safe Teardown & Context Invalidation (Shutdown & ResetPacingContext)
+    {
+        std::vector<uint8_t> testImg;
+        XeMfgTest::PopulateValidImage(testImg);
+        std::vector<uint8_t> pristine = testImg;
+
+        bool ok = engine.Apply(testImg.data(), testImg.size(), 4, true);
+        assert(ok);
+        assert(engine.applied);
+        assert(engine.pacingDetours == 3);
+
+        int dummyContext = 42;
+        engine.pacingContext = &dummyContext;
+
+        engine.ResetPacingContext();
+        assert(engine.pacingContext == nullptr && "ResetPacingContext must nullify cached context");
+
+        engine.pacingContext = &dummyContext;
+        engine.Shutdown();
+        assert(engine.pacingContext == nullptr && "Shutdown must nullify cached context");
+        assert(!engine.applied && "Shutdown must mark engine as unapplied");
+        assert(engine.pacingDetours == 0 && "Shutdown must clear pacing detours");
+        assert(testImg == pristine && "Shutdown must restore image byte-for-byte");
+        printf("  [PASS] Test 6: Safe lifecycle teardown and pacing context invalidation.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");

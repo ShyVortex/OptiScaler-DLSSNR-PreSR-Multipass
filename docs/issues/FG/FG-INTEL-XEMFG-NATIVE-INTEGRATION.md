@@ -245,4 +245,57 @@ After resolving menu locks and NGX Feature 11 rejection, a second field test in 
    - `tests/xemfg_loader_unit.cpp`: Validates all 3 pacing detours and clean rollback.
    - `tests/xefg_mfg_streamline_unit.cpp`: Added Test 6 verifying DLSSG startup in passthrough and premature activation prevention.
 
+---
+
+## 9. Field Test 3 Verification: Presentation Pacing Stalls, UI Conflicts & Exit Crash Resolution (Resident Evil Requiem)
+
+### 9.1 Third Test Symptoms
+Following the introduction of presentation pacing detours in Field Test 2, a third end-to-end field test in *Resident Evil Requiem* on Windows 11 (RTX 3080 Ti) revealed three severe regressions:
+1. **Tremendous Stutter & Frame Drops (both DLSS FG ON and OFF)**:
+   - Regardless of whether DLSS FG was enabled or disabled in the game menu, routing through the XeMFG feature caused severe stuttering, framerate drops, and erratic pacing.
+2. **UI Settings Conflicts Below Advanced FG Settings**:
+   - Despite the dedicated `Intel Xe Multi-Frame Generation (XeMFG)` section being enabled, the legacy `Frame Generation (XeFG)` subsection (located below `Advanced FG Settings`) remained active and interactive.
+   - Users could toggle the duplicate `Active##3` checkbox and change the `MFG` dropdown from this lower section. In addition, `Frame Generation (Streamline FG Inputs)` showed a conflicting `Current Streamline FG state: ACTIVATE FG` prompt, creating state conflicts between OptiScaler and in-game Streamline controls.
+3. **Exit Crash on Normal Quit**:
+   - When exiting the game normally from the main menu, `re9.exe` crashed with an unhandled exception dialog pointing to an access violation in `re9.exe` / `KERNELBASE.dll` / `ntdll.dll`.
+
+### 9.2 Root Cause Analysis from Session Traces (`OptiScaler_test3.log`)
+Analysis of `OptiScaler_test3.log` (42 MB trace) revealed four critical defects:
+1. **Synchronous CPU Spin-Wait on Presentation Thread**:
+   - In `XeMfgLoader.cpp`, `PacingHookDeadline` (RVA `0x3430`) executed a blocking CPU wait loop: `WaitForDeadline(targetDeadlineQpc)` using `Sleep(0)` and `_mm_pause()`.
+   - Running a blocking CPU spin-loop directly on the main rendering/present thread starved the CPU, stalled presentation pipelines, fought the display driver's waitable swapchain, and caused severe frametime spikes and dropped frames.
+   - `libxess_fg.dll` internally uses `*pDeadline` for waitable swapchain synchronization; executing a redundant busy-wait spin-loop on the host thread was counterproductive.
+2. **Log File Saturation from Passthrough Frame Desynchronization**:
+   - In `XeFG_Dx12::Present()`, when in passthrough mode (`_passthrough == true`), the function returned `true` immediately without updating `_lastDispatchedFrame = _frameCount`.
+   - Consequently, `IFGFeature::StartNewFrame()` detected a frame index gap on every single frame and emitted `LOG_WARN("Frame count jumped too much! _frameCount: {}, _lastDispatchedFrame: {}")`.
+   - Over the 4.5-minute session before FG was enabled, this warning fired **7,525 times**, generating tens of megabytes of synchronized disk writes during gameplay and creating severe I/O stutter even with FG turned OFF.
+3. **Legacy UI Settings Surface Conflicts**:
+   - In `menu_common.cpp`, `RenderFrameGenerationRuntimeSettings()` rendered interactive `Active##3` and `MFG` combo controls under `Frame Generation (XeFG)`, directly manipulating `config->FGEnabled` and `config->FGXeFGInterpolationCount`.
+   - Toggling these controls while XeMFG was active overrode the in-game Streamline multiplier routing and caused pipeline state thrashing.
+4. **Teardown Access Violation (`0xC0000005`) from Dangling Pointers and Unhooked Detours**:
+   - In `XeMfgLoader.cpp`, `PacingHookGate` cached `g_pacingContext = rcx + 0x168`. When `re9.exe` quits, `libxess_fg.dll` destroys its context and frees heap memory. If any terminating presentation thread subsequently invoked thunk `0x3430`, `PacingHookDeadline` attempted to read `*(g_pacingContext + 0x1b8)` from freed memory, resulting in an immediate memory access violation.
+   - Furthermore, `XeMfgLoader` lacked an explicit shutdown hook in `dllmain.cpp` (`DLL_PROCESS_DETACH`), leaving indirect JMP detours at `0x25c0`, `0x3100`, and `0x3430` pointing into `OptiScaler.dll` memory as the process was terminating.
+
+### 9.3 Solutions Applied
+1. **Eliminated Pacing Spin-Loop & Synchronized Passthrough Frame State**:
+   - `XeMfgLoader.cpp`: Removed `WaitForDeadline()` and its CPU busy-wait spin-loop completely. Retained the clean, passive timestamp adjustment `*pDeadline = (*pDeadline) + frameIndex * (intervalPerFrame - adjust);`, which `libxess_fg.dll` internally uses to schedule presentations.
+   - `XeFG_Dx12.cpp`: In `XeFG_Dx12::Present()`, added `_lastDispatchedFrame = _frameCount;` when `_passthrough` is active, keeping frame counters in continuous sync and completely eliminating the 7,525 warning logs and I/O stalls.
+2. **Suppressed Conflicting Controls Below Advanced FG Settings (`menu_common.cpp`)**:
+   - When `xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default()` is true:
+     - The legacy `Frame Generation (XeFG)` section below `Advanced FG Settings` hides the interactive `Active##3` checkbox and `MFG` combo, displaying:
+       ```
+       --- Frame Generation (XeFG) ---
+       Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above.
+       ```
+     - The redundant `Frame Generation (Streamline FG Inputs)` prompt (`Current Streamline FG state: ACTIVATE FG`) is suppressed, leaving the dedicated XeMFG section as the sole controller and status reporter (`In-Game Multiplier: Off (Disabled in-game)` or `%dX (Active)`).
+3. **Safe Teardown, SEH Guards & Lifecycle Rollback**:
+   - `XeMfgLoader.h` & `XeMfgLoader.cpp`: Added `ResetPacingContext()` and `Shutdown()`. `Shutdown()` clears all context pointers and executes `TransactionalRollback()` to restore pristine binary bytes in `libxess_fg.dll`.
+   - In `PacingHookDeadline`: Added `State::Instance().isShuttingDown` guards and wrapped the `pacingCtx + 0x1b8` dereference in structured exception handling (`#ifdef _MSC_VER __try ... __except`), safely nullifying the context on access violations without crashing.
+   - `XeFG_Dx12.cpp`: Called `XeMfgLoader::ResetPacingContext();` inside `DestroySwapchainContext()` so the context is invalidated immediately upon swapchain release.
+   - `dllmain.cpp`: Called `XeMfgLoader::Shutdown();` inside `case DLL_PROCESS_DETACH:` to ensure pristine binary state before process exit.
+4. **Automated Unit Testing & Verification**:
+   - `tests/xemfg_loader_unit.cpp`: Added Test 6 validating `Shutdown()`, `ResetPacingContext()`, and full transactional image rollback.
+   - `tests/xemfg_menu_exclusion_unit.cpp`: Created comprehensive unit tests validating menu UI conflict suppression, notice rendering, and strict 3-way mutual exclusion across Ada, Ampere, and XeMFG.
+
+
 
