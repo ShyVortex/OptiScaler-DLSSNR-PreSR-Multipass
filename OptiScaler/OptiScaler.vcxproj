@@ -587,6 +587,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="dllmain.h" />
     <ClInclude Include="menu\menu_dx_base.h" />
     <ClInclude Include="menu\menu_common.h" />
+    <ClInclude Include="menu\menu_viewport.h" />
     <ClInclude Include="menu\menu_dx11.h" />
     <ClInclude Include="menu\menu_dx12.h" />
     <ClInclude Include="menu\menu_overlay_base.h" />

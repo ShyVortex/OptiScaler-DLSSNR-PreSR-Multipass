@@ -1,6 +1,7 @@
 #pragma once
 #include "SysUtils.h"
 #include <dxgi.h>
+#include <imgui/imgui.h>
 
 class MenuDxBase
 {
@@ -14,7 +15,7 @@ class MenuDxBase
 
   protected:
     long frameCounter = 0;
-    static bool RenderMenu();
+    static bool RenderMenu(ImVec2 framebufferSize = { 0.0f, 0.0f });
 
     static DXGI_FORMAT TranslateTypelessFormats(DXGI_FORMAT format)
     {
