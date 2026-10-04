@@ -1217,17 +1217,19 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 
             if (state.activeFgOutput == FGOutput::XeFG)
             {
+                static bool initialSyncDone = false;
                 const uint32_t targetCount =
                     (newOptions.mode == sl::DLSSGMode::eOff) ? 0 : newOptions.numFramesToGenerate;
-                const bool modeChanged = !previousMode.has_value() || previousMode.value() != newOptions.mode;
-                const bool countChanged = state.dlssgDetectedInterpolationCount != targetCount;
+                const bool modeChanged = (previousMode != newOptions.mode);
+                const bool countChanged = (state.dlssgDetectedInterpolationCount != static_cast<int>(targetCount));
 
-                if (modeChanged || countChanged)
+                if (!initialSyncDone || modeChanged || countChanged)
                 {
+                    initialSyncDone = true;
                     if (state.currentFG != nullptr)
                         state.currentFG->SetInterpolatedFrameCount(targetCount);
 
-                    state.dlssgDetectedInterpolationCount = targetCount;
+                    state.dlssgDetectedInterpolationCount = static_cast<int>(targetCount);
 
                     if (targetCount == 0)
                     {
