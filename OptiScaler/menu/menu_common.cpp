@@ -4818,10 +4818,18 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
         }
     }
 
+    const bool xeMfgActive = config->XeMfgUnlock.value_or_default();
+
     // XeFG controls
-    if (state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
-        state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain != nullptr && XeFGProxy::InitXeFG() &&
-        fgOutput)
+    if (xeMfgActive && state.activeFgOutput == FGOutput::XeFG)
+    {
+        ImGui::SeparatorText("Frame Generation (XeFG)");
+        ImGui::TextColored(toneMapColor(ImVec4(0.4f, 0.8f, 1.0f, 1.0f)),
+                           "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above.");
+    }
+    else if (!xeMfgActive && state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
+             state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain != nullptr &&
+             XeFGProxy::InitXeFG() && fgOutput)
     {
         ImGui::SeparatorText("Frame Generation (XeFG)");
 
@@ -5783,7 +5791,7 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
     }
 
     // Streamline FG Inputs
-    if (state.currentFGSwapchain != nullptr && state.activeFgInput == FGInput::DLSSG)
+    if (!xeMfgActive && state.currentFGSwapchain != nullptr && state.activeFgInput == FGInput::DLSSG)
     {
         SeparatorWithHelpMarker("Frame Generation (Streamline FG Inputs)", "Select DLSS-FG in-game");
 
