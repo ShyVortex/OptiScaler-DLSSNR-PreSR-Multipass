@@ -75,8 +75,9 @@ bool InputCommon::init_tech(IUnknown* pDevice, LowLatencyMode desiredMode)
 
         if (auto current_tech = currently_active_tech.load(); current_tech && isInitialized)
         {
-            activeOutput = current_tech->get_mode();
-            current_tech->set_sleep_mode(&get_sleep_copy(activeInput)); // Restore any potential sleep mode
+            selection.SetOutput(current_tech->get_mode());
+            current_tech->set_sleep_mode(
+                &get_sleep_copy(selection.ReadSelection().input)); // Restore any potential sleep mode
             return true;
         }
     }
@@ -86,7 +87,9 @@ bool InputCommon::init_tech(IUnknown* pDevice, LowLatencyMode desiredMode)
 
 bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLatencyMode> mode)
 {
-    if (avaliableInputs.count() == 0)
+    // Selection and output replacement must be one decision across concurrent hook calls.
+    std::scoped_lock lock(create_tech_mutex);
+    if (selection.AvailableCount() == 0)
     {
         LOG_TRACE("No avaliable inputs");
 
@@ -102,7 +105,7 @@ bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLa
     if (!pDevice)
     {
         // Some outputs might call sleep with nullptr
-        if (activeOutput != LowLatencyMode::None && !mode.has_value())
+        if (selection.ReadSelection().output != LowLatencyMode::None && !mode.has_value())
             return true; // Allow it if we already have an output and not trying to set manually
         else
             return false;
@@ -111,7 +114,7 @@ bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLa
     if (mode.has_value())
         desiredMode = mode.value();
 
-    if (desiredMode != LowLatencyMode::None && desiredMode == activeOutput)
+    if (desiredMode != LowLatencyMode::None && desiredMode == selection.ReadSelection().output)
     {
         // No need to do anything
         return true;
@@ -119,22 +122,23 @@ bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLa
 
     // TODO: add option for totally disabling specific inputs on boot
 
-    if (!avaliableInputs[desiredInput] && desiredInput != LowLatencyInput::Auto)
+    if (!selection.IsAvailable(desiredInput) && desiredInput != LowLatencyInput::Auto)
     {
         LOG_WARN("Selected Low Latency Input is not avaliable");
         desiredInput = LowLatencyInput::Auto;
-        Config::Instance()->LowLatencyInput.set_volatile_value(activeInput);
+        Config::Instance()->LowLatencyInput.set_volatile_value(selection.ReadSelection().input);
     }
 
     // Hopefully this doesn't cause constant switching of inputs.
     // We can just change the activeInput because it only controls what calls get through.
-    if (activeInput != desiredInput || !avaliableInputs[activeInput] || desiredInput == LowLatencyInput::Auto)
+    if (selection.ReadSelection().input != desiredInput || !selection.IsAvailable(selection.ReadSelection().input) ||
+        desiredInput == LowLatencyInput::Auto)
     {
         bool change = false;
 
-        if (avaliableInputs[desiredInput])
+        if (selection.IsAvailable(desiredInput))
         {
-            activeInput = desiredInput;
+            selection.SetInput(desiredInput);
             change = true;
         }
         else
@@ -144,31 +148,32 @@ bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLa
                 Config::Instance()->LowLatencyInput.set_volatile_value(LowLatencyInput::Auto);
 
             // Try to use inputs in order Reflex -> XeLL -> AL2
-            if (avaliableInputs[LowLatencyInput::Reflex])
+            if (selection.IsAvailable(LowLatencyInput::Reflex))
                 desiredInput = LowLatencyInput::Reflex;
-            else if (avaliableInputs[LowLatencyInput::XeLL])
+            else if (selection.IsAvailable(LowLatencyInput::XeLL))
                 desiredInput = LowLatencyInput::XeLL;
-            else if (avaliableInputs[LowLatencyInput::AntiLag2])
+            else if (selection.IsAvailable(LowLatencyInput::AntiLag2))
                 desiredInput = LowLatencyInput::AntiLag2;
-            else if (avaliableInputs[LowLatencyInput::UeLowLatency])
+            else if (selection.IsAvailable(LowLatencyInput::UeLowLatency))
                 desiredInput = LowLatencyInput::UeLowLatency;
             else
                 desiredInput = LowLatencyInput::None;
 
-            if (desiredInput != activeInput)
+            if (desiredInput != selection.ReadSelection().input)
             {
-                activeInput = desiredInput;
+                selection.SetInput(desiredInput);
                 change = true;
             }
         }
 
         if (change)
         {
-            LOG_TRACE_LOWLATENCY("Selected activeInput: {}", magic_enum::enum_name(activeInput));
+            LOG_TRACE_LOWLATENCY("Selected activeInput: {}", magic_enum::enum_name(selection.ReadSelection().input));
 
             if (auto current_tech = currently_active_tech.load())
             {
-                current_tech->set_sleep_mode(&get_sleep_copy(activeInput)); // Restore any potential sleep mode
+                current_tech->set_sleep_mode(
+                    &get_sleep_copy(selection.ReadSelection().input)); // Restore any potential sleep mode
                 return true;
             }
         }
@@ -196,15 +201,13 @@ bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLa
     if (State::Instance().activeFgOutput == FGOutput::XeFG)
         desiredMode = LowLatencyMode::XeLL;
 
-    if (activeOutput == desiredMode)
+    if (selection.ReadSelection().output == desiredMode)
     {
         delay_deinit = 0;
         return true;
     }
 
     // Beyond this point activeOutput needs changing
-
-    std::scoped_lock lock(create_tech_mutex);
 
     if (init_tech(pDevice, desiredMode))
         return true;
@@ -317,7 +320,7 @@ InputResult InputCommon::sleep(const InputContext& inputContext, IUnknown* pDevi
     if (!update_low_latency_tech(pDevice))
         return InputResult::LowLatencyUpdateFail;
 
-    if (inputContext.caller != activeInput)
+    if (inputContext.caller != selection.ReadSelection().input)
         return InputResult::UsingDifferentInput;
 
     if (auto current_tech = currently_active_tech.load())
@@ -338,7 +341,7 @@ InputResult InputCommon::set_marker(const InputContext& inputContext, IUnknown* 
     if (!update_low_latency_tech(pDevice))
         return InputResult::LowLatencyUpdateFail;
 
-    if (inputContext.caller != activeInput)
+    if (inputContext.caller != selection.ReadSelection().input)
         return InputResult::UsingDifferentInput;
 
     if (inputContext.markerMode == InputMarkerMode::NoMarkers)
@@ -376,7 +379,7 @@ InputResult InputCommon::set_async_marker(const InputContext& inputContext, ID3D
                                           const MarkerParams& marker_params)
 {
     // Always allow Opti's local context through, like XeLL or AL2
-    if (inputContext.caller != activeInput && !inputContext.localContext)
+    if (inputContext.caller != selection.ReadSelection().input && !inputContext.localContext)
         return InputResult::UsingDifferentInput;
 
     if (!currently_active_tech.load()) // can't init using ID3D12CommandQueue, can only check if available
@@ -416,7 +419,7 @@ InputResult InputCommon::set_sleep_mode(const InputContext& inputContext, IUnkno
 
     get_sleep_copy(inputContext.caller) = *sleep_mode;
 
-    if (inputContext.caller != activeInput)
+    if (inputContext.caller != selection.ReadSelection().input)
         return InputResult::UsingDifferentInput;
 
     if (auto current_tech = currently_active_tech.load())
@@ -466,7 +469,7 @@ InputResult InputCommon::get_latency(const InputContext& inputContext, IUnknown*
 
     if (inputContext.caller == LowLatencyInput::Reflex)
     {
-        if (activeOutput == LowLatencyMode::Reflex)
+        if (selection.ReadSelection().output == LowLatencyMode::Reflex)
         {
             // TODO: passthrough call, if success return InputResult::Ok;
             // return InputResult::Ok;
@@ -518,7 +521,7 @@ InputResult InputCommon::get_latency(const InputContext& inputContext, IUnknown*
         xell_frame_report_t* reports = (xell_frame_report_t*) latency_params;
         constexpr size_t reportCount = 64; // 64 reports, if the app allocated less then it's on them
 
-        if (activeOutput == LowLatencyMode::XeLL)
+        if (selection.ReadSelection().output == LowLatencyMode::XeLL)
         {
             if (auto current_tech = currently_active_tech.load())
             {
@@ -569,7 +572,7 @@ InputResult InputCommon::get_latency(const InputContext& inputContext, IUnknown*
 bool InputCommon::get_timing_data(TimingData& timingDataOut)
 {
     InputContext tempContext {};
-    if (activeOutput == LowLatencyMode::Reflex)
+    if (selection.ReadSelection().output == LowLatencyMode::Reflex)
     {
         // TODO: allocate struct and get everything from reflex
         return true;
@@ -701,11 +704,11 @@ bool InputCommon::get_timing_data(TimingData& timingDataOut)
 InputResult InputCommon::mark_present_start(IUnknown* pDevice)
 {
     // TODO: could allow AL2 but need to check the InputMarkerMode of the active AL2 input
-    if (activeInput != LowLatencyInput::UeLowLatency)
+    if (selection.ReadSelection().input != LowLatencyInput::UeLowLatency)
         return InputResult::InputNotSupported;
 
     // TODO: this is missing the frame id required by other outputs
-    if (activeOutput != LowLatencyMode::AntiLag2)
+    if (selection.ReadSelection().output != LowLatencyMode::AntiLag2)
         return InputResult::GenericError;
 
     if (auto current_tech = currently_active_tech.load())
@@ -730,7 +733,7 @@ xell_result_t InputCommon::pass_xellD3D12SetAppQueue(const InputContext& inputCo
     // TODO: XeLL seems to be sending this early, before any markers. Because of that activeOutput is likely still None
     // and we dont grab the appQueue at all
 
-    if (inputContext.caller == LowLatencyInput::XeLL && activeOutput == LowLatencyMode::XeLL)
+    if (inputContext.caller == LowLatencyInput::XeLL && selection.ReadSelection().output == LowLatencyMode::XeLL)
     {
         if (auto current_tech = currently_active_tech.load())
         {
@@ -746,7 +749,7 @@ xell_result_t InputCommon::pass_xellD3D12SetAppQueue(const InputContext& inputCo
 
 xell_result_t InputCommon::pass_xellSetDisplayInfo(const InputContext& inputContext, void* displayInfo)
 {
-    if (inputContext.caller == LowLatencyInput::XeLL && activeOutput == LowLatencyMode::XeLL)
+    if (inputContext.caller == LowLatencyInput::XeLL && selection.ReadSelection().output == LowLatencyMode::XeLL)
     {
         if (auto current_tech = currently_active_tech.load())
         {
@@ -762,7 +765,7 @@ xell_result_t InputCommon::pass_xellSetDisplayInfo(const InputContext& inputCont
 
 xell_result_t InputCommon::pass_xellSetFgEnabled(const InputContext& inputContext, uint32_t param1, uint32_t param2)
 {
-    if (inputContext.caller == LowLatencyInput::XeLL && activeOutput == LowLatencyMode::XeLL)
+    if (inputContext.caller == LowLatencyInput::XeLL && selection.ReadSelection().output == LowLatencyMode::XeLL)
     {
         if (auto current_tech = currently_active_tech.load())
         {
@@ -779,7 +782,7 @@ xell_result_t InputCommon::pass_xellSetFgEnabled(const InputContext& inputContex
 xell_result_t InputCommon::pass_xellSetGeneratedFramesCount(const InputContext& inputContext, uint32_t frameId,
                                                             uint32_t framesCount)
 {
-    if (inputContext.caller == LowLatencyInput::XeLL && activeOutput == LowLatencyMode::XeLL)
+    if (inputContext.caller == LowLatencyInput::XeLL && selection.ReadSelection().output == LowLatencyMode::XeLL)
     {
         if (auto current_tech = currently_active_tech.load())
         {
