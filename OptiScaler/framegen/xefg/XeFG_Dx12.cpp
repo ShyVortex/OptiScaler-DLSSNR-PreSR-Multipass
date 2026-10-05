@@ -256,12 +256,16 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
                               desc->BufferCount, desc->BufferDesc.Width, desc->BufferDesc.Height,
                               desc->BufferDesc.Format, desc->Flags) == S_OK;
 
-            *swapChain = State::Instance().currentFGSwapchain;
-            return result;
+            if (result)
+            {
+                *swapChain = State::Instance().currentFGSwapchain;
+                return true;
+            }
+
+            LOG_WARN("ResizeBuffers on preserved FG swapchain failed, falling back to clean recreation");
         }
-        // Game is creating new swapchain without releasing old one,
-        // we need to release it to avoid errors
-        else if (readyToRelease)
+
+        if (readyToRelease || !Config::Instance()->FGPreserveSwapChain.value_or_default())
         {
             LOG_INFO("Releasing old swapchain");
             ReleaseSwapchain(_hwnd);
@@ -468,12 +472,16 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
             auto result = State::Instance().currentFGSwapchain->ResizeBuffers(
                               desc->BufferCount, desc->Width, desc->Height, desc->Format, desc->Flags) == S_OK;
 
-            *swapChain = (IDXGISwapChain1*) State::Instance().currentFGSwapchain;
-            return result;
+            if (result)
+            {
+                *swapChain = (IDXGISwapChain1*) State::Instance().currentFGSwapchain;
+                return true;
+            }
+
+            LOG_WARN("ResizeBuffers on preserved FG swapchain failed, falling back to clean recreation");
         }
-        // Game is creating new swapchain without releasing old one,
-        // we need to release it to avoid errors
-        else if (readyToRelease)
+
+        if (readyToRelease || !Config::Instance()->FGPreserveSwapChain.value_or_default())
         {
             LOG_INFO("Releasing old swapchain");
             ReleaseSwapchain(_hwnd);
@@ -1770,6 +1778,14 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
         _swapChainContext = nullptr;
         State::Instance().currentFGSwapchain = nullptr;
     }
+
+    _swapChain = nullptr;
+    _hwnd = NULL;
+    _gameCommandQueue = nullptr;
+    _isActive = false;
+    _passthrough = false;
+    _framesToInterpolate = 0;
+    _haveHudless.reset();
 
     ReleaseObjects();
 
