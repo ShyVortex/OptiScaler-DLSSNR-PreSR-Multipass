@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <immintrin.h>
+#include <detours/detours.h>
 
 namespace
 {
@@ -32,6 +33,35 @@ constexpr uintptr_t kRvaU2 = 0x1a5de4;
 constexpr uintptr_t kRvaU3 = 0x1a517d;
 constexpr uintptr_t kRvaU4 = 0x1a45c2;
 constexpr uintptr_t kRvaU5 = 0x20973b;
+
+// Target RVA and pattern for presentation deadline calculation thunk (0x3430 -> 0x224b30)
+constexpr uintptr_t kRvaDeadline = 0x224b30;
+constexpr std::string_view kPatternDeadline = "48 89 5C 24 08 48 89 7C 24 10 41 56 48 83 EC 20 83 7C 24 58 01";
+
+typedef void* (*PFN_CalculateDeadline)(void* pContext, uint64_t* pDeadline, void* pCycleState, void* pCycleInfo,
+                                       uint32_t frameIndex, uint32_t totalFrames);
+static PFN_CalculateDeadline o_CalculateDeadline = nullptr;
+
+static void* hkCalculateDeadline(void* pContext, uint64_t* pDeadline, void* pCycleState, void* pCycleInfo,
+                                 uint32_t frameIndex, uint32_t totalFrames)
+{
+    void* result = o_CalculateDeadline(pContext, pDeadline, pCycleState, pCycleInfo, frameIndex, totalFrames);
+
+    // If multi-frame generation is active (totalFrames >= 2) and this is an unlocked intermediate frame (frameIndex >=
+    // 1)
+    if (pDeadline != nullptr && pCycleInfo != nullptr && totalFrames >= 2 && frameIndex >= 1 && frameIndex <= 5)
+    {
+        // pCycleInfo + 8 holds the total frame interval in ticks (e.g. QPC ticks or 100ns units)
+        uint64_t frameInterval = *reinterpret_cast<const uint64_t*>(reinterpret_cast<const uint8_t*>(pCycleInfo) + 8);
+        if (frameInterval > 0)
+        {
+            uint64_t intervalPerFrame = frameInterval / totalFrames;
+            *pDeadline += static_cast<uint64_t>(frameIndex) * intervalPerFrame;
+        }
+    }
+
+    return result;
+}
 
 struct PatchRecord
 {
@@ -277,9 +307,9 @@ bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrame
 
     outStatus.Patched = (outStatus.PatchesApplied == 5);
     outStatus.Applied = outStatus.Patched;
-    outStatus.PacingDetours = 0;
-    outStatus.PacingInstalled = false;
-    outStatus.VerifiedPacing = false;
+    outStatus.PacingDetours = enablePacing ? 1 : 0;
+    outStatus.PacingInstalled = enablePacing;
+    outStatus.VerifiedPacing = enablePacing;
     g_appliedRecords = patches;
     return outStatus.Patched;
 }
@@ -394,6 +424,40 @@ void TryApply(HMODULE module)
         g_applied = true;
         LOG_INFO("XeMFG unlock: successfully unlocked multi-frame generation up to {}X (ceiling: {})",
                  g_status.ConfiguredCeiling + 1, g_status.ConfiguredCeiling);
+
+        if (o_CalculateDeadline == nullptr)
+        {
+            const std::vector<uint8_t> deadlineExpected = { 0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x7c,
+                                                            0x24, 0x10, 0x41, 0x56, 0x48, 0x83, 0xec, 0x20 };
+            uint8_t* deadlineAddr =
+                ResolvePatchSite(baseAddress, imageSize, kRvaDeadline, kPatternDeadline, deadlineExpected);
+            if (deadlineAddr != nullptr)
+            {
+                o_CalculateDeadline = reinterpret_cast<PFN_CalculateDeadline>(deadlineAddr);
+                DetourTransactionBegin();
+                DetourUpdateThread(GetCurrentThread());
+                DetourAttach(reinterpret_cast<PVOID*>(&o_CalculateDeadline),
+                             reinterpret_cast<PVOID>(hkCalculateDeadline));
+                auto detourStatus = DetourTransactionCommit();
+                if (detourStatus == NO_ERROR)
+                {
+                    g_status.PacingInstalled = true;
+                    g_status.PacingDetours = 1;
+                    g_status.VerifiedPacing = true;
+                    LOG_INFO("XeMFG unlock: presentation deadline pacing detour installed at {:p}",
+                             (void*) deadlineAddr);
+                }
+                else
+                {
+                    LOG_WARN("XeMFG unlock: failed to install deadline pacing detour: {:X}", detourStatus);
+                    o_CalculateDeadline = nullptr;
+                }
+            }
+            else
+            {
+                LOG_WARN("XeMFG unlock: deadline calculation function site not found");
+            }
+        }
     }
     else
     {
@@ -412,6 +476,16 @@ void Shutdown()
         LOG_INFO("XeMfgLoader: Shutting down, rolling back all memory patches");
         TransactionalRollback(g_appliedRecords, g_status);
         g_appliedRecords.clear();
+    }
+
+    if (o_CalculateDeadline != nullptr)
+    {
+        LOG_INFO("XeMfgLoader: detaching deadline pacing detour");
+        DetourTransactionBegin();
+        DetourUpdateThread(GetCurrentThread());
+        DetourDetach(reinterpret_cast<PVOID*>(&o_CalculateDeadline), reinterpret_cast<PVOID>(hkCalculateDeadline));
+        DetourTransactionCommit();
+        o_CalculateDeadline = nullptr;
     }
 
     g_applied = false;
