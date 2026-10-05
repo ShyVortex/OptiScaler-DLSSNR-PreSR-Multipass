@@ -3797,6 +3797,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("Renders ONLY generated frames and blanks native frames.\n"
                            "If interpolation is active, motion will remain visible.\n"
                            "If interpolation has failed, the screen will turn black.");
+
+            bool extraPacing = config->XeMfgExtraPacing.value_or(true);
+            if (ImGui::Checkbox("Display VBlank Sync (Extra Pacing)##xemfg", &extraPacing))
+            {
+                config->XeMfgExtraPacing = extraPacing;
+            }
+            ShowHelpMarker("Synchronizes presentation to VBlank (SyncInterval=1) on Windows DXGI.\n"
+                           "Eliminates frame-time micro-stutters, tearing, and multi-frame clumping.\n"
+                           "Recommended ON for smooth 2X, 3X, and 4X delivery on Windows.");
         }
 
         ImGui::Unindent();

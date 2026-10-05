@@ -1263,6 +1263,19 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
 
         LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
+    else if (willPresent && fgFeatureActive && state.activeFgOutput == FGOutput::XeFG &&
+             config->XeMfgExtraPacing.value_or(true) && !IdentifyGpu::getPrimaryGpu().usesDxvk)
+    {
+        // On native Windows DXGI, unmetered presentation (SyncInterval=0 + ALLOW_TEARING)
+        // causes generated frames to clump or tear across scanouts, creating visual micro-stutter.
+        // Synchronizing presentation to VBlank (SyncInterval=1) ensures intermediate frames are
+        // held across refresh intervals, delivering genuine visual smoothness.
+        if (SyncInterval < 1)
+            SyncInterval = 1;
+
+        Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
+        LOG_DEBUG("XeMFG ExtraPacing applied: SyncInterval={}, Flags={:X}", SyncInterval, Flags);
+    }
 
     // Used at wrapped_swapchain LocalPresent to determine is frame is interpolated or not
     if (willPresent)
