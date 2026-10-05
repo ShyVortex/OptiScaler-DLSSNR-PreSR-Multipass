@@ -19,6 +19,12 @@ struct Status
     unsigned int ConfiguredCeiling = 3; // configured max frames (1..5)
     std::string ModuleVersion;          // file version of libxess_fg.dll
     std::string ErrorMessage;           // optional failure reason
+
+    // Present telemetry from xefgSwapChainGetLastPresentStatus
+    unsigned int LastFramesPresented = 0; // frames presented during last cycle
+    int LastFrameGenResult = 0;           // xefg_swapchain_result_t (0 = SUCCESS)
+    bool IsFrameGenEnabled = false;       // whether FG was enabled in swapchain
+    bool HasPresentTelemetry = false;     // true once first status is captured
 };
 
 enum class Failure
@@ -52,6 +58,9 @@ void ResetPacingContext();
 
 // Cleanly shuts down XeMFG and rolls back all memory patches
 void Shutdown();
+
+// Records real-time presentation telemetry from xefgSwapChainGetLastPresentStatus
+void RecordPresentStatus(unsigned int framesPresented, int frameGenResult, bool isFrameGenEnabled);
 
 // Transactional memory patch test helper for automated unit tests
 bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrames, bool enablePacing,

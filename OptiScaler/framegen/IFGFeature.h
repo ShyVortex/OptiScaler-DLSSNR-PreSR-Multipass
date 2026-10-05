@@ -100,6 +100,7 @@ class IFGFeature
     virtual const char* Name() = 0;
 
     virtual bool Present() = 0;
+    virtual void PostPresent() {}
     virtual void Activate() = 0;
     virtual void Deactivate() = 0;
     virtual void DestroyFGContext() = 0;

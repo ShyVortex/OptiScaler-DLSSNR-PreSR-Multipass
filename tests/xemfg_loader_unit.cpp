@@ -166,7 +166,38 @@ class SimulatedXeMfgEngine
         applied = false;
     }
 
-    void Shutdown() { Rollback(); }
+    uint32_t lastFramesPresented = 0;
+    int lastFrameGenResult = 0;
+    bool isFrameGenEnabled = false;
+    bool hasPresentTelemetry = false;
+
+    void RecordPresentStatus(uint32_t framesPresented, int frameGenResult, bool isFgEnabled)
+    {
+        lastFramesPresented = framesPresented;
+        lastFrameGenResult = frameGenResult;
+        isFrameGenEnabled = isFgEnabled;
+        hasPresentTelemetry = true;
+    }
+
+    void Shutdown()
+    {
+        Rollback();
+        lastFramesPresented = 0;
+        lastFrameGenResult = 0;
+        isFrameGenEnabled = false;
+        hasPresentTelemetry = false;
+    }
+
+    static uint64_t CalculatePacedDeadline(uint64_t baseTimestamp, uint64_t frameInterval, uint32_t frameIndex,
+                                           uint32_t totalFrames)
+    {
+        uint64_t deadline = baseTimestamp;
+        if (totalFrames >= 2 && frameIndex >= 1 && frameIndex <= 5 && frameInterval > 0)
+        {
+            deadline += static_cast<uint64_t>(frameIndex) * (frameInterval / totalFrames);
+        }
+        return deadline;
+    }
 
     uint32_t EffectiveMax(uint32_t nativeReported) const
     {
@@ -320,6 +351,58 @@ int main()
         assert(engine.patchesApplied == 0 && "Shutdown must clear applied patches");
         assert(testImg == pristine && "Shutdown must restore image byte-for-byte");
         printf("  [PASS] Test 6: Safe lifecycle teardown restores pristine image byte-for-byte.\n");
+    }
+
+    // Test 7: Presentation Telemetry Recording & Lifecycle Reset
+    {
+        assert(!engine.hasPresentTelemetry);
+        engine.RecordPresentStatus(4, 0, true);
+        assert(engine.hasPresentTelemetry);
+        assert(engine.lastFramesPresented == 4);
+        assert(engine.lastFrameGenResult == 0);
+        assert(engine.isFrameGenEnabled == true);
+
+        // Record warning / fallback
+        engine.RecordPresentStatus(1, 6, false);
+        assert(engine.lastFramesPresented == 1);
+        assert(engine.lastFrameGenResult == 6);
+        assert(engine.isFrameGenEnabled == false);
+
+        // Verify reset on Shutdown
+        engine.Shutdown();
+        assert(!engine.hasPresentTelemetry);
+        assert(engine.lastFramesPresented == 0);
+        assert(engine.lastFrameGenResult == 0);
+        assert(engine.isFrameGenEnabled == false);
+        printf("  [PASS] Test 7: Presentation telemetry recording & lifecycle reset.\n");
+    }
+
+    // Test 8: Multi-Frame Presentation Deadline Calculation Across Multipliers
+    {
+        const uint64_t baseTimestamp = 1000000;
+        const uint64_t interval = 60000; // e.g. 60ms in arbitrary units
+
+        // Test 4X FG (totalFrames = 4, frames 1..3 interpolated)
+        uint64_t d1 = XeMfgTest::SimulatedXeMfgEngine::CalculatePacedDeadline(baseTimestamp, interval, 1, 4);
+        uint64_t d2 = XeMfgTest::SimulatedXeMfgEngine::CalculatePacedDeadline(baseTimestamp, interval, 2, 4);
+        uint64_t d3 = XeMfgTest::SimulatedXeMfgEngine::CalculatePacedDeadline(baseTimestamp, interval, 3, 4);
+
+        assert(d1 == baseTimestamp + 15000);
+        assert(d2 == baseTimestamp + 30000);
+        assert(d3 == baseTimestamp + 45000);
+        assert(d1 < d2 && d2 < d3 && "Deadlines must be strictly monotonically increasing");
+
+        // Test 6X FG (totalFrames = 6, frames 1..5 interpolated)
+        uint64_t prev = baseTimestamp;
+        for (uint32_t idx = 1; idx <= 5; ++idx)
+        {
+            uint64_t d = XeMfgTest::SimulatedXeMfgEngine::CalculatePacedDeadline(baseTimestamp, interval, idx, 6);
+            assert(d > prev && "Each intermediate deadline must be greater than previous");
+            assert(d == baseTimestamp + idx * 10000);
+            prev = d;
+        }
+        printf(
+            "  [PASS] Test 8: Multi-frame presentation deadline calculation evenly spaces presentation intervals.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");

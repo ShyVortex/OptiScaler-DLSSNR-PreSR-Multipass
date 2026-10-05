@@ -687,7 +687,7 @@ HRESULT FGHooks::hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Wi
                         }
                     }
 
-                    if (swapchainIndex != 0 && Config ::Instance()->FGModifySCIndex.value_or_default())
+                    if (swapchainIndex != 0 && Config::Instance()->FGModifySCIndex.value_or_default())
                     {
                         auto presents = desc.BufferCount - swapchainIndex;
 
@@ -923,7 +923,7 @@ HRESULT FGHooks::hkResizeBuffers1(IDXGISwapChain3* This, UINT BufferCount, UINT 
                         }
                     }
 
-                    if (swapchainIndex != 0 && Config ::Instance()->FGModifySCIndex.value_or_default())
+                    if (swapchainIndex != 0 && Config::Instance()->FGModifySCIndex.value_or_default())
                     {
                         auto presents = desc.BufferCount - swapchainIndex;
 
@@ -1282,6 +1282,11 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
     {
         if (result == DXGI_ERROR_DEVICE_REMOVED && state.currentD3D12Device != nullptr)
             Util::GetDeviceRemovedReason(state.currentD3D12Device);
+    }
+
+    if (willPresent && fgFeatureActive)
+    {
+        fg->PostPresent();
     }
 
     if (tokenResult == sl::Result::eOk && localToken != nullptr && fgFeatureActive &&

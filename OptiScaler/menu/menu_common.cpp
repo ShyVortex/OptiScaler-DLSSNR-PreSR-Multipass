@@ -3711,6 +3711,26 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                    patchStr.c_str(), pacingStr.c_str());
             }
 
+            if (status.HasPresentTelemetry)
+            {
+                if (status.LastFrameGenResult == 0)
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)),
+                                       "Present Status: OK (%u frames presented, FG %s)", status.LastFramesPresented,
+                                       status.IsFrameGenEnabled ? "Enabled" : "Disabled");
+                }
+                else
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
+                                       "Present Status: Code %d (%u frames presented, FG %s)",
+                                       status.LastFrameGenResult, status.LastFramesPresented,
+                                       status.IsFrameGenEnabled ? "Enabled" : "Disabled");
+                }
+                ShowHelpMarker("Real-time presentation status from xefgSwapChainGetLastPresentStatus.\n"
+                               "Indicates whether Intel XeSS-FG is actively producing neural interpolated frames\n"
+                               "or silently falling back to native frames.");
+            }
+
             // In-game multiplier status
             int liveMultiplier = state.dlssgDetectedInterpolationCount;
             if (liveMultiplier <= 0 && state.currentFG != nullptr && !state.currentFG->IsPassthrough())
@@ -3759,6 +3779,24 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "4 = 5X FG (4 generated frames)\n"
                 "5 = 6X FG (5 generated frames)\n"
                 "Save Settings and restart after changing.");
+
+            bool fgDV = config->FGXeFGDebugView.value_or_default();
+            if (ImGui::Checkbox("Debug Markers (Corners)##xemfg", &fgDV))
+            {
+                config->FGXeFGDebugView = fgDV;
+                state.fgChanged = true;
+            }
+            ShowHelpMarker("Renders marker quads in the corners of real interpolated frames.\n"
+                           "If you do not see marker quads, frames are not being interpolated.");
+
+            ImGui::SameLine(0.0f, 16.0f);
+            if (ImGui::Checkbox("Only Interpolated Frames##xemfg", &state.fgOnlyGenerated))
+            {
+                state.fgChanged = true;
+            }
+            ShowHelpMarker("Renders ONLY generated frames and blanks native frames.\n"
+                           "If interpolation is active, motion will remain visible.\n"
+                           "If interpolation has failed, the screen will turn black.");
         }
 
         ImGui::Unindent();
@@ -4987,10 +5025,11 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
                        "Might cause some instability issues.\n\n"
                        "NEEDS GAME RESTART TO BE ACTIVE!");
 
-        // Disable this for now
-        // ImGui::SameLine(0.0f, 16.0f);
-        // ImGui::Checkbox("Only Generated##2", &state.fgOnlyGenerated);
-        // ShowHelpMarker("Display only XeFG generated frames");
+        ImGui::SameLine(0.0f, 16.0f);
+        if (ImGui::Checkbox("Only Generated##2", &state.fgOnlyGenerated))
+            state.fgChanged = true;
+        ShowHelpMarker("Display only XeFG generated frames (blanks native frames).\n"
+                       "Useful to visually verify if neural frame interpolation is working.");
 
         ImGui::Spacing();
         if (auto ch = ScopedCollapsingHeader("Extended XeFG Settings"); ch.IsHeaderOpen())

@@ -888,10 +888,13 @@ bool XeFG_Dx12::Dispatch()
         }
     }
 
-    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
-                                    Config::Instance()->FGXeFGDebugView.value_or_default(), nullptr);
-    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
-                                    state.fgOnlyGenerated, nullptr);
+    if (XeFGProxy::EnableDebugFeature() != nullptr && _swapChainContext != nullptr)
+    {
+        XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
+                                        Config::Instance()->FGXeFGDebugView.value_or_default(), nullptr);
+        XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
+                                        state.fgOnlyGenerated, nullptr);
+    }
 
     xefg_swapchain_frame_constant_data_t constData = {};
 
@@ -1777,4 +1780,48 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
     }
 
     return true;
+}
+
+void XeFG_Dx12::PostPresent()
+{
+    if (_swapChainContext == nullptr || XeFGProxy::GetLastPresentStatus() == nullptr)
+        return;
+
+    xefg_swapchain_present_status_t presentStatus {};
+    auto result = XeFGProxy::GetLastPresentStatus()(_swapChainContext, &presentStatus);
+    if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        XeMfgLoader::RecordPresentStatus(presentStatus.framesPresented, static_cast<int>(presentStatus.frameGenResult),
+                                         presentStatus.isFrameGenEnabled != 0);
+
+        static uint32_t s_logThrottle = 0;
+        static int32_t s_lastResult = -9999;
+        static uint32_t s_lastFrames = 0;
+
+        if (presentStatus.frameGenResult != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        {
+            if (s_lastResult != static_cast<int32_t>(presentStatus.frameGenResult) || (++s_logThrottle % 120 == 0))
+            {
+                LOG_WARN("XeFG LastPresentStatus WARNING: result={} ({}), framesPresented={}, enabled={}",
+                         static_cast<int32_t>(presentStatus.frameGenResult),
+                         magic_enum::enum_name(presentStatus.frameGenResult), presentStatus.framesPresented,
+                         presentStatus.isFrameGenEnabled);
+                s_lastResult = static_cast<int32_t>(presentStatus.frameGenResult);
+            }
+        }
+        else
+        {
+            if (s_lastResult != 0 || s_lastFrames != presentStatus.framesPresented || (++s_logThrottle % 600 == 0))
+            {
+                LOG_INFO("XeFG LastPresentStatus: framesPresented={}, frameGenResult=SUCCESS, enabled={}",
+                         presentStatus.framesPresented, presentStatus.isFrameGenEnabled);
+                s_lastResult = 0;
+                s_lastFrames = presentStatus.framesPresented;
+            }
+        }
+    }
+    else
+    {
+        LOG_DEBUG("GetLastPresentStatus failed with result: {}", static_cast<int32_t>(result));
+    }
 }

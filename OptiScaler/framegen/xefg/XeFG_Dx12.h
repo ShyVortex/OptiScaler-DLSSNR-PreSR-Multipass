@@ -64,6 +64,7 @@ class XeFG_Dx12 : public virtual IFGFeature_Dx12
     void EvaluateState(ID3D12Device* device, FG_Constants& fgConstants) override final;
 
     bool Present() override final;
+    void PostPresent() override final;
 
     bool SetResource(Dx12Resource* inputResource) override final;
     void SetCommandQueue(FG_ResourceType type, ID3D12CommandQueue* queue) override final;

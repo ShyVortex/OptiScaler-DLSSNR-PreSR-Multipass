@@ -495,6 +495,19 @@ void Shutdown()
     g_status.PacingDetours = 0;
     g_status.PacingInstalled = false;
     g_status.VerifiedPacing = false;
+    g_status.LastFramesPresented = 0;
+    g_status.LastFrameGenResult = 0;
+    g_status.IsFrameGenEnabled = false;
+    g_status.HasPresentTelemetry = false;
+}
+
+void RecordPresentStatus(unsigned int framesPresented, int frameGenResult, bool isFrameGenEnabled)
+{
+    std::scoped_lock lock(g_mutex);
+    g_status.LastFramesPresented = framesPresented;
+    g_status.LastFrameGenResult = frameGenResult;
+    g_status.IsFrameGenEnabled = isFrameGenEnabled;
+    g_status.HasPresentTelemetry = true;
 }
 
 } // namespace XeMfgLoader
