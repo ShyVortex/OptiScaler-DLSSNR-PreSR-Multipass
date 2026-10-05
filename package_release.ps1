@@ -169,6 +169,27 @@ New-Item -ItemType Directory -Force -Path "$stage\Licenses" | Out-Null
 
 foreach ($name in @('libxess.dll', 'libxess_dx11.dll', 'libxell.dll', 'libxess_fg.dll')) {
     $extPath = "$root\external\xess\bin\$name"
+    $sdkPath = "$root\XeMFG\SDK\bin\$name"
+    if (-not (Test-Path -LiteralPath $extPath) -and (Test-Path -LiteralPath $sdkPath)) {
+        $extPath = $sdkPath
+    }
+    if (-not (Test-Path -LiteralPath $extPath)) {
+        $remoteUrl = "https://raw.githubusercontent.com/intel/xess/main/bin/$name"
+        Write-Host "Downloading $name from $remoteUrl..."
+        $targetDir = "$root\external\xess\bin"
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+        }
+        try {
+            Invoke-WebRequest -Uri $remoteUrl -OutFile "$targetDir\$name" -UseBasicParsing
+            if (Test-Path -LiteralPath "$targetDir\$name") {
+                $extPath = "$targetDir\$name"
+                Write-Host "Successfully downloaded $name."
+            }
+        } catch {
+            Write-Warning "Failed to download $name from remote: $_"
+        }
+    }
     if ((Test-Path -LiteralPath $extPath) -and -not (Test-Path -LiteralPath "$stage\OptiScaler\$name")) {
         Copy-Item -LiteralPath $extPath -Destination "$stage\OptiScaler\$name" -Force
     }
