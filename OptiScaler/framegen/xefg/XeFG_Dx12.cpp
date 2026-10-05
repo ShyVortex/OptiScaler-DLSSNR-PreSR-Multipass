@@ -945,8 +945,8 @@ bool XeFG_Dx12::Dispatch()
 
     constData.jitterOffsetX = _jitterX[fIndex];
     constData.jitterOffsetY = _jitterY[fIndex];
-    constData.motionVectorScaleX = _mvScaleX[fIndex];
-    constData.motionVectorScaleY = _mvScaleY[fIndex];
+    constData.motionVectorScaleX = (_mvScaleX[fIndex] != 0.0f) ? _mvScaleX[fIndex] : 1.0f;
+    constData.motionVectorScaleY = (_mvScaleY[fIndex] != 0.0f) ? _mvScaleY[fIndex] : 1.0f;
 
     if (!Config::Instance()->FGSkipReset.value_or_default())
         constData.resetHistory = _reset[fIndex];

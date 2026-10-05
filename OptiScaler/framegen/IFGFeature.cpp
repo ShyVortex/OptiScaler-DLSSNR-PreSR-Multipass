@@ -37,7 +37,11 @@ UINT64 IFGFeature::StartNewFrame()
 {
     _frameCount++;
 
-    if (_lastDispatchedFrame == 0 || (_frameCount - _lastDispatchedFrame) > 2)
+    if (_lastDispatchedFrame == 0)
+    {
+        _lastDispatchedFrame = _frameCount - 1;
+    }
+    else if ((_frameCount - _lastDispatchedFrame) >= BUFFER_COUNT)
     {
         LOG_WARN("Frame count jumped too much! _frameCount: {}, _lastDispatchedFrame: {}", _frameCount,
                  _lastDispatchedFrame);

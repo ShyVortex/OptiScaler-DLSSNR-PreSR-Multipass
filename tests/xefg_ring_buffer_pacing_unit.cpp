@@ -1,0 +1,157 @@
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <vector>
+
+// Standalone unit test for XeFG Ring Buffer Pacing, StartNewFrame Discontinuity Logic,
+// and Motion Vector Scale Safety.
+
+static const int BUFFER_COUNT = 4;
+
+class MockFGFeature
+{
+  public:
+    uint64_t _frameCount = 0;
+    uint64_t _lastDispatchedFrame = 0;
+    uint32_t _jumpCount = 0;
+    int _allowedFrameAhead = 1;
+
+    int GetIndex() const { return static_cast<int>(_frameCount % BUFFER_COUNT); }
+
+    uint64_t StartNewFrame()
+    {
+        _frameCount++;
+
+        if (_lastDispatchedFrame == 0)
+        {
+            _lastDispatchedFrame = _frameCount - 1;
+        }
+        else if ((_frameCount - _lastDispatchedFrame) >= BUFFER_COUNT)
+        {
+            _jumpCount++;
+            _lastDispatchedFrame = _frameCount - 1;
+        }
+
+        return _frameCount;
+    }
+
+    int GetDispatchIndex(uint64_t& willDispatchFrame)
+    {
+        if (_frameCount == _lastDispatchedFrame)
+            return -1;
+
+        willDispatchFrame = _lastDispatchedFrame + 1;
+
+        auto diff = _frameCount - _lastDispatchedFrame;
+        if (diff > _allowedFrameAhead || diff < 0 || _lastDispatchedFrame == 0)
+        {
+            // If current frame has resources ready, catch up
+            willDispatchFrame = _frameCount;
+        }
+
+        _lastDispatchedFrame = willDispatchFrame;
+        return static_cast<int>(willDispatchFrame % BUFFER_COUNT);
+    }
+};
+
+struct MockFrameConstantData
+{
+    float motionVectorScaleX = 0.0f;
+    float motionVectorScaleY = 0.0f;
+};
+
+static void PopulateFrameConstants(MockFrameConstantData& constData, float inputMvScaleX, float inputMvScaleY)
+{
+    constData.motionVectorScaleX = (inputMvScaleX != 0.0f) ? inputMvScaleX : 1.0f;
+    constData.motionVectorScaleY = (inputMvScaleY != 0.0f) ? inputMvScaleY : 1.0f;
+}
+
+int main()
+{
+    printf("Running XeFG Ring Buffer & Motion Vector Pacing Unit Tests...\n");
+
+    // Test 1: Pipelining up to 3 frames ahead does not trigger false discontinuity jumps
+    {
+        MockFGFeature fg;
+        fg._allowedFrameAhead = 2; // Capcom RE Engine quirk
+
+        // Frame 1
+        fg.StartNewFrame(); // frame 1, lastDispatched = 0 -> initializes to 0
+        assert(fg._frameCount == 1);
+        assert(fg._lastDispatchedFrame == 0);
+        assert(fg._jumpCount == 0);
+
+        uint64_t df = 0;
+        int idx = fg.GetDispatchIndex(df);
+        assert(df == 1);
+        assert(idx == 1);
+        assert(fg._lastDispatchedFrame == 1);
+
+        // Frame 2
+        fg.StartNewFrame();
+        fg.GetDispatchIndex(df);
+        assert(fg._lastDispatchedFrame == 2);
+
+        // Simulate 2-frame pipelining: render thread pushes frames 3, 4 before GPU dispatches
+        fg.StartNewFrame(); // frame 3, diff = 3 - 2 = 1
+        assert(fg._jumpCount == 0);
+
+        fg.StartNewFrame(); // frame 4, diff = 4 - 2 = 2
+        assert(fg._jumpCount == 0);
+
+        fg.StartNewFrame(); // frame 5, diff = 5 - 2 = 3 (diff < BUFFER_COUNT)
+        // In previous buggy version, diff > 2 triggered false jump here!
+        assert(fg._jumpCount == 0);
+        assert(fg._lastDispatchedFrame == 2);
+
+        // Now dispatch catches up
+        idx = fg.GetDispatchIndex(df);
+        assert(df == 5); // caught up since diff > allowedFrameAhead (2)
+        assert(fg._lastDispatchedFrame == 5);
+        assert(fg._jumpCount == 0);
+
+        printf("  [PASS] Test 1: Pipelined frames do not trigger spurious ring buffer jumps\n");
+    }
+
+    // Test 2: True discontinuity (diff >= BUFFER_COUNT) clamps and reports correctly
+    {
+        MockFGFeature fg;
+        fg.StartNewFrame(); // frame 1
+        uint64_t df = 0;
+        fg.GetDispatchIndex(df); // dispatched 1, _lastDispatchedFrame = 1
+
+        // Simulate massive gap (e.g. pause or level reload)
+        fg._frameCount = 100;
+        fg.StartNewFrame(); // frame 101, diff = 101 - 1 = 100 >= BUFFER_COUNT
+        assert(fg._jumpCount == 1);
+        assert(fg._lastDispatchedFrame == 100);
+
+        printf("  [PASS] Test 2: Genuine ring buffer overflow correctly clamps _lastDispatchedFrame\n");
+    }
+
+    // Test 3: Motion vector scale zero fallback
+    {
+        MockFrameConstantData constData {};
+
+        // Case A: 0.0f inputs must fallback to 1.0f
+        PopulateFrameConstants(constData, 0.0f, 0.0f);
+        assert(constData.motionVectorScaleX == 1.0f);
+        assert(constData.motionVectorScaleY == 1.0f);
+
+        // Case B: Non-zero inputs preserved
+        PopulateFrameConstants(constData, 2.5f, -1.0f);
+        assert(constData.motionVectorScaleX == 2.5f);
+        assert(constData.motionVectorScaleY == -1.0f);
+
+        // Case C: Single-axis zero input fallback
+        PopulateFrameConstants(constData, 1.5f, 0.0f);
+        assert(constData.motionVectorScaleX == 1.5f);
+        assert(constData.motionVectorScaleY == 1.0f);
+
+        printf("  [PASS] Test 3: Motion vector scale zero inputs safely default to 1.0f\n");
+    }
+
+    printf("All XeFG Ring Buffer & Motion Vector Pacing Unit Tests PASSED!\n");
+    return 0;
+}
