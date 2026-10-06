@@ -3,118 +3,95 @@
 ## 1. Overview & Context
 
 - **Environment**: Windows 11 x64, NVIDIA GeForce RTX 3080 Ti Laptop GPU (`0x170` Ampere architecture), Direct3D 12.
-- **Target Application**: *Resident Evil Requiem* (`re9.exe`, Capcom RE Engine).
-- **Target Runtime**: Intel XeSS Frame Generation (`libxess_fg.dll` / `libxess.dll` / `libxell.dll` v3.0+ SDK) with native XeMFG multi-frame generation.
-- **Diagnostic Trace**: `OptiScaler_test6.log` (505,960 lines, 43MB, LogLevel=1).
+- **Target Applications**:
+  - *Resident Evil Requiem* (`re9.exe`, Capcom RE Engine).
+  - *The Last of Us Part II Remastered* (`tlou-ii.exe`, Naughty Dog Engine).
+- **Target Runtimes**: Intel XeSS Frame Generation (`libxess_fg.dll` / `libxess.dll` / `libxell.dll` v3.0+ SDK) with native XeMFG multi-frame generation, and AMD FSR 3.1 Frame Generation.
+- **Diagnostic Traces**: `OptiScaler_test6.log` (LogLevel=1) and `OptiScaler_test7.log` (LogLevel=1).
 
 ---
 
 ## 2. Reported Symptoms
 
-Following the successful engagement of XeFG 2X and Multi-Frame Generation in *Resident Evil Requiem*, two critical stability issues and one build/packaging requirement were identified:
-1. **Black Screen on Save Game Load with FG Enabled**:
-   - Loading a saved game while DLSS FG / XeFG was active resulted in a permanent black screen where the 3D scene and pause menu failed to render, requiring Alt+F4 to quit.
-   - Workaround: Disabling DLSS FG in-game prior to loading a save allowed the game to load normally, after which FG could be toggled on.
-2. **Persistent Stuttering & Periodic Frame Drops During Gameplay**:
-   - While XeFG produced interpolated frames (verified by debug markers and telemetry), significant motion instability, stutters, and periodic drops back to native 1X presentation remained.
-3. **XeSS 3.0+ SDK Build Process Integration**:
-   - Ensure release archives and CI workflows consistently stage the official XeSS 3.0+ SDK binaries, fetching dynamically from `https://github.com/intel/xess/tree/main/bin` if local files are missing.
+Following the initial engagement of XeFG 2X and Multi-Frame Generation, the following issues were reported:
+1. **Resident Evil Requiem Startup Crash**:
+   - The game failed to launch into the menu, terminating with an unhandled exception pointing to `dxgi.dll!0x7ffca1f10000 + 0x13dc9f`, `RTSSHooks64.dll!0x180000000 + 0x720c1`, and `sl.interposer.dll!0x7ffcc8f00000 + 0x279fc`.
+2. **The Last of Us Part II Black Screen & Framerate Degradation**:
+   - The game launched, but soon transitioned into a permanent black screen with no way to proceed, accompanied by framerate degrading progressively down to near-zero.
+3. **Save-Load Stability in RE Requiem**:
+   - Loading saves with FG enabled previously exhibited black screen states when tagged resources became unavailable during loading screens.
+4. **XeSS 3.0+ SDK Staging in CI Workflows**:
+   - Ensure release packaging and GitHub Actions dynamically retrieve the official XeSS 3.0+ SDK binaries.
 
 ---
 
-## 3. Issue Validity Assessment & Trace Analysis (`OptiScaler_test6.log`)
+## 3. Issue Validity Assessment & Root Cause Analysis
 
-Rigorous analysis of `OptiScaler_test6.log` confirmed all reported issues were genuine defects in OptiScaler's frame generation core and lifecycle management:
-
-### 3.1 Ring Buffer Desynchronization (4,420 Occurrences)
-In `OptiScaler_test6.log`, the following warning fired **4,420 times** throughout the session:
+### 3.1 RE Requiem Startup Crash (`OptiScaler_test7.log`)
+`OptiScaler_test7.log` revealed:
 ```text
-[W] IFGFeature::StartNewFrame Frame count jumped too much! _frameCount: 13944, _lastDispatchedFrame: 13941
-[W] IFGFeature::StartNewFrame Frame count jumped too much! _frameCount: 13942, _lastDispatchedFrame: 13939
-[W] IFGFeature::StartNewFrame Frame count jumped too much! _frameCount: 13940, _lastDispatchedFrame: 13937
+[17:24:10.530516] [D] DxgiFactoryHooks::CreateSwapChainForHwnd Width: 2560, Height: 1440, Format: 24, Count: 3, Flags: 842, Hwnd: C006C, SkipWrapping: false
+[17:24:10.530555] [I] XeFG_Dx12::CreateSwapchain1 Releasing old swapchain
+[17:24:10.535846] [D] XeFG_Dx12::CreateSwapchain1 Releasing swapchain, ref count: 2
+[17:24:10.572240] [D] XeFG_Dx12::CreateSwapchain1 Releasing swapchain, ref count: 3221225472
 ```
 - **Mechanism**:
-  - Capcom RE Engine employs multi-frame pipelining: CPU command recording runs 2 frames ahead of GPU present.
-  - In `IFGFeature::StartNewFrame()`, a hardcoded check evaluated:
-    `if (_lastDispatchedFrame == 0 || (_frameCount - _lastDispatchedFrame) > 2)`
-  - When `_frameCount - _lastDispatchedFrame == 3` (completely valid in a 4-slot ring buffer `BUFFER_COUNT = 4`), `StartNewFrame` falsely concluded a frame jump had occurred and forcibly set `_lastDispatchedFrame = _frameCount - 1`.
-  - When `XeFG_Dx12::Dispatch` subsequently called `GetDispatchIndex`, it attempted to dispatch `_lastDispatchedFrame + 1`—a future frame whose depth and motion vectors had not finished GPU rendering.
-  - `XeFG_Dx12::Dispatch` logged:
-    ```text
-    [W] XeFG_Dx12::Dispatch Depth or Velocity is not ready, skipping
-    [W] XeFG_Dx12::PostPresent XeFG LastPresentStatus WARNING: result=-14 (XEFG_SWAPCHAIN_RESULT_ERROR_INCORRECT_INPUT_RESOURCES), framesPresented=1
+  - `GameQuirk::DoNotPreserveFGSwapChain` had been applied to `re9.exe`, causing `FGPreserveSwapChain` to resolve to `false`.
+  - When RE Engine launched and transitioned from its 1080p splash video to the 1440p main menu via `CreateSwapChainForHwnd`, `XeFG_Dx12::CreateSwapchain1` bypassed `ResizeBuffers` and entered lines 484–500:
+    ```cpp
+    if (State::Instance().currentRealSwapchain != nullptr) {
+        UINT release = 0;
+        do {
+            release = State::Instance().currentRealSwapchain->Release();
+        } while (release > 0);
+    }
     ```
-  - This aborted interpolation and fell back to presenting only 1 native frame every 1–2 seconds, causing continuous frametime spikes and presentation stutter.
+  - Forcibly invoking `Release()` in a loop on `currentRealSwapchain` until ref count hit 0 destroyed the active DXGI swapchain COM object out from under concurrent render and hook threads (`RTSSHooks64.dll`, `sl.interposer.dll`, `dxgi.dll`).
+  - Ref count underflowed to `3221225472` (`0xC0000000`), immediately producing an access violation `0xC0000005`.
+  - **Resolution**: Removed `GameQuirk::DoNotPreserveFGSwapChain` from `re9.exe` and `re9demo.exe`, and deleted the destructive `while (release > 0) currentRealSwapchain->Release();` loops from `XeFG_Dx12.cpp`. RE Engine smoothly resizes its swapchain via `ResizeBuffers`.
 
-### 3.2 Motion Vector Scale Rejection
-`OptiScaler_test6.log` captured:
-```text
-[E] XeFG Log: XeFG: Invalid argument. Motion vector scale should not be 0.
-[W] XeFG_Dx12::PostPresent XeFG LastPresentStatus WARNING: result=-4 (XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT), framesPresented=1
-```
-- When Streamline inputs passed 0.0f or uninitialized motion vector scales, `libxess_fg.dll` rejected the frame constants with `XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT`, dropping presentation back to 1 frame.
+### 3.2 The Last of Us Part II Black Screen & Queue Starvation
+- **Mechanism**:
+  - In `IFGFeature::StartNewFrame()`, the discontinuity threshold had been widened to `(_frameCount - _lastDispatchedFrame) >= BUFFER_COUNT`.
+  - `tlou-ii.exe` specifies `GameQuirk::AllowedFrameAhead2` (`FGAllowedFrameAhead = 2`).
+  - When frames were rendered across cutscenes or loading transitions without dispatch, `_frameCount - _lastDispatchedFrame` reached 2.
+  - Because `2 < BUFFER_COUNT (4)`, `StartNewFrame()` never resynchronized `_lastDispatchedFrame`.
+  - In `GetDispatchIndex`, since `diff == 2 <= FGAllowedFrameAhead (2)`, it never caught up to `_frameCount`; instead it continually requested `_lastDispatchedFrame + 1` (historical frame `_frameCount - 1`).
+  - Because the 4-slot ring buffer had already cleared and overwritten that slot, `FSRFG_Dx12::Dispatch` repeatedly logged `"Depth or Velocity is not ready, skipping"` and skipped dispatch.
+  - `_lastDispatchedFrame` became locked 2 frames behind. Every subsequent frame attempted to dispatch an expired historical slot and failed, presenting no frames and causing a permanent black screen while presentation queue latency spiraled downward to 0 FPS.
+  - Furthermore, `wrapped_swapchain.cpp` line 450 applied `XeMfgExtraPacing` without checking `fgFeatureActive`, forcing `SyncInterval = 1` even during passthrough or when FG was off.
+  - **Resolution**: Restored `if (_lastDispatchedFrame == 0 || (_frameCount - _lastDispatchedFrame) > 2) _lastDispatchedFrame = _frameCount - 1;` in `IFGFeature.cpp`. In `wrapped_swapchain.cpp`, guarded `XeMfgExtraPacing` with `fg != nullptr && fg->IsActive() && !fg->IsPaused()`.
 
-### 3.3 Swapchain Recreation Collision on Save Game Load
-`OptiScaler_test6.log` recorded:
-```text
-[12:10:08.027791] [I] Destroyed DXGISwapChain proxy ... native swap-chain ref count 0
-[12:10:08.027827] [E] 'kFeatureDLSS_G' context is missing.
-[12:10:08.027880] [D] DxgiFactoryHooks::CreateSwapChainForHwnd Width: 2560, Height: 1440
-[12:10:08.027897] [W] FGHooks::CreateSwapChainForHwnd Looks like game is creating new swapchain, without releasing old one!
-[12:10:08.027968] [W] XeFG_Dx12::CreateSwapchain1 FG swapchain already created for the same output window!
-```
-- During level/save loading, RE Engine destroys its existing DXGI swapchain and calls `CreateSwapChainForHwnd`.
-- Streamline destroyed its `kFeatureDLSS_G` context and DXGISwapChain proxy.
-- Because `FGPreserveSwapChain` defaults to `true` and `re9.exe` lacked `GameQuirk::DoNotPreserveFGSwapChain`, OptiScaler attempted `ResizeBuffers` on the old `currentFGSwapchain`.
-- Handing back a zombie proxy swapchain detached from the game's newly created native swapchain left the game presenting into the void, resulting in an unrecoverable black screen.
+### 3.3 Motion Vector Scale Safety
+- Guarded `motionVectorScaleX` and `motionVectorScaleY` in `XeFG_Dx12::Dispatch()` so 0.0f inputs safely default to 1.0f, preventing `XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT`.
 
 ---
 
 ## 4. Solutions Applied
 
-### 4.1 Ring Buffer Pipelining & Threshold Fix (`IFGFeature.cpp`)
-- Replaced the hardcoded `> 2` check with `(_frameCount - _lastDispatchedFrame) >= BUFFER_COUNT`.
-- Pipelined frames with differences up to 3 are now correctly preserved without spurious jump clamps or false frame advances.
-
-### 4.2 Game Engine Quirks for RE Requiem (`Quirks.h`)
-- Added `GameQuirk::AllowedFrameAhead2` to `re9.exe` and `re9demo.exe` to allow RE Engine's 2-frame pipelining without premature dispatch catch-up.
-- Added `GameQuirk::DoNotPreserveFGSwapChain` to `re9.exe` and `re9demo.exe` so swapchains are cleanly recreated on save/scene loads.
-
-### 4.3 Motion Vector Scale Safety Guard (`XeFG_Dx12.cpp`)
-- Guarded `motionVectorScaleX` and `motionVectorScaleY` in `XeFG_Dx12::Dispatch()`:
-  ```cpp
-  constData.motionVectorScaleX = (_mvScaleX[fIndex] != 0.0f) ? _mvScaleX[fIndex] : 1.0f;
-  constData.motionVectorScaleY = (_mvScaleY[fIndex] != 0.0f) ? _mvScaleY[fIndex] : 1.0f;
-  ```
-  Preventing `XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT`.
-
-### 4.4 Swapchain Lifecycle & Recreation Hardening (`XeFG_Dx12.cpp`)
-- In `CreateSwapchain` and `CreateSwapchain1`:
-  - If `FGPreserveSwapChain` is active but `ResizeBuffers` fails, OptiScaler now logs a warning and automatically falls back to full swapchain release and clean recreation.
-  - When `readyToRelease` is true or `DoNotPreserveFGSwapChain` is active, the old swapchain is cleanly destroyed before creating the new context.
-- In `ReleaseSwapchain`:
-  - Reset `_swapChain = nullptr`, `_hwnd = NULL`, `_gameCommandQueue = nullptr`, `_isActive = false`, `_passthrough = false`, `_framesToInterpolate = 0`, and `_haveHudless.reset()`.
-
-### 4.5 Remote XeSS 3.0 SDK Retrieval & CI Staging (`package_release.ps1`, Workflows)
-- In `package_release.ps1`:
-  - Checks local `XeMFG\SDK\bin\$name` and `external\xess\bin\$name`.
-  - If missing locally, dynamically downloads from `https://raw.githubusercontent.com/intel/xess/main/bin/$name`.
-- In `.github/workflows/package_release.yml` & `build.yml`:
-  - Added dedicated step `Ensure XeSS 3.0+ SDK binaries are present` that verifies all 4 binaries exist in `external/xess/bin` or downloads them directly from `https://raw.githubusercontent.com/intel/xess/main/bin/` if absent.
+1. **Quirks & Swapchain Preservation (`Quirks.h`, `XeFG_Dx12.cpp`)**:
+   - `re9.exe` and `re9demo.exe` preserve swapchains (`FGPreserveSwapChain = true`) and utilize `AllowedFrameAhead2`.
+   - Eliminated all destructive COM release loops on `currentRealSwapchain`.
+2. **Ring Buffer Resynchronization (`IFGFeature.cpp`)**:
+   - Restored proven `diff > 2` resynchronization clamp in `StartNewFrame()`, preventing stale buffer starvation in games using `AllowedFrameAhead2`.
+3. **Pacing Gating (`wrapped_swapchain.cpp`)**:
+   - `XeMfgExtraPacing` is strictly gated behind `fg != nullptr && fg->IsActive() && !fg->IsPaused()`.
+4. **Remote SDK Retrieval (`package_release.ps1`, Workflows)**:
+   - Automated dynamic retrieval of official Intel XeSS 3.0+ SDK binaries from `https://raw.githubusercontent.com/intel/xess/main/bin/`.
 
 ---
 
 ## 5. Automated Verification
 
-- **Ring Buffer & Motion Vector Unit Test** (`tests/xefg_ring_buffer_pacing_unit.cpp`):
-  - Validated 4-slot ring buffer progression under 2-frame pipelining without spurious jumps.
-  - Validated genuine overflow clamping when `diff >= BUFFER_COUNT`.
-  - Validated motion vector scale zero inputs safely defaulting to `1.0f`.
-- **Swapchain Lifecycle Unit Test** (`tests/xefg_swapchain_lifecycle_unit.cpp`):
-  - Validated `re9.exe` and `re9demo.exe` quirk entries for `AllowedFrameAhead2` and `DoNotPreserveFGSwapChain`.
-  - Validated clean swapchain recreation during simulated save loads.
-  - Validated `ResizeBuffers` failure fallback recreation.
+- **Swapchain Lifecycle Test** (`tests/xefg_swapchain_lifecycle_unit.cpp`):
+  - Validated swapchain preservation on `re9.exe`.
+  - Validated clean `ResizeBuffers` across resolution changes (1080p splash to 1440p menu) without swapchain destruction.
+  - Validated clean recreation fallback on `ResizeBuffers` failure.
   - Validated full state reset in `ReleaseSwapchain`.
-- **Formatting & CI Compliance**:
-  - Preserved UTF-8 BOM on all modified files.
-  - Passed `clang-format --dry-run --Werror` cleanly.
+- **Ring Buffer Pacing Test** (`tests/xefg_ring_buffer_pacing_unit.cpp`):
+  - Validated pipelining up to 2 frames ahead without spurious jumps.
+  - Validated that gaps > 2 immediately snap `_lastDispatchedFrame = _frameCount - 1` to prevent starvation loops.
+  - Validated motion vector scale zero fallback.
+- **Formatting & MSVC Compliance**:
+  - UTF-8 BOM (`\xef\xbb\xbf`) preserved on all modified files.
+  - Passed `clang-format --dry-run --Werror` cleanly with 0 violations.

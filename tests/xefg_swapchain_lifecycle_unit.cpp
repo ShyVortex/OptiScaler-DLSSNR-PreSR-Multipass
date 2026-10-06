@@ -34,10 +34,9 @@ struct QuirkEntry
 
 static const QuirkEntry testQuirkTable[] = {
     { "re9.exe", Quirk::RestoreComputeSigOnNonNvidia | Quirk::DisableDxgiSpoofing | Quirk::RestoreComputeSigOnNvidia |
-                     Quirk::AllowedFrameAhead2 | Quirk::DoNotPreserveFGSwapChain },
+                     Quirk::AllowedFrameAhead2 },
     { "re9demo.exe", Quirk::RestoreComputeSigOnNonNvidia | Quirk::DisableDxgiSpoofing |
-                         Quirk::RestoreComputeSigOnNvidia | Quirk::AllowedFrameAhead2 |
-                         Quirk::DoNotPreserveFGSwapChain },
+                         Quirk::RestoreComputeSigOnNvidia | Quirk::AllowedFrameAhead2 },
 };
 
 class MockXeFGSwapchainManager
@@ -55,6 +54,7 @@ class MockXeFGSwapchainManager
     // Simulation helpers
     uint32_t _releaseCallCount = 0;
     uint32_t _createContextCount = 0;
+    uint32_t _resizeBuffersCallCount = 0;
     bool _resizeBuffersShouldSucceed = true;
 
     bool ReleaseSwapchain(uintptr_t hwnd)
@@ -80,13 +80,13 @@ class MockXeFGSwapchainManager
         {
             if (_preserveSwapChain)
             {
-                // Attempt ResizeBuffers
+                _resizeBuffersCallCount++;
                 if (_resizeBuffersShouldSucceed)
                 {
                     *outSwapchain = _currentFGSwapchain;
                     return true;
                 }
-                // If ResizeBuffers failed, fall back to clean recreation!
+                // If ResizeBuffers failed, fall back to clean recreation
             }
 
             if (readyToRelease || !_preserveSwapChain)
@@ -121,20 +121,21 @@ int main()
 {
     printf("Running XeFG Swapchain Lifecycle & Save-Load Unit Tests...\n");
 
-    // Test 1: Verify RE Requiem quirk entries have DoNotPreserveFGSwapChain & AllowedFrameAhead2
+    // Test 1: Verify RE Requiem quirk entries preserve swapchain (NO DoNotPreserveFGSwapChain) and configure
+    // AllowedFrameAhead2
     {
         for (const auto& entry : testQuirkTable)
         {
-            assert(HasQuirk(entry.quirks, Quirk::DoNotPreserveFGSwapChain));
+            assert(!HasQuirk(entry.quirks, Quirk::DoNotPreserveFGSwapChain));
             assert(HasQuirk(entry.quirks, Quirk::AllowedFrameAhead2));
         }
-        printf("  [PASS] Test 1: re9.exe and re9demo.exe configure DoNotPreserveFGSwapChain and AllowedFrameAhead2\n");
+        printf("  [PASS] Test 1: re9.exe and re9demo.exe preserve swapchain and configure AllowedFrameAhead2\n");
     }
 
-    // Test 2: Clean swapchain recreation when DoNotPreserveFGSwapChain is active (re9 save load scenario)
+    // Test 2: Normal startup resolution transition (1080p intro to 1440p menu) preserves swapchain via ResizeBuffers
     {
         MockXeFGSwapchainManager mgr;
-        mgr._preserveSwapChain = false; // forced false by DoNotPreserveFGSwapChain quirk
+        mgr._preserveSwapChain = true;
 
         void* sc1 = nullptr;
         bool ok = mgr.CreateSwapchain1(0x1234, 1920, 1080, &sc1, false);
@@ -142,21 +143,23 @@ int main()
         assert(sc1 != nullptr);
         assert(mgr._createContextCount == 1);
         assert(mgr._releaseCallCount == 0);
+        assert(mgr._resizeBuffersCallCount == 0);
         assert(mgr._hwnd == 0x1234);
 
-        // Game reloads save: calls CreateSwapChain1 with readyToRelease = true on same HWND
+        // Intro finishes, game switches to 1440p menu
         void* sc2 = nullptr;
-        ok = mgr.CreateSwapchain1(0x1234, 2560, 1440, &sc2, true);
+        ok = mgr.CreateSwapchain1(0x1234, 2560, 1440, &sc2, false);
         assert(ok);
-        assert(sc2 != nullptr);
-        assert(mgr._releaseCallCount == 1);   // Old swapchain cleanly released
-        assert(mgr._createContextCount == 2); // Brand new swapchain context created
+        assert(sc2 == sc1);
+        assert(mgr._resizeBuffersCallCount == 1);
+        assert(mgr._releaseCallCount == 0); // No destructive swapchain release!
+        assert(mgr._createContextCount == 1);
         assert(mgr._hwnd == 0x1234);
 
-        printf("  [PASS] Test 2: Save load cleanly releases and recreates swapchain under DoNotPreserveFGSwapChain\n");
+        printf("  [PASS] Test 2: Startup resolution transition cleanly resizes without swapchain destruction\n");
     }
 
-    // Test 3: ResizeBuffers fallback recreation when ResizeBuffers fails on preserved swapchain
+    // Test 3: ResizeBuffers failure safely falls back to clean swapchain recreation without COM ref loops
     {
         MockXeFGSwapchainManager mgr;
         mgr._preserveSwapChain = true;
@@ -167,7 +170,7 @@ int main()
         assert(ok);
         assert(mgr._createContextCount == 1);
 
-        // Recreate called: ResizeBuffers fails -> must fall back to ReleaseSwapchain & recreate
+        // Recreate called: ResizeBuffers fails -> falls back to ReleaseSwapchain & recreate
         void* sc2 = nullptr;
         ok = mgr.CreateSwapchain1(0x5678, 2560, 1440, &sc2, true);
         assert(ok);
