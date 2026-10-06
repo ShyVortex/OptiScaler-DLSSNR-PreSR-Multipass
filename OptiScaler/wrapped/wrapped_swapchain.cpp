@@ -447,7 +447,8 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 
         LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
-    else if (willPresent && State::Instance().activeFgOutput == FGOutput::XeFG &&
+    else if (willPresent && fg != nullptr && fg->IsActive() && !fg->IsPaused() &&
+             State::Instance().activeFgOutput == FGOutput::XeFG &&
              Config::Instance()->XeMfgExtraPacing.value_or(true) && !IdentifyGpu::getPrimaryGpu().usesDxvk)
     {
         if (SyncInterval < 1)
