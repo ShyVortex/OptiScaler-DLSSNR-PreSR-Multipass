@@ -3803,9 +3803,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             {
                 config->XeMfgExtraPacing = extraPacing;
             }
-            ShowHelpMarker("Synchronizes presentation to VBlank (SyncInterval=1) on Windows DXGI.\n"
-                           "Eliminates frame-time micro-stutters, tearing, and multi-frame clumping.\n"
-                           "Recommended ON for smooth 2X, 3X, and 4X delivery on Windows.");
+            ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
+                           "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
+                           "Enable only if your display exhibits severe tear-lines without V-Sync.");
         }
 
         ImGui::Unindent();
