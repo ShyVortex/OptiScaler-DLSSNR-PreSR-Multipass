@@ -3701,7 +3701,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else
             {
-                std::string pacingStr = status.PacingInstalled ? "active (deadline detour)"
+                std::string pacingStr = status.PacingInstalled ? "active (native provider)"
                                                                : (status.VerifiedPacing ? "verified" : "standard");
                 std::string patchStr =
                     status.Applied

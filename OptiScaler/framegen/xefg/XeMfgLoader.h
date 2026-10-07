@@ -11,9 +11,9 @@ struct Status
     bool Patched = false;               // all required unlock patches applied
     bool Applied = false;               // alias for Patched
     unsigned int PatchesApplied = 0;    // count of applied patches (0..5)
-    unsigned int PacingDetours = 0;     // count of active pacing detours (0 or 1 for deadline calculation)
-    bool PacingInstalled = false;       // passive multi-frame deadline detour active
-    bool VerifiedPacing = false;        // true when passive deadline detour verified
+    unsigned int PacingDetours = 0;     // count of active pacing detours (0 for native provider pacing)
+    bool PacingInstalled = false;       // native provider multi-frame pacing active
+    bool VerifiedPacing = false;        // true when native provider pacing verified
     bool PatchFailed = false;           // memory protection or write operation failed
     bool RollbackFailed = false;        // at least one original byte state could not be restored
     unsigned int ConfiguredCeiling = 3; // configured max frames (1..5)

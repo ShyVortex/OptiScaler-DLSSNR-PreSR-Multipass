@@ -1,4 +1,4 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -377,7 +377,7 @@ int main()
         printf("  [PASS] Test 7: Presentation telemetry recording & lifecycle reset.\n");
     }
 
-    // Test 8: Multi-Frame Presentation Deadline Calculation Across Multipliers
+    // Test 8: Native Provider Presentation Deadline Calculation Across Multipliers (0x180224b30)
     {
         const uint64_t baseTimestamp = 1000000;
         const uint64_t interval = 60000; // e.g. 60ms in arbitrary units
@@ -401,8 +401,8 @@ int main()
             assert(d == baseTimestamp + idx * 10000);
             prev = d;
         }
-        printf(
-            "  [PASS] Test 8: Multi-frame presentation deadline calculation evenly spaces presentation intervals.\n");
+        printf("  [PASS] Test 8: Native provider presentation deadline calculation evenly spaces presentation "
+               "intervals.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");
