@@ -524,6 +524,7 @@ auto DlssNr_Dx12::State::DenoiseFirstContext::Before(ID3D12GraphicsCommandList* 
         } restore { owner, cmd };
         restore.Read(depth, depth == color ? arrival : inputStates.depth);
         restore.Read(motion, motion == color ? arrival : inputStates.motion);
+        handoff.modelAttempted = true;
         owner.Run(cmd, g.edited, depth, motion, g.edited, frame, queue, &handoff.modelEvaluated);
     }
     if (owner.nr.successfulDispatches == before)
@@ -536,7 +537,7 @@ auto DlssNr_Dx12::State::DenoiseFirstContext::Before(ID3D12GraphicsCommandList* 
             Say("NR composition failed after model evaluation; ordinary NR resumes next frame; use Retry");
             return handoff;
         }
-        Say("waiting for NR evaluation; the game's upscale keeps its raw input");
+        Say("waiting for private NR creation; raw frame retained without changing NR history placement");
         return handoff;
     }
     handoff.modelEvaluated = true;

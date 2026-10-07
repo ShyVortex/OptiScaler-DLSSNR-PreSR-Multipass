@@ -46,6 +46,11 @@ Display-resolution MV and output-scaling requests retain the ordinary NR route.
    ordinary NR resumes on subsequent frames with reset history until explicit Retry.
    Consumption is propagated from the actual model evaluation, not inferred from
    successful final composition, which can fail after temporal history advanced.
+   Private NR owns its model-initialization/warmup frame as well: falling back to
+   ordinary post-SR at that point would rebuild the shared NR cache to a different
+   placement (and often size), destroying the new feature before it becomes ready.
+   A transient raw frame during this later warmup avoids a reproduced livelock.
+   Early private-denoiser warmup and unsupported admission still retain ordinary NR.
 7. A mismatched or abandoned handoff retires its generation instead of issuing
    a barrier on a different recording or reusing a texture with an unknown state.
    The destructor uses the complete readiness predicate, including private owners,
@@ -75,6 +80,8 @@ of driver/GPU stability, visual quality or RTX4090 performance.
   lazy allocation with discarded initial command recordings.
 - `tests/nr_game_history/run.ps1`: actual game evaluate scope, route transitions,
   failed evaluation retries and Reset/jitter restoration.
+- `tests/nr_history_warmup/run.ps1`: actual model preparation, invocation and routing
+  over multiple epochs, including equal-size placement-only rebuild livelock.
 - `tests/run-nr-cpu-audits.ps1`: existing seven ownership, timing, descriptor,
   threading, allocation and encode-failure audit groups. Includes a deliberately
   failing post-only-notification negative control.

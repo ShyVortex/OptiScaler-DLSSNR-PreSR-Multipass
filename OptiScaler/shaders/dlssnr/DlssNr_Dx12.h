@@ -125,6 +125,9 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
         bool replaceOutput = false;
         // A late composition/enlargement failure must not evaluate this model twice in one frame.
         bool modelEvaluated = false;
+        // Private NR also owns its creation/warmup frame. Switching back to ordinary
+        // placement here would destroy that just-created model before it can become ready.
+        bool modelAttempted = false;
     };
     DenoiseFirstHandoff DenoiseFirstBefore(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params,
                                            uint32_t featureFlags, ID3D12CommandQueue* queue, bool rayReconstruction,

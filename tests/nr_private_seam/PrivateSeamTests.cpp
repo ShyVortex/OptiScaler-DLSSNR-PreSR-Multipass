@@ -228,6 +228,7 @@ struct TraceHandoff
     ID3D12Resource* color = nullptr;
     bool replaceOutput = false;
     bool modelEvaluated = false;
+    bool modelAttempted = false;
 };
 TraceHandoff LateFailureBefore(DlssNr_Dx12::State& owner, bool composition)
 {

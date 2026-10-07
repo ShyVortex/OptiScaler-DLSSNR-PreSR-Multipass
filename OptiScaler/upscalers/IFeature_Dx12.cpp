@@ -146,15 +146,17 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     const bool specializedNr =
         NeuralRendering && NeuralRendering->ProcessSeam(InCommandList, InParameters, true, timingQueue,
                                                         rayReconstruction, submissionEpoch, interop, GetFeatureFlags());
-    // Decide from a successful handoff, not the requested mode. Warming, unsupported and
-    // failed private work must leave the ordinary NR placement available on this frame.
+    // Decide from accepted private work, not the requested mode. Early denoiser warmup or
+    // unsupported inputs retain ordinary NR. Once private NR owns its model initialization,
+    // do not rebuild that shared history back to the ordinary placement in the same frame.
     DlssNr_Dx12::DenoiseFirstHandoff denoiseHandoff {};
     if (NeuralRendering && !specializedNr && !interop && !useOutputScaling &&
         Config::Instance()->DlssNrEnabled.value_or_default() &&
         Config::Instance()->DlssNrDenoiseFirst.value_or_default() && DlssNr::CanRunBeforeUpscale_Dx12(InParameters))
         denoiseHandoff = NeuralRendering->DenoiseFirstBefore(InCommandList, InParameters, GetFeatureFlags(),
                                                              timingQueue, rayReconstruction, submissionEpoch);
-    const bool denoiseFirst = denoiseHandoff.color || denoiseHandoff.replaceOutput || denoiseHandoff.modelEvaluated;
+    const bool denoiseFirst = denoiseHandoff.color || denoiseHandoff.replaceOutput || denoiseHandoff.modelEvaluated ||
+                              denoiseHandoff.modelAttempted;
     const bool nrBeforeUpscale =
         NeuralRendering && !specializedNr && !denoiseFirst && Config::Instance()->DlssNrEnabled.value_or_default() &&
         Config::Instance()->DlssNrRunBeforeSr.value_or_default() && DlssNr::CanRunBeforeUpscale_Dx12(InParameters);
