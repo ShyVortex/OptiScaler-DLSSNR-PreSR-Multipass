@@ -598,6 +598,8 @@ bool FSRFG_Dx12::Dispatch()
             _fgCommandList[fIndex]->Close();
             _waitingExecute[fIndex] = true;
             dispatchResult = ExecuteCommandList(fIndex);
+            if (dispatchResult)
+                ConfirmDispatched(willDispatchFrame);
         }
     }
 
@@ -765,7 +767,7 @@ ffxReturnCode_t FSRFG_Dx12::DispatchCallback(ffxDispatchDescFrameGeneration* par
     _lastFrameId = params->frameID;
 
     if (dispatchResult == FFX_API_RETURN_OK)
-        ConfirmDispatched(willDispatchFrame);
+        ConfirmDispatched(params->frameID);
 
     return dispatchResult;
 }
