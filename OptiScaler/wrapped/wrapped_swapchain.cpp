@@ -444,18 +444,7 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
             LOG_DEBUG("Removing DXGI_PRESENT_ALLOW_TEARING");
             Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
         }
-
         LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
-    }
-    else if (willPresent && fg != nullptr && fg->IsActive() && !fg->IsPaused() &&
-             State::Instance().activeFgOutput == FGOutput::XeFG &&
-             Config::Instance()->XeMfgExtraPacing.value_or(true) && !IdentifyGpu::getPrimaryGpu().usesDxvk)
-    {
-        if (SyncInterval < 1)
-            SyncInterval = 1;
-
-        Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
-        LOG_DEBUG("XeMFG ExtraPacing applied in wrapped_swapchain: SyncInterval={}, Flags={:X}", SyncInterval, Flags);
     }
 
     // DXVK check, it's here because of upscaler time calculations

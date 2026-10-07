@@ -1265,7 +1265,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
     else if (willPresent && fgFeatureActive && state.activeFgOutput == FGOutput::XeFG &&
-             config->XeMfgExtraPacing.value_or(true) && !IdentifyGpu::getPrimaryGpu().usesDxvk)
+             config->XeMfgExtraPacing.value_or(false) && !IdentifyGpu::getPrimaryGpu().usesDxvk)
     {
         // On native Windows DXGI, unmetered presentation (SyncInterval=0 + ALLOW_TEARING)
         // causes generated frames to clump or tear across scanouts, creating visual micro-stutter.

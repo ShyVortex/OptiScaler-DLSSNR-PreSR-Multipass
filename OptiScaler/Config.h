@@ -750,7 +750,7 @@ class Config
     // XeMFG Unlock
     CustomOptional<bool> XeMfgUnlock { false };
     CustomOptional<int> XeMfgMaxFrames { 3 };
-    CustomOptional<bool> XeMfgExtraPacing { true }; // VBlank synchronization & presentation pacing for Windows DXGI
+    CustomOptional<bool> XeMfgExtraPacing { false }; // Optional VBlank synchronization for Windows DXGI
 
     // DLSSG
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance

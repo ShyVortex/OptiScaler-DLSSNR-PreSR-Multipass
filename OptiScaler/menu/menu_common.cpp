@@ -3798,7 +3798,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "If interpolation is active, motion will remain visible.\n"
                            "If interpolation has failed, the screen will turn black.");
 
-            bool extraPacing = config->XeMfgExtraPacing.value_or(true);
+            bool extraPacing = config->XeMfgExtraPacing.value_or(false);
             if (ImGui::Checkbox("Display VBlank Sync (Extra Pacing)##xemfg", &extraPacing))
             {
                 config->XeMfgExtraPacing = extraPacing;
