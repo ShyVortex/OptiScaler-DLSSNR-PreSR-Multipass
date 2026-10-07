@@ -1213,6 +1213,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         }
     }
 
+    bool fgDispatched = false;
     if (willPresent && fgFeatureActive)
     {
         if (state.activeFgInput == FGInput::FSRFG)
@@ -1221,7 +1222,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
             FSR3FG::ffxPresentCallback();
 
         DlssNr::ApplyToFinishedPicture(This, state.currentCommandQueue);
-        fg->Present();
+        fgDispatched = fg->Present();
     }
     else if (willPresent && fg != nullptr)
     {
@@ -1279,7 +1280,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
 
     // Used at wrapped_swapchain LocalPresent to determine is frame is interpolated or not
     if (willPresent)
-        state.fgPresentIsCalled = true;
+        state.fgPresentIsCalled = fgDispatched;
 
     HRESULT result;
     if (pPresentParameters == nullptr)
@@ -1297,7 +1298,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
             Util::GetDeviceRemovedReason(state.currentD3D12Device);
     }
 
-    if (willPresent && fgFeatureActive)
+    if (willPresent && fgFeatureActive && fgDispatched)
     {
         fg->PostPresent();
     }

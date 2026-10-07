@@ -648,7 +648,8 @@ void XeFG_Dx12::Activate()
         nativeAA = currentFeature->RenderWidth() == currentFeature->DisplayWidth();
 
     if (_swapChainContext != nullptr && _fgContext != nullptr && !_isActive &&
-        (IsLowResMV() || nativeAA || (State::Instance().gameQuirks & GameQuirk::ForceFGRenderSizeMVs) ||
+        (State::Instance().activeFgInput == FGInput::DLSSG || IsLowResMV() || nativeAA ||
+         (State::Instance().gameQuirks & GameQuirk::ForceFGRenderSizeMVs) ||
          Config::Instance()->FGXeFGIgnoreInitChecks.value_or_default()))
     {
         auto result = XeFGProxy::SetEnabled()(_swapChainContext, true);
@@ -704,6 +705,7 @@ void XeFG_Dx12::Deactivate()
 
         //_lastDispatchedFrame = 0;
         _waitingNewFrameData = false;
+        _needResetHistory = true;
 
         LOG_INFO("SetEnabled: false, result: {} ({})", magic_enum::enum_name(result), (UINT) result);
     }
@@ -933,9 +935,11 @@ bool XeFG_Dx12::Dispatch()
     constData.motionVectorScaleY = (_mvScaleY[fIndex] != 0.0f) ? _mvScaleY[fIndex] : 1.0f;
 
     if (!Config::Instance()->FGSkipReset.value_or_default())
-        constData.resetHistory = _reset[fIndex];
+        constData.resetHistory = (_reset[fIndex] || _needResetHistory);
     else
         constData.resetHistory = false;
+
+    _needResetHistory = false;
 
     switch (Config::Instance()->FTInput.value_or_default())
     {
@@ -957,6 +961,9 @@ bool XeFG_Dx12::Dispatch()
               State::Instance().reflexFrameId);
 
     auto frameId = static_cast<uint32_t>(willDispatchFrame);
+
+    if (XeFGProxy::SetEnabled() != nullptr && _swapChainContext != nullptr)
+        XeFGProxy::SetEnabled()(_swapChainContext, true);
 
     auto result = XeFGProxy::TagFrameConstants()(_swapChainContext, frameId, &constData);
     if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
@@ -1460,7 +1467,16 @@ bool XeFG_Dx12::Present()
 
     _fgFramePresentId++;
 
-    return Dispatch();
+    auto dispatchResult = Dispatch();
+    if (!dispatchResult && _swapChainContext != nullptr)
+    {
+        if (XeFGProxy::SetEnabled() != nullptr)
+            XeFGProxy::SetEnabled()(_swapChainContext, false);
+        _needResetHistory = true;
+        _lastDispatchedFrame = _frameCount;
+    }
+
+    return dispatchResult;
 }
 
 bool XeFG_Dx12::SetResource(Dx12Resource* inputResource)
