@@ -937,6 +937,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="dlssnr\DlssNr_Pipeline_Dx12.cpp" />
     <ClInclude Include="dlssnr\DlssNr_Pipeline_Dx12.h" />
     <ClInclude Include="dlssnr\DlssNr_Upscaler.h" />
+    <ClInclude Include="dlssnr\DlssNr_PrivateCreation.h" />
     <ClInclude Include="dlssnr\DlssNr_VkExtensions.h" />
     <ClInclude Include="dlssnr\DlssNrFeature_Dx12.h" />
     <ClInclude Include="dlssnr\DlssNrFeature_Vk_Internal.h" />
@@ -953,6 +954,10 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_DeferredSr.cpp" />
+    <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_DenoiseFirst.cpp" />
+    <ClInclude Include="shaders\dlssnr\precompile\dlssnr_denoise_first_Shader.h" />
+    <None Include="shaders\dlssnr\precompile\dlssnr_denoise_first.hlsl" />
+    <None Include="shaders\dlssnr\precompile\dlssnr_denoise_first_Shader.cso" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Enlarge.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Evaluate.cpp" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_FinishedCompose.cpp" />

@@ -66,6 +66,7 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     ID3D12PipelineState* _finishedColorPipelineState = nullptr;
     ID3D12PipelineState* _spatialPipelineState = nullptr;
     ID3D12PipelineState* _spatialGuidesPipelineState = nullptr;
+    ID3D12PipelineState* _denoiseFirstPipelineState = nullptr;
 
     // Caller holds the owner and state locks. All NR compute shaders share this descriptor layout.
     bool DispatchCompute(ID3D12GraphicsCommandList* cmd, const DlssNrConstants& constants,
@@ -116,6 +117,26 @@ class DlssNr_Dx12 : public Shader_Dx12, public DlssNr_Common
     void ApplyFinishedDx11(IDXGISwapChain* swapchain);
     std::string FinishedStatus();
     std::string DeferredStatus();
+
+    struct DenoiseFirstHandoff
+    {
+        ID3D12Resource* color = nullptr;
+        bool zeroJitter = false;
+        bool replaceOutput = false;
+        // A late composition/enlargement failure must not evaluate this model twice in one frame.
+        bool modelEvaluated = false;
+        // Private NR also owns its creation/warmup frame. Switching back to ordinary
+        // placement here would destroy that just-created model before it can become ready.
+        bool modelAttempted = false;
+    };
+    DenoiseFirstHandoff DenoiseFirstBefore(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params,
+                                           uint32_t featureFlags, ID3D12CommandQueue* queue, bool rayReconstruction,
+                                           unsigned long long submissionEpoch);
+    void DenoiseFirstAfter(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, ID3D12Resource* output,
+                           bool upscaled, D3D12_RESOURCE_STATES outputState);
+    std::string DenoiseStatus();
+    bool DispatchDenoiseFirstPass(ID3D12GraphicsCommandList* cmd, const DlssNrConstants& constants, ID3D12Resource* raw,
+                                  ID3D12Resource* model, ID3D12Resource* clean, ID3D12Resource* target);
 
     // Records one pass. Resources that a given mode does not read may be null; a stand-in is bound in
     // their place so every descriptor in the table is valid.

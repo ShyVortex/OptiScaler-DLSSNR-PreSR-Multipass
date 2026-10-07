@@ -8,6 +8,7 @@
 #include "precompile/dlssnr_finished_color_Shader.h"
 #include "precompile/dlssnr_spatial_Shader.h"
 #include "precompile/dlssnr_spatial_guides_Shader.h"
+#include "precompile/dlssnr_denoise_first_Shader.h"
 
 namespace
 {
@@ -271,7 +272,14 @@ bool DlssNr_Dx12::ReadyToDestroy()
         return false;
     if (!_state->retiredEnlargers.empty() || (_state->enlarger && !_state->enlarger->lifetime.Idle()))
         return false;
-    if (!_state->lifetime.Idle() || !_state->deferredSr.lifetime.Idle() || !_descriptorSlots.Idle())
+    if (!_state->lifetime.Idle() || !_state->deferredSr.lifetime.Idle() || !_state->denoiseFirst.lifetime.Idle() ||
+        !_descriptorSlots.Idle())
+        return false;
+    if ((_state->deferredSr.current && !_state->deferredSr.current->creation.Idle()) ||
+        !_state->deferredSr.retiredGenerations.empty() || !_state->denoiseFirst.retiredGenerations.empty())
+        return false;
+    if (_state->denoiseFirst.current && (!_state->denoiseFirst.current->denoiserCreation.Idle() ||
+                                         !_state->denoiseFirst.current->enlargerCreation.Idle()))
         return false;
     for (auto& model : _state->nr.models)
         if (!model.Idle())
@@ -287,7 +295,25 @@ void DlssNr_Dx12::FinishSubmitted()
     std::lock_guard lock(_state->mutex);
     _descriptorSlots.FinishSubmitted();
     _state->lifetime.FinishSubmitted();
+    if (_state->deferredSr.current)
+        _state->deferredSr.current->creation.FinishSubmitted();
+    for (auto* old : _state->deferredSr.retiredGenerations)
+        old->creation.FinishSubmitted();
     _state->deferredSr.lifetime.FinishSubmitted();
+    auto finishDenoise = [](auto& g)
+    {
+        g.denoiserCreation.FinishSubmitted();
+        g.enlargerCreation.FinishSubmitted();
+        if (g.denoiseTime)
+            g.denoiseTime->FinishSubmitted();
+        if (g.enlargeTime)
+            g.enlargeTime->FinishSubmitted();
+    };
+    if (_state->denoiseFirst.current)
+        finishDenoise(*_state->denoiseFirst.current);
+    for (auto* old : _state->denoiseFirst.retiredGenerations)
+        finishDenoise(*old);
+    _state->denoiseFirst.lifetime.FinishSubmitted();
     _state->captureFrames.FinishSubmitted();
     if (_state->enlarger)
         _state->enlarger->lifetime.FinishSubmitted();
@@ -313,7 +339,7 @@ DlssNr_Dx12::~DlssNr_Dx12()
         activeNrOwner = nullptr;
     DlssNr::ClearStatus(this);
     const bool finished = _state->WaitForFinishedPicture();
-    if (!finished || _state->pendingSubmissions || !_state->lifetime.Idle() || !_descriptorSlots.Idle())
+    if (!finished || !ReadyToDestroy())
     {
         LOG_WARN("DLSS-NR: abandoning GPU ownership with unresolved command recordings at teardown");
         _state.release();
@@ -354,6 +380,77 @@ DlssNr_Dx12::~DlssNr_Dx12()
         _spatialGuidesPipelineState->Release();
         _spatialGuidesPipelineState = nullptr;
     }
+    if (_denoiseFirstPipelineState != nullptr)
+    {
+        _denoiseFirstPipelineState->Release();
+        _denoiseFirstPipelineState = nullptr;
+    }
+}
+
+bool DlssNr_Dx12::DispatchDenoiseFirstPass(ID3D12GraphicsCommandList* cmd, const DlssNrConstants& constants,
+                                           ID3D12Resource* raw, ID3D12Resource* model, ID3D12Resource* clean,
+                                           ID3D12Resource* target)
+{
+    std::lock_guard ownersLock(nrOwnersMutex);
+    std::lock_guard stateLock(_state->mutex);
+    if (!_denoiseFirstPipelineState && _init)
+        CreateComputePipeline(_device, &_denoiseFirstPipelineState, dlssnr_denoise_first_cso,
+                              sizeof(dlssnr_denoise_first_cso), nullptr);
+    if (!_denoiseFirstPipelineState)
+        return false;
+    return DispatchCompute(cmd, constants, _denoiseFirstPipelineState, raw, model, clean, nullptr, nullptr, target,
+                           nullptr, nullptr);
+}
+
+DlssNr_Dx12::DenoiseFirstHandoff DlssNr_Dx12::DenoiseFirstBefore(ID3D12GraphicsCommandList* cmd,
+                                                                 NVSDK_NGX_Parameter* params, uint32_t featureFlags,
+                                                                 ID3D12CommandQueue* queue, bool rayReconstruction,
+                                                                 unsigned long long submissionEpoch)
+{
+    std::lock_guard ownersLock(nrOwnersMutex);
+    ActivateNrOwner(this);
+    std::lock_guard stateLock(_state->mutex);
+    _state->ConsumeControls();
+    struct Publish
+    {
+        State& s;
+        ~Publish() { s.Publish(); }
+    } publish { *_state };
+    if (!_init || !cmd || !params)
+        return {};
+    return _state->denoiseFirst.Before(cmd, params, featureFlags, submissionEpoch, queue, rayReconstruction);
+}
+
+void DlssNr_Dx12::DenoiseFirstAfter(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, ID3D12Resource* output,
+                                    bool upscaled, D3D12_RESOURCE_STATES outputState)
+{
+    std::lock_guard ownersLock(nrOwnersMutex);
+    std::lock_guard stateLock(_state->mutex);
+    _state->denoiseFirst.After(cmd, params, output, upscaled, outputState);
+}
+
+std::string DlssNr_Dx12::DenoiseStatus()
+{
+    std::lock_guard stateLock(_state->mutex);
+    auto& df = _state->denoiseFirst;
+    std::string text = df.status;
+    // Live timings are appended at read time, never put into the logged status text.
+    if (df.current && !df.current->failed)
+    {
+        char timing[64];
+        if (df.lastDenoiseTime)
+        {
+            std::snprintf(timing, sizeof(timing), " [1:1 pass %.2f ms", *df.lastDenoiseTime);
+            text += timing;
+            if (df.current->step == State::DenoiseFirstContext::PrivateSr && df.lastEnlargeTime)
+            {
+                std::snprintf(timing, sizeof(timing), ", private SR %.2f ms", *df.lastEnlargeTime);
+                text += timing;
+            }
+            text += "]";
+        }
+    }
+    return text;
 }
 
 bool DlssNr_Dx12::SpatialReady()
@@ -557,6 +654,11 @@ bool DlssNr_Dx12::ProcessSeam(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Paramete
         cfg.DlssNrRunBeforeSr.value_or_default(), cfg.DlssNrDeferredDlss.value_or_default(),
         cfg.DlssNrResidualAcrossRr.value_or_default(), cfg.DlssNrFinishedPicture.value_or_default());
     const bool special = placement.finished || placement.deferred;
+    // Denoise first owns the ordinary seams in IFeature_Dx12; drop its private features when it is not the active mode.
+    if (beforeUpscale)
+        _state->denoiseFirst.Idle(!special && !interop && cfg.DlssNrEnabled.value_or_default() &&
+                                  cfg.DlssNrDenoiseFirst.value_or_default() &&
+                                  DlssNr::CanRunBeforeUpscale_Dx12(params));
     if (special)
         _state->EvaluateInternal(cmd, params, beforeUpscale, queue, rayReconstruction, submissionEpoch, interop);
     else
@@ -945,6 +1047,11 @@ std::string DeferredDlssStatus()
 {
     std::lock_guard lock(nrOwnersMutex);
     return activeNrOwner ? activeNrOwner->DeferredStatus() : "not started";
+}
+std::string DenoiseFirstStatus()
+{
+    std::lock_guard lock(nrOwnersMutex);
+    return activeNrOwner ? activeNrOwner->DenoiseStatus() : "not started";
 }
 bool Shutdown()
 {

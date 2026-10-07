@@ -475,6 +475,14 @@ bool Config::Reload(std::filesystem::path iniPath)
             DlssNrPrivateUpscaler.set_from_config(readInt("DlssNr", "PrivateUpscaler"));
             DlssNrResidualAcrossRr.set_from_config(readBool("DlssNr", "ResidualAcrossRR"));
             DlssNrResidualAcrossRrBlend.set_from_config(readFloat("DlssNr", "ResidualAcrossRRBlend"));
+            DlssNrDenoiseFirst.set_from_config(readBool("DlssNr", "DenoiseFirst"));
+            DlssNrDenoiseFirstStep.set_from_config(readInt("DlssNr", "DenoiseFirstStep"));
+            DlssNrDenoiseFirstEdit.set_from_config(readInt("DlssNr", "DenoiseFirstEdit"));
+            DlssNrDenoiseFirstKernel.set_from_config(readInt("DlssNr", "DenoiseFirstKernel"));
+            DlssNrDenoiseFirstShift.set_from_config(readBool("DlssNr", "DenoiseFirstShift"));
+            DlssNrDenoiseFirstFlipJitter.set_from_config(readBool("DlssNr", "DenoiseFirstFlipJitter"));
+            DlssNrDenoiseFirstNeighbourhoodClamp.set_from_config(readBool("DlssNr", "DenoiseFirstNeighbourhoodClamp"));
+            DlssNrDenoiseFirstFireflyGuard.set_from_config(readBool("DlssNr", "DenoiseFirstFireflyGuard"));
             DlssNrToggleKey.set_from_config(readInt("DlssNr", "ToggleKey"));
             DlssNrTransferStrength.set_from_config(readFloat("DlssNr", "TransferStrength"));
             DlssNrColourStrength.set_from_config(readFloat("DlssNr", "ColourStrength"));
@@ -1435,6 +1443,21 @@ bool Config::SaveIni(std::filesystem::path destination)
                      GetBoolValue(Instance()->DlssNrResidualAcrossRr.value_for_config()).c_str());
         ini.SetValue("DlssNr", "ResidualAcrossRRBlend",
                      GetFloatValue(Instance()->DlssNrResidualAcrossRrBlend.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirst", GetBoolValue(Instance()->DlssNrDenoiseFirst.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstStep",
+                     GetIntValue(Instance()->DlssNrDenoiseFirstStep.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstEdit",
+                     GetIntValue(Instance()->DlssNrDenoiseFirstEdit.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstKernel",
+                     GetIntValue(Instance()->DlssNrDenoiseFirstKernel.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstShift",
+                     GetBoolValue(Instance()->DlssNrDenoiseFirstShift.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstFlipJitter",
+                     GetBoolValue(Instance()->DlssNrDenoiseFirstFlipJitter.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstNeighbourhoodClamp",
+                     GetBoolValue(Instance()->DlssNrDenoiseFirstNeighbourhoodClamp.value_for_config()).c_str());
+        ini.SetValue("DlssNr", "DenoiseFirstFireflyGuard",
+                     GetBoolValue(Instance()->DlssNrDenoiseFirstFireflyGuard.value_for_config()).c_str());
         ini.Delete("DlssNr", "ResidualFG");
         ini.Delete("DlssNr", "ResidualFGApproxCamera");
         ini.Delete("DlssNr", "UseProxy");

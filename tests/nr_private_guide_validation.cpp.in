@@ -1,0 +1,103 @@
+// CPU-only harness. The runner inserts production frame structs, Init prelude and Evaluate prelude.
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <vector>
+using UINT64 = uint64_t;
+enum { D3D12_RESOURCE_DIMENSION_TEXTURE2D = 3 };
+enum D3D12_RESOURCE_STATES { D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS };
+struct D3D12_RESOURCE_DESC
+{
+    unsigned Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    UINT64 Width = 1280;
+    unsigned Height = 720;
+    unsigned DepthOrArraySize = 1, MipLevels = 1, Format = 0;
+    struct { unsigned Count = 1, Quality = 0; } SampleDesc;
+};
+struct ID3D12Resource { D3D12_RESOURCE_DESC desc; D3D12_RESOURCE_DESC GetDesc() const { return desc; } };
+struct ID3D12Device {};
+struct ID3D12GraphicsCommandList { unsigned barriers = 0, dispatches = 0; };
+@STRUCTS@
+struct Adapter
+{
+    unsigned width = 0, height = 0, outWidth = 0, outHeight = 0;
+    bool rayReconstruction = false, autoExposure = false, lowResolutionMotion = true;
+    unsigned roughnessMode = 0, hardwareDepth = 1;
+    std::string error;
+    static void Barrier(ID3D12GraphicsCommandList* cmd, ID3D12Resource*, D3D12_RESOURCE_STATES before,
+                        D3D12_RESOURCE_STATES after) { if (before != after) ++cmd->barriers; }
+    void Init(const PrivateUpscalerCreateDx12& info)
+    {
+@INIT@
+        (void) inverted; (void) jittered; (void) highMv;
+    }
+    bool Evaluate(ID3D12GraphicsCommandList* cmd, const PrivateUpscalerFrameDx12& f)
+    {
+@EVALUATE@
+        ++cmd->dispatches;
+        return true;
+    }
+};
+} // namespace DlssNr
+int main()
+{
+    using namespace DlssNr;
+    int failures = 0, cases = 0;
+    auto run = [&](const char* name, bool lowMv, D3D12_RESOURCE_DESC depthDesc, D3D12_RESOURCE_DESC motionDesc,
+                   bool expected)
+    {
+        Adapter adapter;
+        PrivateUpscalerCreateDx12 info;
+        info.width = 1280; info.height = 720; info.outputWidth = 1920; info.outputHeight = 1080;
+        info.lowResolutionMotion = lowMv;
+        adapter.Init(info);
+        ID3D12Resource color, output, depth { depthDesc }, motion { motionDesc }, exposure;
+        PrivateUpscalerFrameDx12 f;
+        f.width = 1280; f.height = 720; f.outputWidth = 1920; f.outputHeight = 1080;
+        f.color.resource = &color; f.output.resource = &output; f.depth.resource = &depth;
+        f.motion.resource = &motion; f.exposure.resource = &exposure;
+        f.color.state = f.depth.state = f.motion.state = f.exposure.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        ID3D12GraphicsCommandList cmd;
+        const bool accepted = adapter.Evaluate(&cmd, f);
+        const bool pass = accepted == expected && (expected ? cmd.dispatches == 1 && cmd.barriers == 4 :
+                                                              cmd.dispatches == 0 && cmd.barriers == 0);
+        ++cases; failures += !pass;
+        std::printf("%s %s (accepted=%d barriers=%u dispatches=%u)\n", pass ? "PASS" : "FAIL", name,
+                    accepted, cmd.barriers, cmd.dispatches);
+    };
+    D3D12_RESOURCE_DESC render, display = render, larger = render;
+    display.Width = 1920; display.Height = 1080;
+    larger.Width = 4096; larger.Height = 2160; larger.MipLevels = 5;
+    run("render-sized low-res guides", true, render, render, true);
+    run("display-sized motion", false, render, display, true);
+    run("large backing textures with mip0", true, larger, larger, true);
+    run("large display-motion backing", false, render, larger, true);
+    run("display-motion rejects render-size", false, render, render, false);
+    run("low-motion accepts display-size backing", true, render, display, true);
+    for (bool isDepth : { true, false })
+    {
+        auto bad = render;
+        bad.Dimension = 1;
+        run(isDepth ? "depth buffer dimension" : "motion buffer dimension", true,
+            isDepth ? bad : render, isDepth ? render : bad, false);
+        bad.Dimension = 4;
+        run(isDepth ? "depth 3D dimension" : "motion 3D dimension", true,
+            isDepth ? bad : render, isDepth ? render : bad, false);
+        bad = render; bad.SampleDesc.Count = 4;
+        run(isDepth ? "depth MSAA" : "motion MSAA", true, isDepth ? bad : render, isDepth ? render : bad, false);
+        bad = render; bad.Width = 1279;
+        run(isDepth ? "depth width undersized" : "motion width undersized", true,
+            isDepth ? bad : render, isDepth ? render : bad, false);
+        bad = render; bad.Height = 719;
+        run(isDepth ? "depth height undersized" : "motion height undersized", true,
+            isDepth ? bad : render, isDepth ? render : bad, false);
+    }
+    auto shortDisplay = display; shortDisplay.Width = 1919;
+    run("display motion width undersized", false, render, shortDisplay, false);
+    shortDisplay = display; shortDisplay.Height = 1079;
+    run("display motion height undersized", false, render, shortDisplay, false);
+    std::printf("%d cases, %d failures\n", cases, failures);
+    return failures ? 1 : 0;
+}

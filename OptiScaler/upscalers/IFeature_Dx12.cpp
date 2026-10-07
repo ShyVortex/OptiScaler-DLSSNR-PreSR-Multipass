@@ -146,8 +146,19 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     const bool specializedNr =
         NeuralRendering && NeuralRendering->ProcessSeam(InCommandList, InParameters, true, timingQueue,
                                                         rayReconstruction, submissionEpoch, interop, GetFeatureFlags());
+    // Decide from accepted private work, not the requested mode. Early denoiser warmup or
+    // unsupported inputs retain ordinary NR. Once private NR owns its model initialization,
+    // do not rebuild that shared history back to the ordinary placement in the same frame.
+    DlssNr_Dx12::DenoiseFirstHandoff denoiseHandoff {};
+    if (NeuralRendering && !specializedNr && !interop && !useOutputScaling &&
+        Config::Instance()->DlssNrEnabled.value_or_default() &&
+        Config::Instance()->DlssNrDenoiseFirst.value_or_default() && DlssNr::CanRunBeforeUpscale_Dx12(InParameters))
+        denoiseHandoff = NeuralRendering->DenoiseFirstBefore(InCommandList, InParameters, GetFeatureFlags(),
+                                                             timingQueue, rayReconstruction, submissionEpoch);
+    const bool denoiseFirst = denoiseHandoff.color || denoiseHandoff.replaceOutput || denoiseHandoff.modelEvaluated ||
+                              denoiseHandoff.modelAttempted;
     const bool nrBeforeUpscale =
-        NeuralRendering && !specializedNr && Config::Instance()->DlssNrEnabled.value_or_default() &&
+        NeuralRendering && !specializedNr && !denoiseFirst && Config::Instance()->DlssNrEnabled.value_or_default() &&
         Config::Instance()->DlssNrRunBeforeSr.value_or_default() && DlssNr::CanRunBeforeUpscale_Dx12(InParameters);
 
     // Order is important as that's the order of shader dispatch
@@ -251,7 +262,8 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
               } });
     }
 
-    if (NeuralRendering && !specializedNr && !nrBeforeUpscale && Config::Instance()->DlssNrEnabled.value_or_default())
+    if (NeuralRendering && !specializedNr && !nrBeforeUpscale && !denoiseFirst &&
+        Config::Instance()->DlssNrEnabled.value_or_default())
     {
         LOG_DEBUG("IFeature_Dx12: Scheduling DLSS-NR post-upscale pass in pipeline");
         pipeline.push_back(MakeDlssNrPass(*NeuralRendering, Device, InCommandList, InParameters, false,
@@ -303,6 +315,8 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     auto* currentTarget = SetupShaderPipeline(pipeline, paramOutput);
     SetUpscalerResource_Dx12(InParameters, NVSDK_NGX_Parameter_Output, currentTarget);
     auto* originalColor = GetUpscalerResource_Dx12(InParameters, NVSDK_NGX_Parameter_Color);
+    if (denoiseHandoff.color)
+        SetUpscalerResource_Dx12(InParameters, NVSDK_NGX_Parameter_Color, denoiseHandoff.color);
     const bool diagnoseNr = nrBeforeUpscale && !interop;
     if (diagnoseNr)
         NeuralRendering->DiagnosePipeline(0, InCommandList, InParameters, originalColor, GetFeatureFlags(),
@@ -323,8 +337,62 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
                                           edited != originalColor);
     }
     UpscalerTime->Start(InCommandList);
-    const bool evalResult = EvaluateInternal(InCommandList, InParameters);
+    const int denoiseGameRoute =
+        denoiseHandoff.color || denoiseHandoff.replaceOutput
+            ? std::clamp(Config::Instance()->DlssNrDenoiseFirstStep.value_or_default(), 0, 2) + 1
+            : 0;
+    const bool resetGameHistory = denoiseGameRoute != _denoiseGameRoute;
+    const bool evalResult = [&]
+    {
+        // Limit the override to the game's evaluate; restore even on a failed evaluation.
+        struct RestoreParameters
+        {
+            NVSDK_NGX_Parameter* params;
+            float x = 0, y = 0;
+            bool active = false;
+            unsigned reset = 0;
+            bool overrideReset = false;
+            RestoreParameters(NVSDK_NGX_Parameter* p, bool zero, bool resetHistory)
+                : params(p), overrideReset(resetHistory)
+            {
+                if (overrideReset)
+                {
+                    params->Get(NVSDK_NGX_Parameter_Reset, &reset);
+                    params->Set(NVSDK_NGX_Parameter_Reset, 1u);
+                }
+                active = zero && params->Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &x) == NVSDK_NGX_Result_Success &&
+                         params->Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &y) == NVSDK_NGX_Result_Success;
+                if (active)
+                {
+                    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, 0.0f);
+                    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, 0.0f);
+                }
+            }
+            ~RestoreParameters()
+            {
+                if (overrideReset)
+                    params->Set(NVSDK_NGX_Parameter_Reset, reset);
+                if (active)
+                {
+                    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_X, x);
+                    params->Set(NVSDK_NGX_Parameter_Jitter_Offset_Y, y);
+                }
+            }
+        } restoreParameters { InParameters, denoiseHandoff.zeroJitter, resetGameHistory };
+        return EvaluateInternal(InCommandList, InParameters);
+    }();
     UpscalerTime->End(InCommandList);
+    if (evalResult)
+        _denoiseGameRoute = denoiseGameRoute;
+    if (denoiseFirst)
+    {
+        const auto outputState =
+            currentTarget != paramOutput
+                ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+                : static_cast<D3D12_RESOURCE_STATES>(
+                      Config::Instance()->OutputResourceBarrier.value_or(D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
+        NeuralRendering->DenoiseFirstAfter(InCommandList, InParameters, currentTarget, evalResult, outputState);
+    }
     if (diagnoseNr)
         NeuralRendering->DiagnosePipeline(2, InCommandList, InParameters, currentTarget, GetFeatureFlags(),
                                           rayReconstruction, evalResult);

@@ -130,7 +130,7 @@ bool DlssNr_Dx12::State::PrepareSpatialResources(ID3D12Device* device, const Dls
 }
 
 auto DlssNr_Dx12::State::CreateScratch(ID3D12Device* device, DXGI_FORMAT format, unsigned int width,
-                                       unsigned int height) -> ID3D12Resource*
+                                       unsigned int height, D3D12_RESOURCE_STATES initialState) -> ID3D12Resource*
 {
     D3D12_HEAP_PROPERTIES heap {};
     heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -148,8 +148,7 @@ auto DlssNr_Dx12::State::CreateScratch(ID3D12Device* device, DXGI_FORMAT format,
     desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     ID3D12Resource* res = nullptr;
-    device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
-                                    IID_PPV_ARGS(&res));
+    device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr, IID_PPV_ARGS(&res));
     return res;
 }
 
@@ -256,6 +255,7 @@ auto DlssNr_Dx12::State::ReleaseResources() -> void
     ReleaseEnlarger();
     enlargementStatus.clear();
     deferredSr.ReleaseResources();
+    denoiseFirst.ReleaseResources();
 
     lifetime.Collect();
 

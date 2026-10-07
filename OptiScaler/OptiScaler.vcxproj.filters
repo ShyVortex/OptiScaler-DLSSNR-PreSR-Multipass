@@ -1646,6 +1646,7 @@
     <ClInclude Include="dlssnr\DlssNr_Pipeline_Dx12.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="dlssnr\DlssNr_Proxy.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="dlssnr\DlssNr_Upscaler.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="dlssnr\DlssNr_PrivateCreation.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNr_VkExtensions.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNrFeature_Dx12.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="dlssnr\DlssNrFeature_Vk.cpp"><Filter>Source Files</Filter></ClCompile>
@@ -1669,6 +1670,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_DeferredSr.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_DenoiseFirst.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClInclude Include="shaders\dlssnr\precompile\dlssnr_denoise_first_Shader.h"><Filter>Header Files</Filter></ClInclude>
+    <None Include="shaders\dlssnr\precompile\dlssnr_denoise_first.hlsl"><Filter>Source Files</Filter></None>
+    <None Include="shaders\dlssnr\precompile\dlssnr_denoise_first_Shader.cso" />
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Enlarge.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_Evaluate.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="shaders\dlssnr\DlssNr_Dx12_FinishedCompose.cpp"><Filter>Source Files</Filter></ClCompile>
