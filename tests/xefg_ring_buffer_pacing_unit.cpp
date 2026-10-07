@@ -19,6 +19,27 @@ class MockFGFeature
     int _allowedFrameAhead = 1;
     bool _depthReady[BUFFER_COUNT] = { false, false, false, false };
     bool _velocityReady[BUFFER_COUNT] = { false, false, false, false };
+    bool _isActive = true;
+    bool _passthrough = false;
+    uint32_t _framesToInterpolate = 1;
+    bool _needResetHistory = false;
+
+    bool SetInterpolatedFrameCount(uint32_t count)
+    {
+        if (count == 0)
+        {
+            _passthrough = true;
+            _framesToInterpolate = 0;
+            _needResetHistory = true;
+            return true;
+        }
+
+        _passthrough = false;
+        _framesToInterpolate = count;
+        if (!_isActive)
+            _isActive = true;
+        return true;
+    }
 
     int GetIndex() const { return static_cast<int>(_frameCount % BUFFER_COUNT); }
 
@@ -390,6 +411,58 @@ int main()
         assert(!fg.IsSlotReady(depthSlot));
 
         printf("  [PASS] Test 7: Multi-resource tagging yields identical slot index (zero MV slot-split)\n");
+    }
+
+    // Test 8: Warm passthrough preserves queue state across count 0 -> N unpause
+    {
+        MockFGFeature fg;
+        fg._allowedFrameAhead = 2;
+        fg.StartNewFrame(); // frame 1
+        int s1 = fg.GetIndexWillBeDispatched();
+        fg.TagSlot(s1);
+        uint64_t df = 0;
+        int idx = fg.GetDispatchIndex(df);
+        assert(idx == s1 && df == 1);
+        fg.ConfirmDispatched(df);
+
+        // Pause menu: Streamline sets count = 0
+        fg.SetInterpolatedFrameCount(0);
+        assert(fg._passthrough == true);
+        assert(fg._framesToInterpolate == 0);
+        assert(fg._isActive == true); // Remains active (warm swapchain queue)
+        assert(fg._needResetHistory == true);
+
+        // While in passthrough, native frames pass through without tearing down queue
+        fg.StartNewFrame(); // frame 2
+        fg._lastDispatchedFrame = fg._frameCount;
+        fg._actuallyDispatchedFrame = fg._frameCount;
+
+        // Unpause: Streamline sets count = 2
+        fg.SetInterpolatedFrameCount(2);
+        assert(fg._passthrough == false);
+        assert(fg._framesToInterpolate == 2);
+        assert(fg._needResetHistory == true); // Preserved for first resumed frame constants
+
+        // First resumed frame arrives
+        fg.StartNewFrame(); // frame 3
+        int dSlot = fg.GetIndexWillBeDispatched();
+        fg._depthReady[dSlot] = true;
+        int vSlot = fg.GetIndexWillBeDispatched();
+        fg._velocityReady[vSlot] = true;
+        assert(dSlot == vSlot); // No slot-split
+
+        idx = fg.GetDispatchIndex(df);
+        assert(idx == dSlot && df == 3);
+
+        // Verify history reset flag consumption
+        bool resetHistoryForFrame = fg._needResetHistory;
+        assert(resetHistoryForFrame == true);
+        fg._needResetHistory = false;
+
+        fg.ConfirmDispatched(df);
+        assert(!fg.IsSlotReady(dSlot));
+
+        printf("  [PASS] Test 8: Warm passthrough preserves queue state across count 0 -> N unpause\n");
     }
 
     printf("All XeFG Ring Buffer & Motion Vector Pacing Unit Tests PASSED!\n");
