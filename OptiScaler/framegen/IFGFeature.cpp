@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "IFGFeature.h"
 #include <Config.h>
 #include <low_latency/input/input_common.h>
@@ -37,11 +37,23 @@ UINT64 IFGFeature::StartNewFrame()
 {
     _frameCount++;
 
-    if (_lastDispatchedFrame == 0 || (_frameCount - _lastDispatchedFrame) > 2)
+    if (!IsActive() || IsPaused())
+    {
+        _lastDispatchedFrame = _frameCount;
+    }
+    else if (_lastDispatchedFrame == 0)
+    {
+        _lastDispatchedFrame = _frameCount - 1;
+    }
+    else if (_frameCount > _lastDispatchedFrame && (_frameCount - _lastDispatchedFrame) > 2)
     {
         LOG_WARN("Frame count jumped too much! _frameCount: {}, _lastDispatchedFrame: {}", _frameCount,
                  _lastDispatchedFrame);
 
+        _lastDispatchedFrame = _frameCount - 1;
+    }
+    else if (_frameCount <= _lastDispatchedFrame)
+    {
         _lastDispatchedFrame = _frameCount - 1;
     }
 
@@ -180,20 +192,20 @@ bool IFGFeature::IsInfiniteDepth() { return _constants.flags[FG_Flags::InfiniteD
 
 void IFGFeature::SetFrameCount(UINT64 frameId)
 {
-    // Only change frame count, if it's lower than current one
-    // Or higher than allowed frame ahead
-    // if (frameId < _frameCount || (frameId - _frameCount) >
-    // Config::Instance()->FGAllowedFrameAhead.value_or_default())
-    //{
-    //    LOG_DEBUG("Old: {}, New: {}", _frameCount, frameId);
-    //    _frameCount = frameId;
-    //}
-    // else if (frameId != _frameCount)
-    //{
-    //    LOG_TRACE("Prevented setting frame count! Old: {}, New: {}", _frameCount, frameId);
-    //}
-
-    _frameCount = frameId;
+    if (frameId > _frameCount)
+    {
+        _frameCount = frameId;
+    }
+    else if (_frameCount - frameId > 4)
+    {
+        LOG_DEBUG("Frame counter rewind detected. Old: {}, New: {}", _frameCount, frameId);
+        _frameCount = frameId;
+        _lastDispatchedFrame = (frameId > 0 ? frameId - 1 : 0);
+    }
+    else
+    {
+        LOG_TRACE("Preserving pipelined frameCount {}. Incoming marker: {}", _frameCount, frameId);
+    }
 }
 
 void IFGFeature::SetJitter(float x, float y, int index)
