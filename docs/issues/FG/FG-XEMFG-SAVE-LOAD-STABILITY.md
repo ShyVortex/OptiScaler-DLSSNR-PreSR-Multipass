@@ -72,17 +72,30 @@ Following the initial engagement of XeFG 2X and Multi-Frame Generation, the foll
 1. **Quirks & Swapchain Preservation (`Quirks.h`, `XeFG_Dx12.cpp`)**:
    - `re9.exe` and `re9demo.exe` preserve swapchains (`FGPreserveSwapChain = true`) and utilize `AllowedFrameAhead2`.
    - Eliminated all destructive COM release loops on `currentRealSwapchain`.
-2. **Ring Buffer Resynchronization (`IFGFeature.cpp`)**:
-   - Restored proven `diff > 2` resynchronization clamp in `StartNewFrame()`, preventing stale buffer starvation in games using `AllowedFrameAhead2`.
-3. **Pacing Gating (`wrapped_swapchain.cpp`)**:
-   - `XeMfgExtraPacing` is strictly gated behind `fg != nullptr && fg->IsActive() && !fg->IsPaused()`.
-4. **Remote SDK Retrieval (`package_release.ps1`, Workflows)**:
+2. **Dynamic Passthrough & Error -14 Prevention (`XeFG_Dx12.cpp`, `FG_Hooks.cpp`)**:
+   - In `XeFG_Dx12::Present()`, when `Dispatch()` returns `false` (due to missing depth/velocity during save/load screens), OptiScaler immediately invokes `XeFGProxy::SetEnabled(_swapChainContext, false)`, sets `_needResetHistory = true`, and syncs `_lastDispatchedFrame = _frameCount`.
+   - Intel's `libxess_fg.dll` runtime transitions to passthrough mode instead of expecting frame tags, eliminating `XEFG_SWAPCHAIN_RESULT_ERROR_INCORRECT_INPUT_RESOURCES` (-14) and permanent black screens.
+   - In `FG_Hooks.cpp`, `state.fgPresentIsCalled` and `fg->PostPresent()` are strictly gated behind `fgDispatched`, ensuring un-dispatched loading frames are not treated as interpolated frames by the swapchain wrapper.
+3. **Temporal History Flush & Seamless Resumption (`XeFG_Dx12.cpp`)**:
+   - When 3D world rendering resumes with valid resources, `Dispatch()` re-enables `XeFGProxy::SetEnabled(_swapChainContext, true)` and tags `constData.resetHistory = true`, flushing stale motion vectors from before the save/load transition.
+   - In `XeFG_Dx12::Activate()`, added `State::Instance().activeFgInput == FGInput::DLSSG` to the activation condition so DLSS Frame Generation inputs (which provide dilated display-resolution motion vectors) activate cleanly without requiring manual quirk overrides.
+4. **Frame Counter Synchronization & Jump Warning Elimination (`IFGFeature.cpp`)**:
+   - In `IFGFeature::StartNewFrame()`, synchronized `_lastDispatchedFrame = _frameCount` during inactive or passthrough states (`!IsActive() || IsPaused()`), completely suppressing the 3,687 spurious `[W] IFGFeature::StartNewFrame Frame count jumped too much!` disk I/O log writes on the render thread.
+   - Startup initialization (`_lastDispatchedFrame == 0`) now smoothly initializes `_lastDispatchedFrame = _frameCount - 1` without emitting an erroneous warning.
+   - In `IFGFeature::SetFrameCount(frameId)`, protected against backwards regression under `AllowedFrameAhead2` when presentation markers lag render slots by $\le 4$ frames, preventing `-1` collisions in `GetDispatchIndex` and alternating frame drops.
+5. **Remote SDK Retrieval (`package_release.ps1`, Workflows)**:
    - Automated dynamic retrieval of official Intel XeSS 3.0+ SDK binaries from `https://raw.githubusercontent.com/intel/xess/main/bin/`.
 
 ---
 
 ## 5. Automated Verification
 
+- **Save/Load Stability & Presentation Pacing Test** (`tests/xefg_save_load_stability_unit.cpp`):
+  - Validated dynamic `SetEnabled(false)` passthrough when depth/velocity inputs are unready during save/load screens.
+  - Validated runtime re-activation with `resetHistory = true` temporal flush upon gameplay resumption.
+  - Validated zero spurious jump warnings emitted across 120 loading screen frames.
+  - Validated pipelined `SetFrameCount` render slot preservation under `AllowedFrameAhead2` and genuine counter resets.
+  - Validated unmetered presentation preservation without forced VBlank locks.
 - **Swapchain Lifecycle Test** (`tests/xefg_swapchain_lifecycle_unit.cpp`):
   - Validated swapchain preservation on `re9.exe`.
   - Validated clean `ResizeBuffers` across resolution changes (1080p splash to 1440p menu) without swapchain destruction.
