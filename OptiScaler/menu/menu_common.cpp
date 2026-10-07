@@ -6022,7 +6022,7 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
         }
 
         if (state.rtssReflexInjection)
-            currentMethod.append(" (RTSS)");
+            currentMethod.append(" (RTSS - Protected)");
 
         const bool fakenvapiInactive = (fakenvapi::isUsingAsMainNvapi() || fakenvapiMode == LowLatencyMode::XeLL) &&
                                        !fakenvapi::isLowLatencyActive() && state.reflexLimitsFps;
