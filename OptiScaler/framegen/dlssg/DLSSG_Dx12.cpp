@@ -613,6 +613,8 @@ bool DLSSG_Dx12::Dispatch()
 
     LOG_DEBUG("Result: Ok");
 
+    ConfirmDispatched(willDispatchFrame);
+
     return true;
 }
 

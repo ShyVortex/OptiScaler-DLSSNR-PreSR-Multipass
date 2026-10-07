@@ -627,6 +627,7 @@ void XeFG_Dx12::CreateContext(ID3D12Device* device, FG_Constants& fgConstants)
     {
         _fgContext = _swapChainContext;
         _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
     }
 
     if (_isActive)
@@ -658,6 +659,7 @@ void XeFG_Dx12::Activate()
         {
             _isActive = true;
             _lastDispatchedFrame = 0;
+            _actuallyDispatchedFrame = 0;
         }
 
         LOG_INFO("SetEnabled: true, result: {} ({})", magic_enum::enum_name(result), (UINT) result);
@@ -703,7 +705,8 @@ void XeFG_Dx12::Deactivate()
             _isActive = false;
         }
 
-        //_lastDispatchedFrame = 0;
+        _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
         _waitingNewFrameData = false;
         _needResetHistory = true;
 
@@ -1041,6 +1044,8 @@ bool XeFG_Dx12::Dispatch()
 
     LOG_DEBUG("Result: Ok");
 
+    ConfirmDispatched(willDispatchFrame);
+
     return true;
 }
 
@@ -1352,6 +1357,7 @@ bool XeFG_Dx12::Present()
     {
         LOG_DEBUG("XeFG is in passthrough mode, presenting base frame without interpolation");
         _lastDispatchedFrame = _frameCount;
+        _actuallyDispatchedFrame = _frameCount;
         return true;
     }
 
@@ -1468,12 +1474,12 @@ bool XeFG_Dx12::Present()
     _fgFramePresentId++;
 
     auto dispatchResult = Dispatch();
-    if (!dispatchResult && _swapChainContext != nullptr)
+    if (!dispatchResult)
     {
-        if (XeFGProxy::SetEnabled() != nullptr)
-            XeFGProxy::SetEnabled()(_swapChainContext, false);
         _needResetHistory = true;
-        _lastDispatchedFrame = _frameCount;
+        LOG_DEBUG("XeFG_Dx12::Present: Dispatch failed for frame {}, falling back to native pass-through without "
+                  "disabling swapchain",
+                  _frameCount);
     }
 
     return dispatchResult;
@@ -1666,8 +1672,8 @@ bool XeFG_Dx12::SetResource(Dx12Resource* inputResource)
 
             if (lastFormat[fIndex] != DXGI_FORMAT_UNKNOWN && lastFormat[fIndex] != desc.Format)
             {
-                State::Instance().fgChanged = true;
-                return false;
+                LOG_DEBUG("XeFG_Dx12::SetResource: HudlessColor format transition on slot {} ({} -> {})", fIndex,
+                          (UINT) lastFormat[fIndex], (UINT) desc.Format);
             }
 
             lastFormat[fIndex] = desc.Format;

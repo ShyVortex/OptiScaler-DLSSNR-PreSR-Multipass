@@ -764,6 +764,9 @@ ffxReturnCode_t FSRFG_Dx12::DispatchCallback(ffxDispatchDescFrameGeneration* par
 
     _lastFrameId = params->frameID;
 
+    if (dispatchResult == FFX_API_RETURN_OK)
+        ConfirmDispatched(willDispatchFrame);
+
     return dispatchResult;
 }
 

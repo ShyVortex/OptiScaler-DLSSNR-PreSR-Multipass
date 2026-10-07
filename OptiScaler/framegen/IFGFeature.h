@@ -69,6 +69,7 @@ class IFGFeature
 
     UINT64 _frameCount = 0;
     UINT64 _lastDispatchedFrame = 0;
+    UINT64 _actuallyDispatchedFrame = 0;
     UINT64 _lastFGFrame = 0;
     bool _waitingNewFrameData = false;
     int _framesToInterpolate = -1;
@@ -90,6 +91,8 @@ class IFGFeature
     IID streamlineRiid {};
 
     bool CheckForRealObject(std::string functionName, IUnknown* pObject, IUnknown** ppRealObject);
+    bool IsSlotReady(int index) const;
+    int ResolveDispatchSlot(UINT64& willDispatchFrame);
     int GetDispatchIndex(UINT64& willDispatchFrame);
     virtual void NewFrame() = 0;
 
@@ -112,6 +115,7 @@ class IFGFeature
     int GetIndex();
     int GetIndexWillBeDispatched();
     UINT64 StartNewFrame();
+    void ConfirmDispatched(UINT64 frameId);
 
     bool IsResourceReady(FG_ResourceType type, int index = -1);
 
