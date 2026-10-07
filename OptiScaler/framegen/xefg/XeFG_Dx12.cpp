@@ -1064,17 +1064,9 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
     {
         _passthrough = true;
         _framesToInterpolate = 0;
+        _needResetHistory = true;
 
-        if (_swapChainContext != nullptr && XeFGProxy::SetEnabled() != nullptr)
-        {
-#ifndef DONT_USE_XMX
-            ScopedSkipSpoofingGlobal skipSpoofingGlobal {};
-#endif
-            auto result = XeFGProxy::SetEnabled()(_swapChainContext, false);
-            LOG_DEBUG("XeFG SetEnabled(false) result: {} ({})", magic_enum::enum_name(result), (UINT) result);
-        }
-
-        Deactivate();
+        LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0)");
         return true;
     }
 
