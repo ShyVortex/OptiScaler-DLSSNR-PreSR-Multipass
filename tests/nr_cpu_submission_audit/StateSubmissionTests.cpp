@@ -2,6 +2,7 @@
 // Only surrounding owner/COM dependencies are CPU fixtures. No graphics DLL is loaded.
 #include "../nr_cpu_timing_audit/CpuD3d12.h"
 #include "../../OptiScaler/dlssnr/DlssNr_GpuLifetime.cpp"
+#include "../../OptiScaler/dlssnr/DlssNr_PrivateCreation.h"
 #include "../../OptiScaler/shaders/dlssnr/DlssNr_GpuTime.h"
 #include "../../OptiScaler/dlssnr/DlssNr_FinishedReady.h"
 #include "../../OptiScaler/dlssnr/DlssNr_Placement.h"
@@ -81,13 +82,37 @@ struct CpuFence final : CpuObject<ID3D12Fence>
     UINT64 completed = 0;
     UINT64 GetCompletedValue() override { return completed; }
 };
+struct CpuQueryHeap final : CpuObject<ID3D12QueryHeap>
+{
+};
+struct CpuReadback final : CpuObject<ID3D12Resource>
+{
+    std::vector<UINT64> data;
+    explicit CpuReadback(UINT64 bytes) : data(static_cast<size_t>(bytes / sizeof(UINT64)), 0) {}
+    HRESULT Map(UINT, const D3D12_RANGE*, void** out) override
+    {
+        *out = data.data();
+        return S_OK;
+    }
+    void Unmap(UINT, const D3D12_RANGE*) override {}
+};
 struct CpuDevice final : CpuObject<ID3D12Device>
 {
-    HRESULT CreateQueryHeap(const D3D12_QUERY_HEAP_DESC*, REFIID, void**) override { return E_NOTIMPL; }
-    HRESULT CreateCommittedResource(const CD3DX12_HEAP_PROPERTIES*, D3D12_HEAP_FLAGS, const CD3DX12_RESOURCE_DESC*,
-                                    D3D12_RESOURCE_STATES, const void*, REFIID, void**) override
+    bool enableTiming = false;
+    HRESULT CreateQueryHeap(const D3D12_QUERY_HEAP_DESC*, REFIID, void** out) override
     {
-        return E_NOTIMPL;
+        if (!enableTiming)
+            return E_NOTIMPL;
+        *out = static_cast<ID3D12QueryHeap*>(new CpuQueryHeap);
+        return S_OK;
+    }
+    HRESULT CreateCommittedResource(const CD3DX12_HEAP_PROPERTIES*, D3D12_HEAP_FLAGS, const CD3DX12_RESOURCE_DESC* desc,
+                                    D3D12_RESOURCE_STATES, const void*, REFIID, void** out) override
+    {
+        if (!enableTiming)
+            return E_NOTIMPL;
+        *out = static_cast<ID3D12Resource*>(new CpuReadback(desc->Width));
+        return S_OK;
     }
     HRESULT CreateFence(UINT64 value, D3D12_FENCE_FLAGS, REFIID, void** out) override
     {
@@ -114,7 +139,11 @@ struct CpuQueue final : CpuObject<ID3D12CommandQueue>
         device->AddRef();
         return S_OK;
     }
-    HRESULT GetTimestampFrequency(UINT64*) override { return E_NOTIMPL; }
+    HRESULT GetTimestampFrequency(UINT64* out) override
+    {
+        *out = 1000000;
+        return S_OK;
+    }
     HRESULT Signal(ID3D12Fence* fence, UINT64 value) override
     {
         if (failSignal)
@@ -163,7 +192,14 @@ struct CpuCommands final : ID3D12GraphicsCommandList
         return S_OK;
     }
     void EndQuery(ID3D12QueryHeap*, D3D12_QUERY_TYPE, UINT) override {}
-    void ResolveQueryData(ID3D12QueryHeap*, D3D12_QUERY_TYPE, UINT, UINT, ID3D12Resource*, UINT64) override {}
+    void ResolveQueryData(ID3D12QueryHeap*, D3D12_QUERY_TYPE, UINT, UINT, ID3D12Resource* resource,
+                          UINT64 offset) override
+    {
+        // Hand-authored timestamp boundary; the actual timer still gates reads by its fence.
+        auto& data = static_cast<CpuReadback*>(resource)->data;
+        data[static_cast<size_t>(offset / sizeof(UINT64))] = 1000;
+        data[static_cast<size_t>(offset / sizeof(UINT64)) + 1] = 2000;
+    }
 };
 
 struct DlssNr_Dx12
@@ -174,8 +210,25 @@ struct DlssNr_Dx12
         DlssNr::GpuLifetime lifetime;
         struct DeferredSr
         {
+            struct Generation
+            {
+                DlssNr::PrivateFeatureCreation creation;
+            };
+            std::unique_ptr<Generation> current;
+            std::vector<Generation*> retiredGenerations;
             DlssNr::GpuLifetime lifetime;
         } deferredSr;
+        struct DenoiseFirst
+        {
+            struct Generation
+            {
+                DlssNr::PrivateFeatureCreation denoiserCreation, enlargerCreation;
+                std::unique_ptr<DlssNrGpuTime> denoiseTime, enlargeTime;
+            };
+            std::unique_ptr<Generation> current;
+            std::vector<Generation*> retiredGenerations;
+            DlssNr::GpuLifetime lifetime;
+        } denoiseFirst;
         DlssNr::GpuLifetime captureFrames;
         std::unique_ptr<DlssNrGpuTime> gpuTime, ngxTime;
         unsigned pendingSubmissions = 0;
@@ -696,11 +749,180 @@ bool FailedOwnerPreparationQuarantinesUnvisitedChildren()
     return ok;
 }
 
+// Exercise the actual owner aggregation/reset/quarantine methods with all three
+// creation gates, including old generations still reachable through the registry.
+struct PrivateCreationFixture
+{
+    using Deferred = DlssNr_Dx12::State::DeferredSr::Generation;
+    using Denoise = DlssNr_Dx12::State::DenoiseFirst::Generation;
+    ComPtr<CpuDevice> device;
+    ComPtr<CpuQueue> queue;
+    ComPtr<CpuCommands> commands;
+    std::unique_ptr<Deferred> oldDeferred;
+    std::unique_ptr<Denoise> oldDenoise;
+    DlssNr_Dx12::State state;
+    PrivateCreationFixture()
+    {
+        device.Attach(new CpuDevice);
+        device->enableTiming = true;
+        queue.Attach(new CpuQueue(device.Get()));
+        commands.Attach(new CpuCommands);
+        state.deferredSr.current = std::make_unique<Deferred>();
+        state.denoiseFirst.current = std::make_unique<Denoise>();
+        oldDeferred = std::make_unique<Deferred>();
+        oldDenoise = std::make_unique<Denoise>();
+        state.deferredSr.retiredGenerations.push_back(oldDeferred.get());
+        state.denoiseFirst.retiredGenerations.push_back(oldDenoise.get());
+        state.lifetime.Record(commands.Get());
+        state.deferredSr.lifetime.Record(commands.Get());
+        state.denoiseFirst.lifetime.Record(commands.Get());
+        ForEach([&](auto& creation) { creation.Record(commands.Get()); });
+        state.denoiseFirst.current->denoiseTime = std::make_unique<DlssNrGpuTime>(device.Get());
+        state.denoiseFirst.current->enlargeTime = std::make_unique<DlssNrGpuTime>(device.Get());
+        oldDenoise->denoiseTime = std::make_unique<DlssNrGpuTime>(device.Get());
+        oldDenoise->enlargeTime = std::make_unique<DlssNrGpuTime>(device.Get());
+        ForEachTimer(
+            [&](auto& timer)
+            {
+                timer.Start(commands.Get());
+                timer.End(commands.Get());
+            });
+    }
+    template <class Action> void ForEach(Action action)
+    {
+        action(state.deferredSr.current->creation);
+        action(oldDeferred->creation);
+        action(state.denoiseFirst.current->denoiserCreation);
+        action(state.denoiseFirst.current->enlargerCreation);
+        action(oldDenoise->denoiserCreation);
+        action(oldDenoise->enlargerCreation);
+    }
+    bool AllReady()
+    {
+        bool ready = true;
+        ForEach([&](auto& creation) { ready &= creation.Ready(); });
+        return ready;
+    }
+    template <class Action> void ForEachTimer(Action action)
+    {
+        action(*state.denoiseFirst.current->denoiseTime);
+        action(*state.denoiseFirst.current->enlargeTime);
+        action(*oldDenoise->denoiseTime);
+        action(*oldDenoise->enlargeTime);
+    }
+    bool AllTimersReady()
+    {
+        bool ready = true;
+        ForEachTimer([&](auto& timer) { ready &= timer.ReadGpuTime() == 1.0; });
+        return ready;
+    }
+    bool AllQuarantined()
+    {
+        bool quarantined = true;
+        ForEach([&](auto& creation) { quarantined &= !creation.Ready() && !creation.Discarded() && !creation.Idle(); });
+        ForEachTimer([&](auto& timer) { quarantined &= !timer.ReadGpuTime(); });
+        return quarantined && !state.lifetime.Idle() && !state.deferredSr.lifetime.Idle() &&
+               !state.denoiseFirst.lifetime.Idle();
+    }
+    DlssNr::GpuSubmission Begin()
+    {
+        ID3D12CommandList* lists[] { commands.Get() };
+        return state.BeginFinishedPictureSubmission(1, lists);
+    }
+    void Quarantine()
+    {
+        ID3D12CommandList* lists[] { commands.Get() };
+        state.QuarantineFinishedPictureSubmission(1, lists);
+    }
+    void Reset() { state.FinishedPictureResetCommandList(commands.Get()); }
+};
+
+bool CurrentAndRetiredCreationNotificationsAreCoupled()
+{
+    PrivateCreationFixture f;
+    auto submission = f.Begin();
+    f.Reset(); // Represents Reset after real Execute but before its notification.
+    const bool pinned = f.AllQuarantined();
+    submission.Complete(f.queue.Get());
+    const bool incomplete = f.AllQuarantined() && !f.AllReady();
+    f.queue->Complete();
+    const bool ready = f.AllReady() && f.AllTimersReady() && f.state.pendingSubmissions == 0 &&
+                       f.state.lifetime.Idle() && f.state.deferredSr.lifetime.Idle() &&
+                       f.state.denoiseFirst.lifetime.Idle();
+    const bool ok = pinned && incomplete && ready;
+    std::printf("current and retired private creation notifications retain exact reset-racing submissions: %s\n",
+                ok ? "PASS" : "FAIL");
+    return ok;
+}
+
+bool CurrentAndRetiredCreationFailuresStayQuarantined(bool abandon)
+{
+    PrivateCreationFixture f;
+    {
+        auto submission = f.Begin();
+        if (!abandon)
+            f.Quarantine();
+        f.Reset();
+        if (!abandon)
+        {
+            submission.Complete(f.queue.Get());
+            f.queue->Complete();
+        }
+    }
+    const bool ok = f.AllQuarantined() && f.state.pendingSubmissions == 0;
+    std::printf("current and retired creation %s remains quarantined: %s\n", abandon ? "abandonment" : "quarantine",
+                ok ? "PASS" : "FAIL");
+    return ok;
+}
+
+bool CreationPreparationAllocationFailuresQuarantineEveryGeneration()
+{
+    unsigned injected = 0;
+    bool success = false;
+    bool safe = true;
+    for (int allocation = 0; allocation < 128; ++allocation)
+    {
+        PrivateCreationFixture f;
+        bool threw = false;
+        failAllocationAfter = allocation;
+        try
+        {
+            auto submission = f.Begin();
+            failAllocationAfter = -1;
+            submission.Complete(nullptr);
+        }
+        catch (const std::bad_alloc&)
+        {
+            threw = true;
+            ++injected;
+        }
+        failAllocationAfter = -1;
+        if (!threw)
+        {
+            success = true;
+            break;
+        }
+        // The real batch still executes after preparation fails; every child,
+        // including not-yet-visited retired helpers, must fail closed on Reset.
+        f.Quarantine();
+        f.Reset();
+        safe &= f.AllQuarantined() && f.state.pendingSubmissions == 0;
+    }
+    const bool ok = success && injected > 0 && safe;
+    std::printf("private creation aggregation allocation sweep: %u sites, %s\n", injected, ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 int main()
 {
     if (!PreparationAllocationFailureRetainsRecording())
         return 1;
     if (!FailedOwnerPreparationQuarantinesUnvisitedChildren())
+        return 1;
+    if (!CurrentAndRetiredCreationNotificationsAreCoupled() ||
+        !CurrentAndRetiredCreationFailuresStayQuarantined(false) ||
+        !CurrentAndRetiredCreationFailuresStayQuarantined(true) ||
+        !CreationPreparationAllocationFailuresQuarantineEveryGeneration())
         return 1;
     unsigned failures = 0, injected = 0;
     bool reachedSuccess = false;

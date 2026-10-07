@@ -3,8 +3,10 @@
 
 auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* colour, ID3D12Resource* depth,
                              ID3D12Resource* motion, ID3D12Resource* output, const DlssNrFrameInfo& frame,
-                             ID3D12CommandQueue* timingQueue) -> void
+                             ID3D12CommandQueue* timingQueue, bool* evaluatedModel) -> void
 {
+    if (evaluatedModel)
+        *evaluatedModel = false;
     std::lock_guard<std::recursive_mutex> nrLock(mutex);
     const Config& cfg = *Config::Instance();
     nr.spatialActive = false;
@@ -420,6 +422,8 @@ auto DlssNr_Dx12::State::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Resource*
         modelFrame.output = passOutput;
         result = static_cast<int>(nr.models[pass].Run(cmdList, device, modelFrame, PassSettings(cfg, pass),
                                                       frame.SubmissionEpoch, &evaluated));
+        if (evaluatedModel && evaluated)
+            *evaluatedModel = true;
         modelRunning = evaluated && result == NVSDK_NGX_Result_Success;
         if (!evaluated || result != NVSDK_NGX_Result_Success)
             break;

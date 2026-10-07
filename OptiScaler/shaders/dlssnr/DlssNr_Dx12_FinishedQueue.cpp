@@ -6,7 +6,25 @@ auto DlssNr_Dx12::State::FinishedPictureResetCommandList(ID3D12CommandList* cmd)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     lifetime.ResetRecording(cmd);
+    if (deferredSr.current)
+        deferredSr.current->creation.ResetRecording(cmd);
+    for (auto* old : deferredSr.retiredGenerations)
+        old->creation.ResetRecording(cmd);
     deferredSr.lifetime.ResetRecording(cmd);
+    auto resetDenoise = [&](auto& g)
+    {
+        g.denoiserCreation.ResetRecording(cmd);
+        g.enlargerCreation.ResetRecording(cmd);
+        if (g.denoiseTime)
+            g.denoiseTime->ResetRecording(cmd);
+        if (g.enlargeTime)
+            g.enlargeTime->ResetRecording(cmd);
+    };
+    if (denoiseFirst.current)
+        resetDenoise(*denoiseFirst.current);
+    for (auto* old : denoiseFirst.retiredGenerations)
+        resetDenoise(*old);
+    denoiseFirst.lifetime.ResetRecording(cmd);
     captureFrames.ResetRecording(cmd);
     if (enlarger)
         enlarger->lifetime.ResetRecording(cmd);
@@ -115,7 +133,25 @@ auto DlssNr_Dx12::State::BeginFinishedPictureSubmission(UINT count, ID3D12Comman
     // Parent ownership is completed LAST: its retirement callbacks can destroy
     // the timers/enlargers whose exact generations we capture here.
     auto parent = lifetime.BeginSubmission(count, lists);
+    if (deferredSr.current)
+        add(deferredSr.current->creation.BeginSubmission(count, lists));
+    for (auto* old : deferredSr.retiredGenerations)
+        add(old->creation.BeginSubmission(count, lists));
     add(deferredSr.lifetime.BeginSubmission(count, lists));
+    auto captureDenoise = [&](auto& g)
+    {
+        add(g.denoiserCreation.BeginSubmission(count, lists));
+        add(g.enlargerCreation.BeginSubmission(count, lists));
+        if (g.denoiseTime)
+            add(g.denoiseTime->BeginSubmission(count, lists));
+        if (g.enlargeTime)
+            add(g.enlargeTime->BeginSubmission(count, lists));
+    };
+    if (denoiseFirst.current)
+        captureDenoise(*denoiseFirst.current);
+    for (auto* old : denoiseFirst.retiredGenerations)
+        captureDenoise(*old);
+    add(denoiseFirst.lifetime.BeginSubmission(count, lists));
     add(captureFrames.BeginSubmission(count, lists));
     if (gpuTime)
         add(gpuTime->BeginSubmission(count, lists));
@@ -220,7 +256,25 @@ void DlssNr_Dx12::State::QuarantineFinishedPictureSubmission(UINT count, ID3D12C
 {
     std::lock_guard lock(mutex);
     lifetime.QuarantineSubmission(count, lists);
+    if (deferredSr.current)
+        deferredSr.current->creation.QuarantineSubmission(count, lists);
+    for (auto* old : deferredSr.retiredGenerations)
+        old->creation.QuarantineSubmission(count, lists);
     deferredSr.lifetime.QuarantineSubmission(count, lists);
+    auto quarantineDenoise = [&](auto& g)
+    {
+        g.denoiserCreation.QuarantineSubmission(count, lists);
+        g.enlargerCreation.QuarantineSubmission(count, lists);
+        if (g.denoiseTime)
+            g.denoiseTime->QuarantineSubmission(count, lists);
+        if (g.enlargeTime)
+            g.enlargeTime->QuarantineSubmission(count, lists);
+    };
+    if (denoiseFirst.current)
+        quarantineDenoise(*denoiseFirst.current);
+    for (auto* old : denoiseFirst.retiredGenerations)
+        quarantineDenoise(*old);
+    denoiseFirst.lifetime.QuarantineSubmission(count, lists);
     captureFrames.QuarantineSubmission(count, lists);
     if (gpuTime)
         gpuTime->QuarantineSubmission(count, lists);

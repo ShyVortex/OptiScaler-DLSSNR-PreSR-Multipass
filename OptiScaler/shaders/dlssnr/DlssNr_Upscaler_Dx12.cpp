@@ -87,7 +87,7 @@ struct PrivateUpscalerDx12::Impl
     ffxContext ffx = nullptr;
     xess_context_handle_t xess = nullptr;
     unsigned width = 0, height = 0, outWidth = 0, outHeight = 0;
-    bool rayReconstruction = false;
+    bool rayReconstruction = false, autoExposure = false, lowResolutionMotion = true;
     unsigned roughnessMode = 0, hardwareDepth = 1;
     std::string error = "runtime/device/input size";
     bool NgxError(const char* operation, NVSDK_NGX_Result result)
@@ -152,6 +152,7 @@ struct PrivateUpscalerDx12::Impl
         outHeight = info.outputHeight;
         const bool inverted = info.depthInverted;
         const bool jittered = info.jitteredMotion;
+        lowResolutionMotion = info.lowResolutionMotion;
         const bool highMv = !info.lowResolutionMotion;
         if (backend == PrivateUpscaler::DLSS)
         {
@@ -181,10 +182,12 @@ struct PrivateUpscalerDx12::Impl
             p->Set(NVSDK_NGX_Parameter_CreationNodeMask, 1u);
             p->Set(NVSDK_NGX_Parameter_VisibilityNodeMask, 1u);
             p->Set(NVSDK_NGX_Parameter_PerfQualityValue, info.quality);
+            autoExposure = info.autoExposure;
             unsigned flags = (inverted ? NVSDK_NGX_DLSS_Feature_Flags_DepthInverted : 0) |
                              (jittered ? NVSDK_NGX_DLSS_Feature_Flags_MVJittered : 0) |
                              (!highMv ? NVSDK_NGX_DLSS_Feature_Flags_MVLowRes : 0) |
-                             (rayReconstruction ? NVSDK_NGX_DLSS_Feature_Flags_IsHDR : 0);
+                             (rayReconstruction || info.hdr ? NVSDK_NGX_DLSS_Feature_Flags_IsHDR : 0) |
+                             (info.autoExposure ? NVSDK_NGX_DLSS_Feature_Flags_AutoExposure : 0);
             p->Set(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, flags);
             if (rayReconstruction)
             {
@@ -311,9 +314,24 @@ struct PrivateUpscalerDx12::Impl
         auto* depth = f.depth.resource;
         auto* motion = f.motion.resource;
         auto* exposure = f.exposure.resource;
-        if (!color || !output || !depth || !motion || !exposure || f.width != width || f.height != height ||
-            f.outputWidth != outWidth || f.outputHeight != outHeight)
+        // An auto-exposure DLSS feature meters the frame itself and may be given no exposure texture.
+        if (!color || !output || !depth || !motion || (!exposure && !autoExposure) || f.width != width ||
+            f.height != height || f.outputWidth != outWidth || f.outputHeight != outHeight)
             return false;
+        // Guides use mip 0 with zero offsets. Validate their active extents before recording commands;
+        // the backing texture may be larger, and motion uses the resolution selected at creation.
+        const auto depthDesc = depth->GetDesc();
+        const auto motionDesc = motion->GetDesc();
+        const auto motionWidth = lowResolutionMotion ? width : outWidth;
+        const auto motionHeight = lowResolutionMotion ? height : outHeight;
+        if (depthDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || depthDesc.SampleDesc.Count != 1 ||
+            depthDesc.Width < width || depthDesc.Height < height ||
+            motionDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || motionDesc.SampleDesc.Count != 1 ||
+            motionDesc.Width < motionWidth || motionDesc.Height < motionHeight)
+        {
+            error = "depth/motion guide dimension, sample count or active extent";
+            return false;
+        }
         if (rayReconstruction &&
             (!f.rr.valid || f.rr.roughnessMode != roughnessMode || f.rr.hardwareDepth != hardwareDepth))
             return false;
@@ -349,8 +367,8 @@ struct PrivateUpscalerDx12::Impl
             p->Set(NVSDK_NGX_Parameter_MV_Scale_X, f.motionScaleX);
             p->Set(NVSDK_NGX_Parameter_MV_Scale_Y, f.motionScaleY);
             p->Set(NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, f.frameTimeMs);
-            p->Set(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, 1.0f);
-            p->Set(NVSDK_NGX_Parameter_DLSS_Exposure_Scale, 1.0f);
+            p->Set(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, std::isfinite(f.preExposure) ? f.preExposure : 1.0f);
+            p->Set(NVSDK_NGX_Parameter_DLSS_Exposure_Scale, std::isfinite(f.exposureScale) ? f.exposureScale : 1.0f);
             p->Set(NVSDK_NGX_Parameter_Sharpness, 0.0f);
             if (rayReconstruction)
             {

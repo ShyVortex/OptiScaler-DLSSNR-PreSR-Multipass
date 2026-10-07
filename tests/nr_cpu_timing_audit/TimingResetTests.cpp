@@ -398,6 +398,77 @@ bool CompletedReadbackIsConsumedOnceAndReplayRearmsIt()
     return ok;
 }
 
+// FinishSubmitted is an owner-retirement notification, not GPU completion.
+// Removing its completion guard would read/reuse an in-flight timestamp pair;
+// making it a no-op would leave the completed replayable pair unreclaimable.
+bool RetiredTimingRequiresFenceBeforeReadAndReuse(bool resetBeforeNotification)
+{
+    Fixture f;
+    DlssNrGpuTime timer(f.device.Get());
+    const auto first = Record(timer, f.first.Get());
+    ID3D12CommandList* lists[] { f.first.Get() };
+    auto submission = BeginSubmission(timer, 1, lists);
+    if (resetBeforeNotification)
+    {
+        timer.ResetRecording(f.first.Get());
+        timer.FinishSubmitted(); // the captured token has not attached its fence yet
+    }
+    else
+        submission.Complete(f.queue.Get());
+    timer.FinishSubmitted();
+    const bool unread = !timer.ReadGpuTime();
+    const auto whilePending = Record(timer, f.next.Get());
+    if (resetBeforeNotification)
+    {
+        submission.Complete(f.queue.Get());
+        timer.FinishSubmitted();
+    }
+    const bool stillUnread = !timer.ReadGpuTime();
+    f.queue->Complete();
+    timer.FinishSubmitted();
+    const auto duration = timer.ReadGpuTime();
+    const auto reclaimed = Record(timer, f.next.Get());
+    const bool ok = first != UINT_MAX && whilePending != UINT_MAX && whilePending != first && unread && stillUnread &&
+                    duration == 1.0 && reclaimed == first;
+    std::printf("retired timer %s waits for fence before read/reuse, then reclaims: %s\n",
+                resetBeforeNotification ? "Reset/Finish before Complete" : "Finish while submitted in flight",
+                ok ? "PASS" : "FAIL");
+    return ok;
+}
+
+bool RetirementDoesNotDiscardUnsubmittedTiming()
+{
+    Fixture f;
+    DlssNrGpuTime timer(f.device.Get());
+    const auto first = Record(timer, f.first.Get());
+    timer.FinishSubmitted();
+    const auto next = Record(timer, f.next.Get());
+    const bool ok = first != UINT_MAX && next != UINT_MAX && next != first && !timer.ReadGpuTime();
+    std::printf("retired timer Finish preserves unsubmitted recording: %s\n", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
+bool RetiredTimingFailureRemainsQuarantined(bool removed)
+{
+    Fixture f;
+    DlssNrGpuTime timer(f.device.Get());
+    const auto first = Record(timer, f.first.Get());
+    ID3D12CommandList* lists[] { f.first.Get() };
+    auto submission = BeginSubmission(timer, 1, lists);
+    f.queue->failSignal = !removed;
+    submission.Complete(f.queue.Get());
+    if (removed)
+        f.queue->RemoveDevice();
+    timer.ResetRecording(f.first.Get());
+    timer.FinishSubmitted();
+    const auto next = Record(timer, f.next.Get());
+    timer.FinishSubmitted();
+    const bool ok = first != UINT_MAX && next != UINT_MAX && next != first && !timer.ReadGpuTime();
+    std::printf("retired timer %s stays unreadable/unreusable after Finish: %s\n",
+                removed ? "removed-device fence" : "failed Signal", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 int main()
 {
     const bool normal = NormalOrderPreservesPendingQuery();
@@ -409,6 +480,14 @@ int main()
     const bool bounded = ExhaustedPoolSkipsUntilCompleted();
     const bool readable = CompletedTimingIsReadableBeforeResetButSlotIsNotReusable();
     const bool readOnce = CompletedReadbackIsConsumedOnceAndReplayRearmsIt();
-    return normal && interleaved && failure && removed && rerecorded && replay && bounded && readable && readOnce ? 0
-                                                                                                                  : 1;
+    const bool retiredInFlight = RetiredTimingRequiresFenceBeforeReadAndReuse(false);
+    const bool retiredPending = RetiredTimingRequiresFenceBeforeReadAndReuse(true);
+    const bool retiredUnsubmitted = RetirementDoesNotDiscardUnsubmittedTiming();
+    const bool retiredSignalFailure = RetiredTimingFailureRemainsQuarantined(false);
+    const bool retiredDeviceRemoval = RetiredTimingFailureRemainsQuarantined(true);
+    return normal && interleaved && failure && removed && rerecorded && replay && bounded && readable && readOnce &&
+                   retiredInFlight && retiredPending && retiredUnsubmitted && retiredSignalFailure &&
+                   retiredDeviceRemoval
+               ? 0
+               : 1;
 }
