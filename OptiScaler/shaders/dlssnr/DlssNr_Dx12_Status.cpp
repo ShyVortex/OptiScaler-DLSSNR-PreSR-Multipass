@@ -16,6 +16,8 @@ auto DlssNr_Dx12::State::DeferredDlssStatus() -> std::string
 
 auto DlssNr_Dx12::State::RetryAfterFailure() -> void
 {
+    deferredSr.ReleaseResources();
+    denoiseFirst.ReleaseResources();
     ReleaseEnlarger();
     enlargementStatus.clear();
     nr.failed = false;

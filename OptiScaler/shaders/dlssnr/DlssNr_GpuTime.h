@@ -187,6 +187,14 @@ class DlssNrGpuTime
         lastSequence = sequence; // older, in-flight samples must not repopulate the display
     }
 
+    // Retired owners only: stop replay tracking without declaring an in-flight sample complete.
+    void FinishSubmitted()
+    {
+        for (auto& s : *samples)
+            if (s.occupied)
+                s.lifetime.FinishSubmitted();
+    }
+
     std::optional<double> ReadGpuTime()
     {
         Collect();

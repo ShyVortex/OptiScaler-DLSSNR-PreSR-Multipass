@@ -1,0 +1,138 @@
+﻿// CPU D3D boundary; production allocation helpers and lazy-allocation statements are inserted unchanged.
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+enum D3D12_RESOURCE_STATES
+{
+    D3D12_RESOURCE_STATE_UNORDERED_ACCESS = 1,
+    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE = 2
+};
+using DXGI_FORMAT = unsigned;
+using D3D12_RESOURCE_FLAGS = unsigned;
+constexpr unsigned D3D12_HEAP_TYPE_DEFAULT = 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D = 3;
+constexpr unsigned D3D12_TEXTURE_LAYOUT_UNKNOWN = 0, D3D12_HEAP_FLAG_NONE = 0;
+constexpr unsigned D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS = 4, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE = 8;
+struct D3D12_HEAP_PROPERTIES
+{
+    unsigned Type = 0;
+};
+struct D3D12_RESOURCE_DESC
+{
+    unsigned Dimension = 0, Width = 0, Height = 0, DepthOrArraySize = 0, MipLevels = 0;
+    DXGI_FORMAT Format = 0;
+    struct
+    {
+        unsigned Count = 0;
+    } SampleDesc;
+    unsigned Layout = 0;
+    D3D12_RESOURCE_FLAGS Flags = 0;
+};
+struct ID3D12Resource
+{
+    D3D12_RESOURCE_STATES actual;
+};
+struct ID3D12Device
+{
+    std::vector<std::unique_ptr<ID3D12Resource>> resources;
+    void CreateCommittedResource(D3D12_HEAP_PROPERTIES*, unsigned, D3D12_RESOURCE_DESC*, D3D12_RESOURCE_STATES initial,
+                                 std::nullptr_t, ID3D12Resource** result)
+    {
+        resources.push_back(std::make_unique<ID3D12Resource>(ID3D12Resource { initial }));
+        *result = resources.back().get();
+    }
+};
+#define IID_PPV_ARGS(x) x
+struct ID3D12GraphicsCommandList
+{
+    std::map<ID3D12Resource*, D3D12_RESOURCE_STATES> predicted;
+    bool mismatch = false;
+    unsigned barriers = 0;
+    void Barrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
+    {
+        const auto it = predicted.find(resource);
+        const auto state = it == predicted.end() ? resource->actual : it->second;
+        mismatch |= state != before;
+        predicted[resource] = after;
+        ++barriers;
+    }
+    void Reset()
+    {
+        predicted.clear();
+        mismatch = false;
+        barriers = 0;
+    }
+};
+struct DlssNr_Dx12
+{
+    struct State
+    {
+        // @SCRATCH_DECL@
+        void Barrier(ID3D12GraphicsCommandList* cmd, ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
+                     D3D12_RESOURCE_STATES after)
+        {
+            if (before != after)
+                cmd->Barrier(resource, before, after);
+        }
+    };
+};
+// @SCRATCH_HELPER@
+// @COLOR_HELPER@
+struct Fixture
+{
+    DlssNr_Dx12::State owner;
+    enum
+    {
+        PrivateSr = 1,
+        EditOntoRaw = 2
+    };
+    struct Generation
+    {
+        ID3D12Device* device;
+        unsigned inputFormat = 10, outputFormat = 10, w = 1280, h = 720, outW = 1920, outH = 1080, colorFlags = 0;
+        ID3D12Resource* composite = nullptr;
+        ID3D12Resource* upscaled = nullptr;
+        bool failed = false;
+    } g;
+    struct Handoff
+    {
+    };
+    explicit Fixture(ID3D12Device* device) : g { device } {}
+    void Say(const std::string&) {}
+    Handoff Allocate(ID3D12GraphicsCommandList* cmd, int step)
+    {
+        (void) cmd; // Directly readable creation needs no initialization command after the fix.
+        Handoff handoff;
+        // @LAZY_ALLOCATIONS@
+        return handoff;
+    }
+};
+int main()
+{
+    int failed = 0;
+    for (int step : { Fixture::EditOntoRaw, Fixture::PrivateSr })
+    {
+        ID3D12Device device;
+        ID3D12GraphicsCommandList cmd;
+        Fixture fixture(&device);
+        fixture.Allocate(&cmd, step);
+        auto* retained = step == Fixture::EditOntoRaw ? fixture.g.composite : fixture.g.upscaled;
+        const bool firstValid = retained && !cmd.mismatch;
+        const auto allocated = device.resources.size();
+        cmd.Reset();                  // recorded initialization transitions are discarded; committed resources survive.
+        fixture.Allocate(&cmd, step); // pointer retained: no second allocation or initialization branch.
+        const bool retainedPointer =
+            device.resources.size() == allocated &&
+            retained == (step == Fixture::EditOntoRaw ? fixture.g.composite : fixture.g.upscaled);
+        fixture.owner.Barrier(&cmd, retained, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        const bool pass = firstValid && retainedPointer && !cmd.mismatch;
+        failed += !pass;
+        std::printf(
+            "%s step%d lazy allocation survives discarded command list (initial=%u retained=%d stateMismatch=%d)\n",
+            pass ? "PASS" : "FAIL", step, unsigned(retained->actual), retainedPointer, cmd.mismatch);
+    }
+    std::printf("2 cases, %d failures\n", failed);
+    return failed ? 1 : 0;
+}

@@ -23,6 +23,7 @@ class IFeature_Dx12 : public virtual IFeature
     std::unique_ptr<Bias_Dx12> Bias = nullptr;
     std::unique_ptr<Magnifier_Dx12> Magnifier = nullptr;
     std::unique_ptr<DlssNr_Dx12> NeuralRendering = nullptr;
+    int _denoiseGameRoute = 0; // Last successfully evaluated input route; zero is ordinary NR/raw.
 
     std::unique_ptr<GpuTime_Dx12> UpscalerTime = nullptr;
 

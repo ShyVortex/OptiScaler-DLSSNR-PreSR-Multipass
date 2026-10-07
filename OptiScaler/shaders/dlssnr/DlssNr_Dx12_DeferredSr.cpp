@@ -20,11 +20,13 @@ auto DlssNr_Dx12::State::DeferredSrContext::RetireCurrent() -> void
 {
     if (!current)
         return;
+    retiredGenerations.push_back(current.get());
     auto* retired = current.release();
     ++retiredCount;
     lifetime.Retire(
         [this, retired]
         {
+            std::erase(retiredGenerations, retired);
             delete retired;
             --retiredCount;
         });
@@ -293,6 +295,7 @@ auto DlssNr_Dx12::State::DeferredSrContext::Before(ID3D12GraphicsCommandList* cm
                 "; clean SR frame retained");
             return;
         }
+        g.creation.Record(cmd);
         DlssNrConstants unit {};
         unit.Mode = DlssNrMode_UnitExposure;
         unit.Width = unit.Height = 1;
@@ -304,14 +307,18 @@ auto DlssNr_Dx12::State::DeferredSrContext::Before(ID3D12GraphicsCommandList* cm
         }
         owner.Barrier(cmd, g.exposure, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        g.createEpoch = submittedEpoch;
-        Say(std::string("private ") + g.upscaler->Name() + " created; waiting for a later submission epoch");
+        Say(std::string("private ") + g.upscaler->Name() + " created; waiting for creation GPU completion");
         return;
     }
-    // Synthetic seam ticks cannot prove that a feature's creation commands were submitted.
-    if (submittedEpoch == g.createEpoch)
+    if (g.creation.Discarded())
     {
-        LOG_DEBUG("DLSS-NR deferred: waiting after feature creation at submitted epoch {}", submittedEpoch);
+        g.failed = true;
+        Say("private feature creation recording was discarded; use Retry.");
+        return;
+    }
+    if (!g.creation.Ready())
+    {
+        Say("waiting for private feature creation GPU completion; clean SR frame retained");
         return;
     }
 
