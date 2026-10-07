@@ -346,6 +346,9 @@ void DLSSG_Dx12::Deactivate()
         StreamlineProxy::ReflexSetOptions()(reflexConst);
 
         _isActive = false;
+        _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
+        ClearAllResourceReady();
     }
 }
 

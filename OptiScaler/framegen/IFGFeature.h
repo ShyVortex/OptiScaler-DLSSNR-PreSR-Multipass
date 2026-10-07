@@ -116,6 +116,7 @@ class IFGFeature
     int GetIndexWillBeDispatched();
     UINT64 StartNewFrame();
     void ConfirmDispatched(UINT64 frameId);
+    void ClearAllResourceReady();
 
     bool IsResourceReady(FG_ResourceType type, int index = -1);
 

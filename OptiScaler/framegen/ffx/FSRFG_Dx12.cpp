@@ -1254,7 +1254,9 @@ void FSRFG_Dx12::Deactivate()
             _isActive = false;
         }
 
-        // _lastDispatchedFrame = 0;
+        _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
+        ClearAllResourceReady();
 
         LOG_INFO("D3D12_Configure Enabled: false, result: {} ({})", magic_enum::enum_name((FfxApiReturnCodes) result),
                  (UINT) result);

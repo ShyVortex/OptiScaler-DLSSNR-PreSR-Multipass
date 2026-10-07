@@ -104,18 +104,34 @@ class MockFGFeature
 
         if (_lastDispatchedFrame == 0 && _frameCount > 0)
         {
-            for (int i = 0; i < BUFFER_COUNT; i++)
+            int slotCur = static_cast<int>(_frameCount % BUFFER_COUNT);
+            if (IsSlotReady(slotCur))
             {
-                if (IsSlotReady(i))
-                {
-                    willDispatchFrame = _frameCount;
-                    return i;
-                }
+                willDispatchFrame = _frameCount;
+                return slotCur;
             }
         }
 
         willDispatchFrame = 0;
         return -1;
+    }
+
+    int GetIndexWillBeDispatched()
+    {
+        uint64_t df = 0;
+        int64_t diff = _frameCount - _lastDispatchedFrame;
+        if (diff > _allowedFrameAhead || diff < 0 || _lastDispatchedFrame == 0)
+        {
+            if (_depthReady[GetIndex()])
+                df = _frameCount;
+            else
+                df = _lastDispatchedFrame + 1;
+        }
+        else
+        {
+            df = _lastDispatchedFrame + 1;
+        }
+        return static_cast<int>(df % BUFFER_COUNT);
     }
 
     int GetDispatchIndex(uint64_t& willDispatchFrame)
@@ -132,6 +148,18 @@ class MockFGFeature
     {
         _actuallyDispatchedFrame = frameId;
         _lastDispatchedFrame = frameId;
+        int slot = static_cast<int>(frameId % BUFFER_COUNT);
+        _depthReady[slot] = false;
+        _velocityReady[slot] = false;
+    }
+
+    void ClearAllResourceReady()
+    {
+        for (int i = 0; i < BUFFER_COUNT; i++)
+        {
+            _depthReady[i] = false;
+            _velocityReady[i] = false;
+        }
     }
 };
 
@@ -332,6 +360,36 @@ int main()
         fg.ConfirmDispatched(10955);
 
         printf("  [PASS] Test 6: Unpause resumption catches undispatched frame without skipping\n");
+    }
+
+    // Test 7: Multi-resource tagging yields identical slot index (zero MV slot-split)
+    {
+        MockFGFeature fg;
+        fg._allowedFrameAhead = 2;
+        fg.StartNewFrame(); // frame 1
+
+        // When Streamline tags Depth, it queries GetIndexWillBeDispatched
+        int depthSlot = fg.GetIndexWillBeDispatched();
+        fg._depthReady[depthSlot] = true;
+
+        // When Streamline next tags MotionVectors, it queries GetIndexWillBeDispatched
+        int mvSlot = fg.GetIndexWillBeDispatched();
+        fg._velocityReady[mvSlot] = true;
+
+        // Both resources MUST resolve to the exact same slot!
+        assert(depthSlot == mvSlot);
+        assert(fg.IsSlotReady(depthSlot));
+
+        uint64_t df = 0;
+        int dispatchSlot = fg.GetDispatchIndex(df);
+        assert(dispatchSlot == depthSlot);
+        assert(df == 1);
+        fg.ConfirmDispatched(df);
+
+        // ConfirmDispatched must flush slot readiness so it doesn't linger
+        assert(!fg.IsSlotReady(depthSlot));
+
+        printf("  [PASS] Test 7: Multi-resource tagging yields identical slot index (zero MV slot-split)\n");
     }
 
     printf("All XeFG Ring Buffer & Motion Vector Pacing Unit Tests PASSED!\n");

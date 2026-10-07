@@ -709,6 +709,7 @@ void XeFG_Dx12::Deactivate()
         _actuallyDispatchedFrame = 0;
         _waitingNewFrameData = false;
         _needResetHistory = true;
+        ClearAllResourceReady();
 
         LOG_INFO("SetEnabled: false, result: {} ({})", magic_enum::enum_name(result), (UINT) result);
     }

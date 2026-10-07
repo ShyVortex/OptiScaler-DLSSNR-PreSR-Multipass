@@ -7,12 +7,30 @@ int IFGFeature::GetIndex() { return (_frameCount % BUFFER_COUNT); }
 
 int IFGFeature::GetIndexWillBeDispatched()
 {
-    UINT64 df = 0;
-    int slot = ResolveDispatchSlot(df);
-    if (slot >= 0)
-        return slot;
+    UINT64 df;
 
-    return GetIndex();
+    auto diff = _frameCount - _lastDispatchedFrame;
+    if (diff > Config::Instance()->FGAllowedFrameAhead.value_or_default() || diff < 0 || _lastDispatchedFrame == 0)
+    {
+        // If current index has resources, skip to it
+        if (HasResource(FG_ResourceType::Depth))
+        {
+            LOG_DEBUG("Skipping not presented frames! _frameCount: {}, _lastDispatchedFrame: {}", _frameCount,
+                      _lastDispatchedFrame);
+
+            df = _frameCount; // Set dispatch frame as new one
+        }
+        else
+        {
+            df = _lastDispatchedFrame + 1; // Render next one
+        }
+    }
+    else
+    {
+        df = _lastDispatchedFrame + 1; // Render next one
+    }
+
+    return (df % BUFFER_COUNT);
 }
 
 UINT64 IFGFeature::StartNewFrame()
@@ -196,16 +214,14 @@ int IFGFeature::ResolveDispatchSlot(UINT64& willDispatchFrame)
         }
     }
 
-    // 4. Initial state fallback when _lastDispatchedFrame == 0: check any slot in ring buffer that has ready resources
+    // 4. Initial state fallback when _lastDispatchedFrame == 0: check if current frame slot has ready resources
     if (_lastDispatchedFrame == 0 && _frameCount > 0)
     {
-        for (int i = 0; i < BUFFER_COUNT; i++)
+        int slotCur = static_cast<int>(_frameCount % BUFFER_COUNT);
+        if (IsSlotReady(slotCur))
         {
-            if (IsSlotReady(i))
-            {
-                willDispatchFrame = _frameCount;
-                return i;
-            }
+            willDispatchFrame = _frameCount;
+            return slotCur;
         }
     }
 
@@ -373,12 +389,20 @@ void IFGFeature::ResetCounters()
     _targetFrame = _frameCount;
     _lastDispatchedFrame = 0;
     _actuallyDispatchedFrame = 0;
+    ClearAllResourceReady();
 }
 
 void IFGFeature::ConfirmDispatched(UINT64 frameId)
 {
     _actuallyDispatchedFrame = frameId;
     _lastDispatchedFrame = frameId;
+    _resourceReady[frameId % BUFFER_COUNT].clear();
+}
+
+void IFGFeature::ClearAllResourceReady()
+{
+    for (int i = 0; i < BUFFER_COUNT; i++)
+        _resourceReady[i].clear();
 }
 
 void IFGFeature::UpdateTarget()
