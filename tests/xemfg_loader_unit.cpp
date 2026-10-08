@@ -45,6 +45,13 @@ static const uint8_t U4_SIG[] = { 0xC7, 0x87, 0x6C, 0x01, 0x00, 0x00, 0x01, 0x00
                                   0x00, 0x00, 0xC6, 0x87, 0x68, 0x01, 0x00, 0x00 };
 static const uint8_t U5_SIG[] = { 0xB8, 0x01, 0x00, 0x00, 0x00, 0x89, 0x47, 0x20, 0x33, 0xC0, 0x48, 0x8B, 0x9C, 0x24 };
 
+static const uint8_t PRESENT_THUNK_EXPECTED[16] = { 0xE9, 0x6B, 0xD1, 0x21, 0x00, 0xCC, 0xCC, 0xCC,
+                                                    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC };
+static const uint8_t SCHED_THUNK_EXPECTED[16] = { 0xE9, 0x2B, 0xBD, 0x21, 0x00, 0xCC, 0xCC, 0xCC,
+                                                  0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC };
+static const uint8_t TS_THUNK_EXPECTED[16] = { 0xE9, 0xFB, 0x16, 0x22, 0x00, 0xCC, 0xCC, 0xCC,
+                                               0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC };
+
 struct PatchRecord
 {
     uint8_t* address = nullptr;
@@ -199,6 +206,68 @@ class SimulatedXeMfgEngine
         return deadline;
     }
 
+    bool pacingInstalled = false;
+    uint32_t pacingDetours = 0;
+
+    bool InstallPacing(uint8_t* base, size_t size)
+    {
+        if (!base || size < 0x230000)
+            return false;
+        if (std::memcmp(base + 0x25c0, PRESENT_THUNK_EXPECTED, 16) != 0 ||
+            std::memcmp(base + 0x3100, SCHED_THUNK_EXPECTED, 16) != 0 ||
+            std::memcmp(base + 0x3430, TS_THUNK_EXPECTED, 16) != 0)
+            return false;
+
+        uint8_t jmpBytes[16] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00, 0x11, 0x22,
+                                 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0xCC, 0xCC };
+        std::memcpy(base + 0x25c0, jmpBytes, 16);
+        std::memcpy(base + 0x3100, jmpBytes, 16);
+        std::memcpy(base + 0x3430, jmpBytes, 16);
+        pacingInstalled = true;
+        pacingDetours = 3;
+        return true;
+    }
+
+    void UninstallPacing(uint8_t* base)
+    {
+        if (!base)
+            return;
+        std::memcpy(base + 0x25c0, PRESENT_THUNK_EXPECTED, 16);
+        std::memcpy(base + 0x3100, SCHED_THUNK_EXPECTED, 16);
+        std::memcpy(base + 0x3430, TS_THUNK_EXPECTED, 16);
+        pacingInstalled = false;
+        pacingDetours = 0;
+    }
+
+    static std::vector<int64_t> SimulateTsDetourBurst(int64_t nativeOut, int64_t medianNs, float fMs,
+                                                      uint32_t countPlus1)
+    {
+        std::vector<int64_t> deadlines;
+        int64_t unit = medianNs / static_cast<int64_t>(countPlus1);
+        int64_t nativeUnit = unit;
+        int64_t fNs = static_cast<int64_t>(fMs * 1000000.0f);
+        int64_t clampedUnit = fNs / static_cast<int64_t>(countPlus1);
+        if (clampedUnit < nativeUnit)
+            nativeUnit = clampedUnit;
+
+        int64_t nextDeadline = 0;
+        int64_t stepNs = unit;
+
+        for (uint32_t idx = 1; idx < countPlus1; ++idx)
+        {
+            if (idx == 1)
+            {
+                nextDeadline = nativeOut + static_cast<int64_t>(idx) * (unit - nativeUnit);
+            }
+            else
+            {
+                nextDeadline += stepNs;
+            }
+            deadlines.push_back(nextDeadline);
+        }
+        return deadlines;
+    }
+
     uint32_t EffectiveMax(uint32_t nativeReported) const
     {
         if (lastFailure)
@@ -212,6 +281,11 @@ class SimulatedXeMfgEngine
 static void PopulateValidImage(std::vector<uint8_t>& image)
 {
     image.assign(0x235000, 0x90); // NOP sled
+
+    // 3 Pacing thunks
+    std::memcpy(image.data() + 0x25c0, PRESENT_THUNK_EXPECTED, sizeof(PRESENT_THUNK_EXPECTED));
+    std::memcpy(image.data() + 0x3100, SCHED_THUNK_EXPECTED, sizeof(SCHED_THUNK_EXPECTED));
+    std::memcpy(image.data() + 0x3430, TS_THUNK_EXPECTED, sizeof(TS_THUNK_EXPECTED));
 
     // U1 at 0x20da4f
     std::memcpy(image.data() + 0x20da4f, U1_SIG, sizeof(U1_SIG));
@@ -403,6 +477,38 @@ int main()
         }
         printf("  [PASS] Test 8: Native provider presentation deadline calculation evenly spaces presentation "
                "intervals.\n");
+    }
+
+    // Test 9: Native XeFGPacing thunk hooking, scheduler routing, and deadline repair across 4X burst
+    {
+        std::vector<uint8_t> pacingImg = pristineImage;
+        assert(engine.InstallPacing(pacingImg.data(), pacingImg.size()));
+        assert(engine.pacingInstalled && "Pacing must be marked installed");
+        assert(engine.pacingDetours == 3 && "All 3 thunks must be detoured");
+
+        // Verify the 3 thunks are redirected to 0xFF, 0x25
+        assert(pacingImg[0x25c0] == 0xFF && pacingImg[0x25c1] == 0x25);
+        assert(pacingImg[0x3100] == 0xFF && pacingImg[0x3101] == 0x25);
+        assert(pacingImg[0x3430] == 0xFF && pacingImg[0x3431] == 0x25);
+
+        // Verify TsDetour deadline simulation (4X FG, 20.6 ms frame, f clamped to 8.5ms)
+        const int64_t medianNs = 20600000;
+        const float fMs = 8.5f;
+        const int64_t nativeBase = 1000000000LL;
+        auto deadlines = XeMfgTest::SimulatedXeMfgEngine::SimulateTsDetourBurst(nativeBase, medianNs, fMs, 4);
+        assert(deadlines.size() == 3);
+        int64_t step1 = deadlines[1] - deadlines[0];
+        int64_t step2 = deadlines[2] - deadlines[1];
+        assert(step1 == medianNs / 4 && "Inter-frame step must equal median / 4");
+        assert(step2 == medianNs / 4 && "Second inter-frame step must equal median / 4");
+
+        // Verify Uninstall cleanly restores pristine bytes
+        engine.UninstallPacing(pacingImg.data());
+        assert(!engine.pacingInstalled);
+        assert(engine.pacingDetours == 0);
+        assert(pacingImg == pristineImage && "UninstallPacing must restore pristine thunk bytes");
+        printf("  [PASS] Test 9: Native XeFGPacing thunk hooking, scheduler routing, and deadline repair across 4X "
+               "burst.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");
