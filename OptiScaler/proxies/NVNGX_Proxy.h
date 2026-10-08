@@ -33,9 +33,9 @@ inline static PFN_NVSDK_NGX_D3D1X_GetFeatureRequirements Original_D3D11_GetFeatu
 inline static PFN_NVSDK_NGX_D3D1X_GetFeatureRequirements Original_D3D12_GetFeatureRequirements = nullptr;
 inline static PFN_NVSDK_NGX_VULKAN_GetFeatureRequirements Original_Vulkan_GetFeatureRequirements = nullptr;
 
-inline static NVSDK_NGX_Result __stdcall
-Hooked_Dx12_GetFeatureRequirements(IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
-                                   NVSDK_NGX_FeatureRequirement* OutSupported)
+inline static NVSDK_NGX_Result __stdcall Hooked_Dx12_GetFeatureRequirements(
+    IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
+    NVSDK_NGX_FeatureRequirement* OutSupported)
 {
     LOG_FUNC();
 
@@ -65,9 +65,9 @@ Hooked_Dx12_GetFeatureRequirements(IDXGIAdapter* Adapter, const NVSDK_NGX_Featur
     return result;
 }
 
-inline static NVSDK_NGX_Result __stdcall
-Hooked_Dx11_GetFeatureRequirements(IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
-                                   NVSDK_NGX_FeatureRequirement* OutSupported)
+inline static NVSDK_NGX_Result __stdcall Hooked_Dx11_GetFeatureRequirements(
+    IDXGIAdapter* Adapter, const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
+    NVSDK_NGX_FeatureRequirement* OutSupported)
 {
     LOG_FUNC();
 
@@ -97,10 +97,9 @@ Hooked_Dx11_GetFeatureRequirements(IDXGIAdapter* Adapter, const NVSDK_NGX_Featur
     return result;
 }
 
-inline static NVSDK_NGX_Result __stdcall
-Hooked_Vulkan_GetFeatureRequirements(const VkInstance Instance, const VkPhysicalDevice PhysicalDevice,
-                                     const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo,
-                                     NVSDK_NGX_FeatureRequirement* OutSupported)
+inline static NVSDK_NGX_Result __stdcall Hooked_Vulkan_GetFeatureRequirements(
+    const VkInstance Instance, const VkPhysicalDevice PhysicalDevice,
+    const NVSDK_NGX_FeatureDiscoveryInfo* FeatureDiscoveryInfo, NVSDK_NGX_FeatureRequirement* OutSupported)
 {
     LOG_FUNC();
 
