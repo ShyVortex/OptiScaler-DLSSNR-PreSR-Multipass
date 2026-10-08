@@ -444,7 +444,6 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
             LOG_DEBUG("Removing DXGI_PRESENT_ALLOW_TEARING");
             Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
         }
-
         LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
 

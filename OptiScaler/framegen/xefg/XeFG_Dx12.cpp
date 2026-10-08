@@ -1,5 +1,7 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "XeFG_Dx12.h"
+#include "XeMfgLoader.h"
+#include "XeFGPacing.h"
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
 #include <resource_tracking/ResTrack_dx12.h>
@@ -166,6 +168,8 @@ bool XeFG_Dx12::DestroySwapchainContext()
 {
     LOG_DEBUG("");
 
+    XeMfgLoader::ResetPacingContext();
+
     if (_swapChainContext != nullptr && !State::Instance().isShuttingDown)
     {
         auto context = _swapChainContext;
@@ -253,27 +257,19 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
                               desc->BufferCount, desc->BufferDesc.Width, desc->BufferDesc.Height,
                               desc->BufferDesc.Format, desc->Flags) == S_OK;
 
-            *swapChain = State::Instance().currentFGSwapchain;
-            return result;
+            if (result)
+            {
+                *swapChain = State::Instance().currentFGSwapchain;
+                return true;
+            }
+
+            LOG_WARN("ResizeBuffers on preserved FG swapchain failed, falling back to clean recreation");
         }
-        // Game is creating new swapchain without releasing old one,
-        // we need to release it to avoid errors
-        else if (readyToRelease)
+
+        if (readyToRelease || !Config::Instance()->FGPreserveSwapChain.value_or_default())
         {
             LOG_INFO("Releasing old swapchain");
             ReleaseSwapchain(_hwnd);
-
-            // Not sure why but XeFG sometimes doesn't release the swapchain properly
-            // so we force release it here to be able to recreate swapchain for same hwnd
-            if (State::Instance().currentRealSwapchain != nullptr)
-            {
-                UINT release = 0;
-                do
-                {
-                    release = State::Instance().currentRealSwapchain->Release();
-                    LOG_DEBUG("Releasing swapchain, ref count: {}", release);
-                } while (release > 0);
-            }
         }
         else
         {
@@ -338,8 +334,10 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
 
     switch (desc->BufferDesc.Scaling)
     {
+    // DXGI_SCALING_ASPECT_RATIO_STRETCH is only valid for CoreWindow/composition swapchains; on an HWND swapchain
+    // CreateSwapChainForHwnd rejects it with DXGI_ERROR_INVALID_CALL. Map centered to stretch for compatibility.
     case DXGI_MODE_SCALING_CENTERED:
-        scDesc.Scaling = DXGI_SCALING_ASPECT_RATIO_STRETCH;
+        scDesc.Scaling = DXGI_SCALING_STRETCH;
         break;
 
     case DXGI_MODE_SCALING_STRETCHED:
@@ -438,6 +436,13 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     {
         XeFGProxy::SetEnabled()(_swapChainContext, true);
     }
+    else if (State::Instance().activeFgInput == FGInput::DLSSG)
+    {
+        _passthrough = true;
+        _framesToInterpolate = 0;
+        _isActive = false;
+        LOG_INFO("XeFG initialized in passthrough mode for DLSSG input");
+    }
 
     _gameCommandQueue = realQueue;
     _swapChain = *swapChain;
@@ -458,27 +463,19 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
             auto result = State::Instance().currentFGSwapchain->ResizeBuffers(
                               desc->BufferCount, desc->Width, desc->Height, desc->Format, desc->Flags) == S_OK;
 
-            *swapChain = (IDXGISwapChain1*) State::Instance().currentFGSwapchain;
-            return result;
+            if (result)
+            {
+                *swapChain = (IDXGISwapChain1*) State::Instance().currentFGSwapchain;
+                return true;
+            }
+
+            LOG_WARN("ResizeBuffers on preserved FG swapchain failed, falling back to clean recreation");
         }
-        // Game is creating new swapchain without releasing old one,
-        // we need to release it to avoid errors
-        else if (readyToRelease)
+
+        if (readyToRelease || !Config::Instance()->FGPreserveSwapChain.value_or_default())
         {
             LOG_INFO("Releasing old swapchain");
             ReleaseSwapchain(_hwnd);
-
-            // Not sure why but XeFG sometimes doesn't release the swapchain properly
-            // so we force release it here to be able to recreate swapchain for same hwnd
-            if (State::Instance().currentRealSwapchain != nullptr)
-            {
-                UINT release = 0;
-                do
-                {
-                    release = State::Instance().currentRealSwapchain->Release();
-                    LOG_DEBUG("Releasing swapchain, ref count: {}", release);
-                } while (release > 0);
-            }
         }
         else
         {
@@ -607,6 +604,13 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     {
         XeFGProxy::SetEnabled()(_swapChainContext, true);
     }
+    else if (State::Instance().activeFgInput == FGInput::DLSSG)
+    {
+        _passthrough = true;
+        _framesToInterpolate = 0;
+        _isActive = false;
+        LOG_INFO("XeFG swapchain1 initialized in passthrough mode for DLSSG input");
+    }
 
     _gameCommandQueue = realQueue;
     _swapChain = *swapChain;
@@ -626,6 +630,7 @@ void XeFG_Dx12::CreateContext(ID3D12Device* device, FG_Constants& fgConstants)
     {
         _fgContext = _swapChainContext;
         _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
     }
 
     if (_isActive)
@@ -647,7 +652,8 @@ void XeFG_Dx12::Activate()
         nativeAA = currentFeature->RenderWidth() == currentFeature->DisplayWidth();
 
     if (_swapChainContext != nullptr && _fgContext != nullptr && !_isActive &&
-        (IsLowResMV() || nativeAA || (State::Instance().gameQuirks & GameQuirk::ForceFGRenderSizeMVs) ||
+        (State::Instance().activeFgInput == FGInput::DLSSG || IsLowResMV() || nativeAA ||
+         (State::Instance().gameQuirks & GameQuirk::ForceFGRenderSizeMVs) ||
          Config::Instance()->FGXeFGIgnoreInitChecks.value_or_default()))
     {
         auto result = XeFGProxy::SetEnabled()(_swapChainContext, true);
@@ -656,6 +662,7 @@ void XeFG_Dx12::Activate()
         {
             _isActive = true;
             _lastDispatchedFrame = 0;
+            _actuallyDispatchedFrame = 0;
         }
 
         LOG_INFO("SetEnabled: true, result: {} ({})", magic_enum::enum_name(result), (UINT) result);
@@ -675,11 +682,15 @@ void XeFG_Dx12::Deactivate()
             auto closeResult = _uiCommandList[fIndex]->Close();
 
             if (closeResult == S_OK)
-                _gameCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**) &_uiCommandList[fIndex]);
+            {
+                if (_gameCommandQueue != nullptr && _uiCommandList[fIndex] != nullptr)
+                    _gameCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**) &_uiCommandList[fIndex]);
+            }
             else
                 LOG_ERROR("_uiCommandList[{}]->Close() error: {:X}", fIndex, (UINT) closeResult);
 
-            _gameCommandQueue->Signal(_uiFence, _uiAllocatorFenceValues[fIndex]);
+            if (_gameCommandQueue != nullptr && _uiFence != nullptr)
+                _gameCommandQueue->Signal(_uiFence, _uiAllocatorFenceValues[fIndex]);
 
             _uiCommandListResetted[fIndex] = false;
         }
@@ -697,8 +708,11 @@ void XeFG_Dx12::Deactivate()
             _isActive = false;
         }
 
-        //_lastDispatchedFrame = 0;
+        _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
         _waitingNewFrameData = false;
+        _needResetHistory = true;
+        ClearAllResourceReady();
 
         LOG_INFO("SetEnabled: false, result: {} ({})", magic_enum::enum_name(result), (UINT) result);
     }
@@ -785,7 +799,8 @@ bool XeFG_Dx12::Dispatch()
                      _maxInterpolationCount);
         }
 
-        if (_framesToInterpolate != Config::Instance()->FGXeFGInterpolationCount.value_or_default())
+        if (State::Instance().activeFgInput != FGInput::DLSSG &&
+            _framesToInterpolate != Config::Instance()->FGXeFGInterpolationCount.value_or_default())
         {
             LOG_INFO("Interpolation count changed {} -> {}", _framesToInterpolate,
                      Config::Instance()->FGXeFGInterpolationCount.value_or_default());
@@ -810,7 +825,7 @@ bool XeFG_Dx12::Dispatch()
     }
 
     // Workaround for wrong frame limit
-    if (state.WAR_xefgRequestFGToggle)
+    if (State::Instance().activeFgInput != FGInput::DLSSG && state.WAR_xefgRequestFGToggle)
     {
         state.WAR_xefgRequestFGToggle = false;
 
@@ -866,10 +881,13 @@ bool XeFG_Dx12::Dispatch()
         }
     }
 
-    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
-                                    Config::Instance()->FGXeFGDebugView.value_or_default(), nullptr);
-    XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
-                                    state.fgOnlyGenerated, nullptr);
+    if (XeFGProxy::EnableDebugFeature() != nullptr && _swapChainContext != nullptr)
+    {
+        XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_TAG_INTERPOLATED_FRAMES,
+                                        Config::Instance()->FGXeFGDebugView.value_or_default(), nullptr);
+        XeFGProxy::EnableDebugFeature()(_swapChainContext, XEFG_SWAPCHAIN_DEBUG_FEATURE_SHOW_ONLY_INTERPOLATION,
+                                        state.fgOnlyGenerated, nullptr);
+    }
 
     xefg_swapchain_frame_constant_data_t constData = {};
 
@@ -920,18 +938,28 @@ bool XeFG_Dx12::Dispatch()
 
     constData.jitterOffsetX = _jitterX[fIndex];
     constData.jitterOffsetY = _jitterY[fIndex];
-    constData.motionVectorScaleX = _mvScaleX[fIndex];
-    constData.motionVectorScaleY = _mvScaleY[fIndex];
+    constData.motionVectorScaleX = (_mvScaleX[fIndex] != 0.0f) ? _mvScaleX[fIndex] : 1.0f;
+    constData.motionVectorScaleY = (_mvScaleY[fIndex] != 0.0f) ? _mvScaleY[fIndex] : 1.0f;
 
     if (!Config::Instance()->FGSkipReset.value_or_default())
-        constData.resetHistory = _reset[fIndex];
+        constData.resetHistory = (_reset[fIndex] || _needResetHistory);
     else
         constData.resetHistory = false;
+
+    _needResetHistory = false;
+
+    auto frameRenderTime = XeFGPacing::RenderTimeMs();
+
+    if (!(frameRenderTime > 0.0))
+        frameRenderTime = _ftDelta[fIndex];
+
+    if (!(frameRenderTime > 0.0))
+        frameRenderTime = state.lastFGFrameTime;
 
     switch (Config::Instance()->FTInput.value_or_default())
     {
     case FrameTimeSource::Input:
-        constData.frameRenderTime = (float) _ftDelta[fIndex];
+        constData.frameRenderTime = static_cast<float>(frameRenderTime);
         break;
 
     case FrameTimeSource::Opti:
@@ -943,11 +971,16 @@ bool XeFG_Dx12::Dispatch()
         break;
     }
 
+    XeFGPacing::NoteFedFrameTime(constData.frameRenderTime);
+
     LOG_DEBUG("Reset: {}, Opti FT: {}, Source FT: {}, Set FT: {}, Opti Id: {}, Reflex Id: {}", _reset[fIndex],
               constData.frameRenderTime, _ftDelta[fIndex], constData.frameRenderTime, _frameCount,
               State::Instance().reflexFrameId);
 
     auto frameId = static_cast<uint32_t>(willDispatchFrame);
+
+    if (XeFGProxy::SetEnabled() != nullptr && _swapChainContext != nullptr)
+        XeFGProxy::SetEnabled()(_swapChainContext, true);
 
     auto result = XeFGProxy::TagFrameConstants()(_swapChainContext, frameId, &constData);
     if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
@@ -1025,6 +1058,8 @@ bool XeFG_Dx12::Dispatch()
 
     LOG_DEBUG("Result: Ok");
 
+    ConfirmDispatched(willDispatchFrame);
+
     return true;
 }
 
@@ -1034,7 +1069,62 @@ void* XeFG_Dx12::SwapchainContext() { return _swapChainContext; }
 
 XeFG_Dx12::~XeFG_Dx12() { Shutdown(); }
 
-bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount) { return true; }
+bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
+{
+    LOG_INFO("XeFG SetInterpolatedFrameCount called with count: {}", interpolatedFrameCount);
+
+    if (interpolatedFrameCount == 0)
+    {
+        _passthrough = true;
+        _framesToInterpolate = 0;
+        _needResetHistory = true;
+
+        LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0)");
+        return true;
+    }
+
+    _passthrough = false;
+
+    if (_maxInterpolationCount > 0 && interpolatedFrameCount > _maxInterpolationCount)
+    {
+        LOG_WARN("Requested interpolation count {} exceeds max supported {}, clamping", interpolatedFrameCount,
+                 _maxInterpolationCount);
+        interpolatedFrameCount = _maxInterpolationCount;
+    }
+
+    Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(interpolatedFrameCount);
+
+    if (_framesToInterpolate != interpolatedFrameCount)
+    {
+        _framesToInterpolate = interpolatedFrameCount;
+
+        if (_swapChainContext != nullptr)
+        {
+#ifndef DONT_USE_XMX
+            ScopedSkipSpoofingGlobal skipSpoofingGlobal {};
+#endif
+            if (XeFGProxy::SetEnabled() != nullptr)
+                XeFGProxy::SetEnabled()(_swapChainContext, true);
+
+            if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
+            {
+                auto intResult = XeFGProxy::SetNumInterpolatedFrames()(_swapChainContext, interpolatedFrameCount);
+                if (intResult != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+                {
+                    LOG_ERROR("XeFG SetNumInterpolatedFrames error: {} ({})", magic_enum::enum_name(intResult),
+                              (UINT) intResult);
+                }
+            }
+        }
+    }
+
+    if (!_isActive)
+    {
+        Activate();
+    }
+
+    return true;
+}
 
 void XeFG_Dx12::EvaluateState(ID3D12Device* device, FG_Constants& fgConstants)
 {
@@ -1269,6 +1359,14 @@ void XeFG_Dx12::CreateObjects(ID3D12Device* InDevice)
 
 bool XeFG_Dx12::Present()
 {
+    if (_passthrough)
+    {
+        LOG_DEBUG("XeFG is in passthrough mode, presenting base frame without interpolation");
+        _lastDispatchedFrame = _frameCount;
+        _actuallyDispatchedFrame = _frameCount;
+        return true;
+    }
+
     auto fIndex = GetIndexWillBeDispatched();
     LOG_DEBUG("fIndex: {}", fIndex);
 
@@ -1381,7 +1479,16 @@ bool XeFG_Dx12::Present()
 
     _fgFramePresentId++;
 
-    return Dispatch();
+    auto dispatchResult = Dispatch();
+    if (!dispatchResult)
+    {
+        _needResetHistory = true;
+        LOG_DEBUG("XeFG_Dx12::Present: Dispatch failed for frame {}, falling back to native pass-through without "
+                  "disabling swapchain",
+                  _frameCount);
+    }
+
+    return dispatchResult;
 }
 
 bool XeFG_Dx12::SetResource(Dx12Resource* inputResource)
@@ -1571,8 +1678,8 @@ bool XeFG_Dx12::SetResource(Dx12Resource* inputResource)
 
             if (lastFormat[fIndex] != DXGI_FORMAT_UNKNOWN && lastFormat[fIndex] != desc.Format)
             {
-                State::Instance().fgChanged = true;
-                return false;
+                LOG_DEBUG("XeFG_Dx12::SetResource: HudlessColor format transition on slot {} ({} -> {})", fIndex,
+                          (UINT) lastFormat[fIndex], (UINT) desc.Format);
             }
 
             lastFormat[fIndex] = desc.Format;
@@ -1609,19 +1716,27 @@ bool XeFG_Dx12::SetResource(Dx12Resource* inputResource)
         if (type != FG_ResourceType::UIColor ||
             (XeFGProxy::SetUiCompositionState() != nullptr || Config::Instance()->FGDrawUIOverFG.value_or_default()))
         {
-            auto frameId = static_cast<uint32_t>(_frameCount - indexDiff);
-            auto result =
-                XeFGProxy::D3D12TagFrameResource()(_swapChainContext, fResource->cmdList, frameId, &resourceParam);
-            LOG_DEBUG("D3D12TagFrameResource, frameId: {}, type: {} result: {} ({})", frameId,
-                      magic_enum::enum_name(type), magic_enum::enum_name(result), (int32_t) result);
-
-            if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+            if (!_passthrough)
             {
-                State::Instance().fgChanged = true;
-                UpdateTarget();
-                Deactivate();
+                auto frameId = static_cast<uint32_t>(_frameCount - indexDiff);
+                auto result =
+                    XeFGProxy::D3D12TagFrameResource()(_swapChainContext, fResource->cmdList, frameId, &resourceParam);
+                LOG_DEBUG("D3D12TagFrameResource, frameId: {}, type: {} result: {} ({})", frameId,
+                          magic_enum::enum_name(type), magic_enum::enum_name(result), (int32_t) result);
 
-                return false;
+                if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+                {
+                    State::Instance().fgChanged = true;
+                    UpdateTarget();
+                    Deactivate();
+
+                    return false;
+                }
+            }
+            else
+            {
+                LOG_DEBUG("XeFG in passthrough mode, skipping D3D12TagFrameResource for type: {}",
+                          magic_enum::enum_name(type));
             }
         }
 
@@ -1676,6 +1791,14 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
         State::Instance().currentFGSwapchain = nullptr;
     }
 
+    _swapChain = nullptr;
+    _hwnd = NULL;
+    _gameCommandQueue = nullptr;
+    _isActive = false;
+    _passthrough = false;
+    _framesToInterpolate = 0;
+    _haveHudless.reset();
+
     ReleaseObjects();
 
     if (Config::Instance()->FGUseMutexForSwapchain.value_or_default())
@@ -1685,4 +1808,48 @@ bool XeFG_Dx12::ReleaseSwapchain(HWND hwnd)
     }
 
     return true;
+}
+
+void XeFG_Dx12::PostPresent()
+{
+    if (_swapChainContext == nullptr || XeFGProxy::GetLastPresentStatus() == nullptr)
+        return;
+
+    xefg_swapchain_present_status_t presentStatus {};
+    auto result = XeFGProxy::GetLastPresentStatus()(_swapChainContext, &presentStatus);
+    if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS)
+    {
+        XeMfgLoader::RecordPresentStatus(presentStatus.framesPresented, static_cast<int>(presentStatus.frameGenResult),
+                                         presentStatus.isFrameGenEnabled != 0);
+
+        static uint32_t s_logThrottle = 0;
+        static int32_t s_lastResult = -9999;
+        static uint32_t s_lastFrames = 0;
+
+        if (presentStatus.frameGenResult != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+        {
+            if (s_lastResult != static_cast<int32_t>(presentStatus.frameGenResult) || (++s_logThrottle % 120 == 0))
+            {
+                LOG_WARN("XeFG LastPresentStatus WARNING: result={} ({}), framesPresented={}, enabled={}",
+                         static_cast<int32_t>(presentStatus.frameGenResult),
+                         magic_enum::enum_name(presentStatus.frameGenResult), presentStatus.framesPresented,
+                         presentStatus.isFrameGenEnabled);
+                s_lastResult = static_cast<int32_t>(presentStatus.frameGenResult);
+            }
+        }
+        else
+        {
+            if (s_lastResult != 0 || s_lastFrames != presentStatus.framesPresented || (++s_logThrottle % 600 == 0))
+            {
+                LOG_INFO("XeFG LastPresentStatus: framesPresented={}, frameGenResult=SUCCESS, enabled={}",
+                         presentStatus.framesPresented, presentStatus.isFrameGenEnabled);
+                s_lastResult = 0;
+                s_lastFrames = presentStatus.framesPresented;
+            }
+        }
+    }
+    else
+    {
+        LOG_DEBUG("GetLastPresentStatus failed with result: {}", static_cast<int32_t>(result));
+    }
 }

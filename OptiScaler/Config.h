@@ -768,6 +768,13 @@ class Config
     CustomOptional<bool> FGXeFGDebugView { false };
     CustomOptional<bool> FGXeFGForceBorderless { false };
 
+    // XeMFG Unlock
+    CustomOptional<bool> XeMfgUnlock { false };
+    CustomOptional<int> XeMfgMaxFrames { 3 };
+    CustomOptional<bool> XeMfgExtraPacing {
+        false
+    }; // Optional VBlank synchronization for Windows DXGI (OFF recommended for native XeFG pacing)
+
     // DLSSG
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance
     CustomOptional<bool> FGDLSSGUseGamesReflexMarkers { true };

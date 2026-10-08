@@ -131,6 +131,16 @@ HMODULE LibraryLoadHooks::LoadLibraryCheckW(std::wstring libName, LPCWSTR lpLibF
     }
 #endif
 
+    // Patch Intel XeSS FG (libxess_fg.dll / igxess_fg.dll) for multi-frame generation
+    const auto libFilename = std::filesystem::path(normalizedPath).filename();
+    if ((libFilename == L"libxess_fg.dll" || libFilename == L"igxess_fg.dll") && XeMfgLoader::Pending())
+    {
+        auto fgModule = NtdllProxy::LoadLibraryExW_Ldr(lpLibFullPath, NULL, 0);
+        if (fgModule)
+            XeMfgLoader::TryApply(fgModule);
+        return fgModule;
+    }
+
     // NGX OTA
     // Try to catch something like this:
     // c:\programdata/nvidia/ngx/models//dlss/versions/20316673/files/160_e658700.bin

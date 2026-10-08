@@ -6,6 +6,7 @@
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/xefg/XeMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 #include <nvapi/NvApiHooks.h>
 
@@ -3190,6 +3191,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& primaryGpu = *ctx.primaryGpu;
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    const bool xeActive = config->XeMfgUnlock.value_or_default();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
@@ -3226,7 +3228,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
     const bool isAda = primaryGpu.vendorId == VendorId::Nvidia &&
                        primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_AD100;
-    const bool disableAda = !isAda || ampereActive || state.externalFrameGeneration;
+    const bool disableAda = !isAda || ampereActive || xeActive || state.externalFrameGeneration;
 
     if (disableAda)
     {
@@ -3242,6 +3244,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("Disabled because the Ampere (RTX 30) SM86 MFG unlock is active.\n"
                            "Disable AmpereMfgUnlock first, Save Settings and restart.");
         }
+        else if (xeActive)
+        {
+            ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
+                           "Disable XeMfgUnlock first, Save Settings and restart.");
+        }
         else
         {
             ShowHelpMarker("Disabled because External frame generation is active.\n"
@@ -3256,6 +3263,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (adaUnlock)
             {
                 config->FGDLSSGAmpereMfgUnlock = false;
+                config->XeMfgUnlock = false;
                 config->FGDLSSGSmoothMotion = false;
                 NvApiHooks::ApplySmoothMotionDrs(false);
             }
@@ -3299,15 +3307,23 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         bool ampereUnlock = config->FGDLSSGAmpereMfgUnlock.value_or_default();
 
-        // Mutual exclusion: disable if Ada is already enabled
+        // Mutual exclusion: disable if Ada or XeMFG is already enabled
         const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-        if (adaActive)
+        if (adaActive || xeActive)
         {
             ImGui::BeginDisabled();
             ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock);
             ImGui::EndDisabled();
-            ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
-                           "Disable AdaMfgUnlock first, Save Settings and restart.");
+            if (adaActive)
+            {
+                ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
+                               "Disable AdaMfgUnlock first, Save Settings and restart.");
+            }
+            else
+            {
+                ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
+                               "Disable XeMfgUnlock first, Save Settings and restart.");
+            }
         }
         else
         {
@@ -3318,6 +3334,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     config->ExternalFrameGeneration = true;
                     config->FGDLSSGAdaMfgUnlock = false;
+                    config->XeMfgUnlock = false;
                     config->FGDLSSGSmoothMotion = false;
                     NvApiHooks::ApplySmoothMotionDrs(false);
                     AmpereMfgLoader::ProbeCandidate(true);
@@ -3624,13 +3641,183 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         ImGui::Unindent();
     }
 
+    // ── Intel Xe Multi-Frame Generation (XeMFG) Unlock ──────────────
+    if (ImGui::CollapsingHeader("Intel Xe Multi-Frame Generation (XeMFG)"))
+    {
+        ImGui::Indent();
+
+        bool xeUnlock = config->XeMfgUnlock.value_or_default();
+
+        // Mutual exclusion: disable if Ada or Ampere is already active
+        const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
+        const bool disableXeMfg = adaActive || ampereActive;
+
+        if (disableXeMfg)
+        {
+            ImGui::BeginDisabled();
+            ImGui::Checkbox("Enable XeMFG Unlocker (Multi-Frame Generation; restart)##xemfg", &xeUnlock);
+            ImGui::EndDisabled();
+            if (adaActive)
+            {
+                ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
+                               "Disable AdaMfgUnlock first, Save Settings and restart.");
+            }
+            else
+            {
+                ShowHelpMarker("Disabled because the Ampere (SM86) MFG unlock is active.\n"
+                               "Disable AmpereMfgUnlock first, Save Settings and restart.");
+            }
+        }
+        else
+        {
+            if (ImGui::Checkbox("Enable XeMFG Unlocker (Multi-Frame Generation; restart)##xemfg", &xeUnlock))
+            {
+                config->XeMfgUnlock = xeUnlock;
+                if (xeUnlock)
+                {
+                    config->FGDLSSGAdaMfgUnlock = false;
+                    config->FGDLSSGAmpereMfgUnlock = false;
+                    config->FGDLSSGSmoothMotion = false;
+                    NvApiHooks::ApplySmoothMotionDrs(false);
+                }
+            }
+            ShowHelpMarker("Natively unlocks Intel Xe Multi-Frame Generation (XeMFG) in libxess_fg.dll.\n"
+                           "Allows 3X, 4X, 5X, and 6X frame generation across Intel, AMD, and NVIDIA GPUs.\n"
+                           "When FG Input is set to DLSSG (Streamline) or OptiFG and FG Output is XeFG,\n"
+                           "in-game multiplier options are fully unlocked and routed to XeFG.\n"
+                           "Provides native Multi-Frame Generation on Linux (Proton/VKD3D) without 2X fallbacks.\n"
+                           "Save Settings and restart after changing.");
+        }
+
+        if (xeUnlock)
+        {
+            const auto& status = XeMfgLoader::LastStatus();
+
+            // Status display
+            if (!status.ErrorMessage.empty())
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s",
+                                   status.ErrorMessage.c_str());
+            }
+            else
+            {
+                std::string pacingStr = status.PacingInstalled ? "active (native provider)"
+                                                               : (status.VerifiedPacing ? "verified" : "standard");
+                std::string patchStr =
+                    status.Applied
+                        ? "active (5/5)"
+                        : (status.PatchesApplied > 0 ? (std::to_string(status.PatchesApplied) + "/5") : "not applied");
+                ImGui::TextWrapped("DLL: %s | Patches: %s | Pacing: %s", status.ModuleFound ? "found" : "missing",
+                                   patchStr.c_str(), pacingStr.c_str());
+            }
+
+            if (status.HasPresentTelemetry)
+            {
+                if (status.LastFrameGenResult == 0)
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)),
+                                       "Present Status: OK (%u frames presented, FG %s)", status.LastFramesPresented,
+                                       status.IsFrameGenEnabled ? "Enabled" : "Disabled");
+                }
+                else
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
+                                       "Present Status: Code %d (%u frames presented, FG %s)",
+                                       status.LastFrameGenResult, status.LastFramesPresented,
+                                       status.IsFrameGenEnabled ? "Enabled" : "Disabled");
+                }
+                ShowHelpMarker("Real-time presentation status from xefgSwapChainGetLastPresentStatus.\n"
+                               "Indicates whether Intel XeSS-FG is actively producing neural interpolated frames\n"
+                               "or silently falling back to native frames.");
+            }
+
+            // In-game multiplier status
+            int liveMultiplier = state.dlssgDetectedInterpolationCount;
+            if (liveMultiplier <= 0 && state.currentFG != nullptr && !state.currentFG->IsPassthrough())
+            {
+                liveMultiplier = static_cast<int>(state.currentFG->GetInterpolatedFrameCount());
+            }
+            if (liveMultiplier <= 0 && state.dlssgLastSetMode != sl::DLSSGMode::eOff &&
+                config->FGXeFGInterpolationCount.has_value() && config->FGXeFGInterpolationCount.value() > 0)
+            {
+                liveMultiplier = config->FGXeFGInterpolationCount.value();
+            }
+
+            if (liveMultiplier > 0)
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
+                                   liveMultiplier + 1);
+                ShowHelpMarker("Multiplier selected by the game engine or Streamline options call.");
+            }
+            else if (state.dlssgLastSetMode == sl::DLSSGMode::eOff)
+            {
+                ImGui::TextDisabled("In-Game Multiplier: Off (Disabled in-game)");
+                ShowHelpMarker("Frame generation is currently set to Off in the game's display settings.");
+            }
+            else
+            {
+                ImGui::TextDisabled("In-Game Multiplier: Default / Unset");
+                ShowHelpMarker("In-game multiplier will be reported once the game's Streamline DLSS-G option is set.");
+            }
+
+            // MaxGeneratedFrames slider
+            int maxFrames = config->XeMfgMaxFrames.value_or(3);
+            const char* xeFrameLabels[] = { "1 (2X FG)", "2 (3X FG)", "3 (4X FG) [Default]", "4 (5X FG)", "5 (6X FG)" };
+            const char* currentLabel =
+                (maxFrames >= 1 && maxFrames <= 5) ? xeFrameLabels[maxFrames - 1] : xeFrameLabels[2];
+            if (ImGui::SliderInt("Max Generated Frames##xemfg", &maxFrames, 1, 5, currentLabel))
+            {
+                config->XeMfgMaxFrames = maxFrames;
+                if (XeMfgLoader::IsEnabled())
+                    XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(maxFrames));
+            }
+            ShowHelpMarker(
+                "Maximum generated frames advertised to the game engine via Streamline and allowed in XeFG.\n"
+                "1 = 2X FG (1 generated frame)\n"
+                "2 = 3X FG (2 generated frames)\n"
+                "3 = 4X FG (3 generated frames, default)\n"
+                "4 = 5X FG (4 generated frames)\n"
+                "5 = 6X FG (5 generated frames)\n"
+                "Save Settings and restart after changing.");
+
+            bool fgDV = config->FGXeFGDebugView.value_or_default();
+            if (ImGui::Checkbox("Debug Markers (Corners)##xemfg", &fgDV))
+            {
+                config->FGXeFGDebugView = fgDV;
+                state.fgChanged = true;
+            }
+            ShowHelpMarker("Renders marker quads in the corners of real interpolated frames.\n"
+                           "If you do not see marker quads, frames are not being interpolated.");
+
+            ImGui::SameLine(0.0f, 16.0f);
+            if (ImGui::Checkbox("Only Interpolated Frames##xemfg", &state.fgOnlyGenerated))
+            {
+                state.fgChanged = true;
+            }
+            ShowHelpMarker("Renders ONLY generated frames and blanks native frames.\n"
+                           "If interpolation is active, motion will remain visible.\n"
+                           "If interpolation has failed, the screen will turn black.");
+
+            bool extraPacing = config->XeMfgExtraPacing.value_or(false);
+            if (ImGui::Checkbox("Display VBlank Sync (Extra Pacing)##xemfg", &extraPacing))
+            {
+                config->XeMfgExtraPacing = extraPacing;
+            }
+            ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
+                           "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
+                           "Enable only if your display exhibits severe tear-lines without V-Sync.");
+        }
+
+        ImGui::Unindent();
+    }
+
     // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
     ImGui::Separator();
     bool smoothMotion = config->FGDLSSGSmoothMotion.value_or(false);
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
     const bool isAmpere = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_GA100);
     const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-    const bool fgConflict = ampereActive || adaActive || state.externalFrameGeneration;
+    const bool fgConflict = ampereActive || adaActive || xeActive || state.externalFrameGeneration;
     const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere) || fgConflict;
 
     if (disableSmoothMotion)
@@ -3783,7 +3970,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         }
     }
 
-    if (state.externalFrameGeneration || ampereFallbackToFsrFg)
+    if (state.externalFrameGeneration || ampereFallbackToFsrFg || xeActive)
     {
         if (state.externalFrameGeneration)
             ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
@@ -3795,6 +3982,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ImGui::TextWrapped("Linux FG Fallback is active (%s). Multiplier is controlled via Max Generated Frames "
                                "above or in-game settings.",
                                fallbackTypeName);
+        }
+        else if (xeActive)
+        {
+            ImGui::TextWrapped(
+                "Intel XeMFG is active. Multiplier is controlled via the Intel Xe Multi-Frame Generation (XeMFG) "
+                "section above or in-game settings.");
         }
         return;
     }
@@ -4673,10 +4866,18 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
         }
     }
 
+    const bool xeMfgActive = config->XeMfgUnlock.value_or_default();
+
     // XeFG controls
-    if (state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
-        state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain != nullptr && XeFGProxy::InitXeFG() &&
-        fgOutput)
+    if (xeMfgActive && state.activeFgOutput == FGOutput::XeFG)
+    {
+        ImGui::SeparatorText("Frame Generation (XeFG)");
+        ImGui::TextColored(toneMapColor(ImVec4(0.4f, 0.8f, 1.0f, 1.0f)),
+                           "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above.");
+    }
+    else if (!xeMfgActive && state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
+             state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain != nullptr &&
+             XeFGProxy::InitXeFG() && fgOutput)
     {
         ImGui::SeparatorText("Frame Generation (XeFG)");
 
@@ -4786,6 +4987,16 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
             ShowHelpMarker("Set XeFG interpolation count");
         }
 
+        int liveDetected = state.dlssgDetectedInterpolationCount;
+        if (liveDetected <= 0 && fgOutput != nullptr && !fgOutput->IsPassthrough())
+            liveDetected = static_cast<int>(fgOutput->GetInterpolatedFrameCount());
+
+        if (state.activeFgInput == FGInput::DLSSG && liveDetected > 0)
+        {
+            ImGui::SameLine(0.0f, 16.0f);
+            ImGui::TextColored(toneMapColor(ImVec4(0.f, 1.f, 0.25f, 1.f)), "[In-Game: %dX]", liveDetected + 1);
+        }
+
         ImGui::SameLine(0.0f, 16.0f);
         ImGui::BeginDisabled(!fgOutput->IsUsingHudlessAny() || XeFGProxy::SetUiCompositionState() == nullptr);
         bool fgCompositeUI = config->FGXeFGUIComposition.value_or_default();
@@ -4823,10 +5034,11 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
                        "Might cause some instability issues.\n\n"
                        "NEEDS GAME RESTART TO BE ACTIVE!");
 
-        // Disable this for now
-        // ImGui::SameLine(0.0f, 16.0f);
-        // ImGui::Checkbox("Only Generated##2", &state.fgOnlyGenerated);
-        // ShowHelpMarker("Display only XeFG generated frames");
+        ImGui::SameLine(0.0f, 16.0f);
+        if (ImGui::Checkbox("Only Generated##2", &state.fgOnlyGenerated))
+            state.fgChanged = true;
+        ShowHelpMarker("Display only XeFG generated frames (blanks native frames).\n"
+                       "Useful to visually verify if neural frame interpolation is working.");
 
         ImGui::Spacing();
         if (auto ch = ScopedCollapsingHeader("Extended XeFG Settings"); ch.IsHeaderOpen())
@@ -5628,7 +5840,7 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
     }
 
     // Streamline FG Inputs
-    if (state.currentFGSwapchain != nullptr && state.activeFgInput == FGInput::DLSSG)
+    if (!xeMfgActive && state.currentFGSwapchain != nullptr && state.activeFgInput == FGInput::DLSSG)
     {
         SeparatorWithHelpMarker("Frame Generation (Streamline FG Inputs)", "Select DLSS-FG in-game");
 
@@ -5810,7 +6022,7 @@ void MenuCommon::RenderFramerateSettings(RenderMenuContext& ctx)
         }
 
         if (state.rtssReflexInjection)
-            currentMethod.append(" (RTSS)");
+            currentMethod.append(" (RTSS - Protected)");
 
         const bool fakenvapiInactive = (fakenvapi::isUsingAsMainNvapi() || fakenvapiMode == LowLatencyMode::XeLL) &&
                                        !fakenvapi::isLowLatencyActive() && state.reflexLimitsFps;

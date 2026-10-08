@@ -598,6 +598,8 @@ bool FSRFG_Dx12::Dispatch()
             _fgCommandList[fIndex]->Close();
             _waitingExecute[fIndex] = true;
             dispatchResult = ExecuteCommandList(fIndex);
+            if (dispatchResult)
+                ConfirmDispatched(willDispatchFrame);
         }
     }
 
@@ -763,6 +765,9 @@ ffxReturnCode_t FSRFG_Dx12::DispatchCallback(ffxDispatchDescFrameGeneration* par
     LOG_DEBUG("D3D12_Dispatch result: {}, fIndex: {}", (UINT) dispatchResult, fIndex);
 
     _lastFrameId = params->frameID;
+
+    if (dispatchResult == FFX_API_RETURN_OK)
+        ConfirmDispatched(params->frameID);
 
     return dispatchResult;
 }
@@ -1249,7 +1254,9 @@ void FSRFG_Dx12::Deactivate()
             _isActive = false;
         }
 
-        // _lastDispatchedFrame = 0;
+        _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
+        ClearAllResourceReady();
 
         LOG_INFO("D3D12_Configure Enabled: false, result: {} ({})", magic_enum::enum_name((FfxApiReturnCodes) result),
                  (UINT) result);

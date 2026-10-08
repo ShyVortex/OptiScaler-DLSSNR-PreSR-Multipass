@@ -8,6 +8,7 @@
 #include <misc/IdentifyGpu.h>
 #include <framegen/nvngx/Nvngx_FG.h>
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/xefg/XeMfgLoader.h>
 
 #if defined(OPTISCALER_RTX40_MFG)
 #include <framegen/dlssg/MfgUnlock.h>
@@ -814,6 +815,7 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
     }
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
 #if defined(OPTISCALER_RTX40_MFG)
     MfgUnlock::TryApply();
     const bool adaMfgActive = MfgUnlock::EnabledForSession();
@@ -822,7 +824,7 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
 #endif
     if ((api == API::DX12 || api == API::Vulkan) &&
         (State::Instance().activeFgInput == FGInput::DLSSG ||
-         State::Instance().activeFgNvngx != FGNvngxReplacement::None || ampereMfgActive || adaMfgActive))
+         State::Instance().activeFgNvngx != FGNvngxReplacement::None || ampereMfgActive || adaMfgActive || xeMfgActive))
     {
         InParams->Set("FrameGeneration.Available", 1);
         InParams->Set("FrameGeneration.NeedsUpdatedDriver", 0);
@@ -854,6 +856,11 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
             State::Instance().dlssgMfgMax = countMax;
         }
 #endif
+        else if (xeMfgActive)
+        {
+            countMax = static_cast<int>(XeMfgLoader::EffectiveMax(1));
+            State::Instance().dlssgMfgMax = countMax;
+        }
         InParams->Set("DLSSG.MultiFrameCountMax", countMax);
 
         if (State::Instance().NVNGX_Engine == NVSDK_NGX_ENGINE_TYPE_UNREAL ||

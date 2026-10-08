@@ -6,7 +6,7 @@ on:
       version:
         description: 'Package Version Tag'
         required: true
-        default: 'v0.9.34'
+        default: 'v0.9.50-pre1'
         type: string
       include_ampere_mfg:
         description: 'Include RTX 20/30 (SM75/SM86) MFG (dlssg_sm86.dll)'
@@ -94,6 +94,30 @@ jobs:
             exit 1
         }
         Write-Host "nvsmooth30 ready."
+
+    - name: Ensure XeSS 3.0+ SDK binaries are present
+      shell: powershell
+      run: |
+        $xessNames = @('libxess.dll', 'libxess_dx11.dll', 'libxell.dll', 'libxess_fg.dll')
+        $targetDir = "external\xess\bin"
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+        }
+        foreach ($name in $xessNames) {
+            $dest = "$targetDir\$name"
+            $sdkSrc = "XeMFG\SDK\bin\$name"
+            if (-not (Test-Path $dest)) {
+                if (Test-Path $sdkSrc) {
+                    Write-Host "Copying $name from $sdkSrc..."
+                    Copy-Item -LiteralPath $sdkSrc -Destination $dest -Force
+                } else {
+                    $url = "https://raw.githubusercontent.com/intel/xess/main/bin/$name"
+                    Write-Host "Downloading $name from $url..."
+                    Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+                }
+            }
+        }
+        Write-Host "XeSS 3.0+ SDK files verified."
 
     - name: Acquire verified hybrid kernels
       shell: powershell

@@ -15,6 +15,7 @@
 #include <menu/menu_overlay_base.h>
 #include <framegen/nvngx/Nvngx_FG.h>
 #include <framegen/dlssg/MfgUnlock.h>
+#include <framegen/xefg/XeMfgLoader.h>
 #include <proxies/KernelBase_Proxy.h>
 #include <imgui/ImGuiNotify.hpp>
 
@@ -343,14 +344,14 @@ sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const ch
     {
         if (strcmp(functionName, "slDLSSGSetOptions") == 0)
         {
-            function = &dummy_slDLSSGSetOptions;
+            function = &hkslDLSSGSetOptions;
 
             return sl::Result::eOk;
         }
 
         if (strcmp(functionName, "slDLSSGGetState") == 0)
         {
-            function = &dummy_slDLSSGGetState;
+            function = &hkslDLSSGGetState;
 
             return sl::Result::eOk;
         }
@@ -361,13 +362,13 @@ sl::Result StreamlineHooks::hkslGetFeatureFunction(sl::Feature feature, const ch
     {
         if (strcmp(functionName, "slDLSSGSetOptions") == 0)
         {
-            function = &dummy_slDLSSGSetOptions;
+            function = &hkslDLSSGSetOptions;
             return sl::Result::eOk;
         }
 
         if (strcmp(functionName, "slDLSSGGetState") == 0)
         {
-            function = &dummy_slDLSSGGetState;
+            function = &hkslDLSSGGetState;
             return sl::Result::eOk;
         }
     }
@@ -906,9 +907,10 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     static std::string config;
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
     bool shouldSpoofArch = Config::Instance()->StreamlineSpoofing.value_or_default() &&
                            (State::Instance().activeFgInput == FGInput::NvngxFG ||
-                            State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive);
+                            State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive);
 
     uint32_t currentArch = 0;
     if (shouldSpoofArch)
@@ -951,7 +953,7 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     }
 
     if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgInput == FGInput::NvngxFG ||
-        ampereMfgActive)
+        ampereMfgActive || xeMfgActive)
     {
         if (configJson.contains("/vsync/supported"_json_pointer))
             configJson["vsync"]["supported"] = true; // disable eVSyncOffRequired
@@ -1189,12 +1191,58 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                 newOptions.mode = sl::DLSSGMode::eOn;
         }
 #endif
-        const auto result = o_slDLSSGSetOptions(viewport, newOptions);
+        if (state.activeFgOutput == FGOutput::XeFG)
+        {
+            const auto xeFailure = XeMfgLoader::LastFailure();
+            if (xeFailure == XeMfgLoader::Failure::RollbackFailed)
+            {
+                newOptions.mode = sl::DLSSGMode::eOff;
+            }
+            else if (xeFailure == XeMfgLoader::Failure::PatchFailed)
+            {
+                newOptions.numFramesToGenerate = 1;
+                if (newOptions.mode == sl::DLSSGMode::eDynamic)
+                    newOptions.mode = sl::DLSSGMode::eOn;
+            }
+        }
+        const auto result = (state.activeFgInput == FGInput::DLSSG || o_slDLSSGSetOptions == nullptr)
+                                ? sl::Result::eOk
+                                : o_slDLSSGSetOptions(viewport, newOptions);
         if (result == sl::Result::eOk)
         {
+            const auto previousMode = state.dlssgLastSetMode;
             state.dlssgLastSetMode = newOptions.mode;
             ReflexHooks::setDlssgFrameCount(newOptions.mode == sl::DLSSGMode::eOff ? 0
                                                                                    : newOptions.numFramesToGenerate);
+
+            if (state.activeFgOutput == FGOutput::XeFG)
+            {
+                static bool initialSyncDone = false;
+                const uint32_t targetCount =
+                    (newOptions.mode == sl::DLSSGMode::eOff) ? 0 : newOptions.numFramesToGenerate;
+                const bool modeChanged = (previousMode != newOptions.mode);
+                const bool countChanged = (state.dlssgDetectedInterpolationCount != static_cast<int>(targetCount));
+
+                if (!initialSyncDone || modeChanged || countChanged)
+                {
+                    initialSyncDone = true;
+                    if (state.currentFG != nullptr)
+                        state.currentFG->SetInterpolatedFrameCount(targetCount);
+
+                    state.dlssgDetectedInterpolationCount = static_cast<int>(targetCount);
+
+                    if (targetCount == 0)
+                    {
+                        LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is eOff, XeFG count set to 0 (passthrough)");
+                    }
+                    else
+                    {
+                        Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(targetCount);
+                        LOG_INFO("hkslDLSSGSetOptions: DLSSG mode is {}, numFramesToGenerate: {} ({}X FG)",
+                                 magic_enum::enum_name(newOptions.mode), targetCount, targetCount + 1);
+                    }
+                }
+            }
             // The runtime can accept native/safety options while individual UI
             // overrides remain unapplied. Acknowledge only a fully applied request.
             const bool requestedActive =
@@ -1263,6 +1311,10 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 #if defined(OPTISCALER_RTX40_MFG)
         state.dlssgMfgMax = static_cast<int>(MfgUnlock::EffectiveMax(std::max(0, state.dlssgMfgMax.value_or(0))));
 #endif
+        if (state.activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+        {
+            state.dlssgMfgMax = static_cast<int>(XeMfgLoader::EffectiveMax(std::max(0, state.dlssgMfgMax.value_or(0))));
+        }
 
         // Do not issue an extra GetState here: it consumes the runtime's
         // numFramesActuallyPresented delta. Capability is learned from the
@@ -1310,6 +1362,41 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
     MfgUnlock::TryApply();
 #endif
     const auto originalStructVersion = state.structVersion;
+
+    // When OptiScaler is routing DLSSG input (e.g. to XeFG), or when native Streamline DLSSG is absent,
+    // synthesize valid state directly instead of failing through unloaded/disabled native DLSSG context.
+    if (State::Instance().activeFgInput == FGInput::DLSSG || o_slDLSSGGetState == nullptr)
+    {
+        state.status = sl::DLSSGStatus::eOk;
+        state.estimatedVRAMUsageInBytes = static_cast<uint64_t>(300 * 1024) * 1024;
+        state.numFramesActuallyPresented = 1;
+
+        auto fg = State::Instance().currentFG;
+        if (fg != nullptr && fg->IsActive() && !fg->IsPaused())
+        {
+            state.numFramesActuallyPresented = fg->GetInterpolatedFrameCount() + 1;
+        }
+
+        if (originalStructVersion >= 2)
+        {
+            state.bIsVsyncSupportAvailable = sl::Boolean::eTrue;
+            if (State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+                state.numFramesToGenerateMax = XeMfgLoader::EffectiveMax(1);
+            else
+                state.numFramesToGenerateMax = 1;
+        }
+
+        if (originalStructVersion >= 4)
+        {
+            state.bIsDynamicMFGSupported = sl::Boolean::eTrue;
+        }
+
+        State::Instance().dlssgGameDMFGSupported = true;
+        State::Instance().dlssgMfgMax = state.numFramesToGenerateMax;
+
+        return sl::Result::eOk;
+    }
+
     if (originalStructVersion < 4)
     {
         sl::DLSSGState newState {};
@@ -1366,6 +1453,10 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
 #if defined(OPTISCALER_RTX40_MFG)
     optiState.dlssgMfgMax = static_cast<int>(MfgUnlock::EffectiveMax(optiState.dlssgMfgMax.value_or(0)));
 #endif
+    if (optiState.activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+    {
+        optiState.dlssgMfgMax = static_cast<int>(XeMfgLoader::EffectiveMax(optiState.dlssgMfgMax.value_or(0)));
+    }
 
     if (optiState.activeFgInput == FGInput::DLSSG)
     {
@@ -1392,7 +1483,12 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
 
         // Struct version 1 ends at 56 bytes, ahead of this field.
         if (originalStructVersion >= 2)
-            state.numFramesToGenerateMax = 1;
+        {
+            if (optiState.activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
+                state.numFramesToGenerateMax = XeMfgLoader::EffectiveMax(1);
+            else
+                state.numFramesToGenerateMax = 1;
+        }
 
         LOG_DEBUG("Status: {}, numFramesActuallyPresented: {}", magic_enum::enum_name(state.status),
                   state.numFramesActuallyPresented);
@@ -2042,7 +2138,8 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
                 }
 
                 const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-                if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive)
+                const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+                if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive)
                 {
                     if (o_slIsFeatureSupported != nullptr)
                         DetourAttach(&(PVOID&) o_slIsFeatureSupported, hkslIsFeatureSupported);
@@ -2222,7 +2319,8 @@ void StreamlineHooks::unhookDlssg()
 void StreamlineHooks::hookDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
 
@@ -2276,7 +2374,8 @@ void StreamlineHooks::unhookLocalDlssg()
 void StreamlineHooks::hookLocalDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
 
@@ -2448,7 +2547,8 @@ void StreamlineHooks::unhookCommon()
 void StreamlineHooks::hookCommon(HMODULE slCommon)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    if (State::Instance().externalFrameGeneration && !ampereMfgActive)
+    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
 

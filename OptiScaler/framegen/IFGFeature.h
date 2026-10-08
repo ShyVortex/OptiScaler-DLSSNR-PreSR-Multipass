@@ -69,6 +69,7 @@ class IFGFeature
 
     UINT64 _frameCount = 0;
     UINT64 _lastDispatchedFrame = 0;
+    UINT64 _actuallyDispatchedFrame = 0;
     UINT64 _lastFGFrame = 0;
     bool _waitingNewFrameData = false;
     int _framesToInterpolate = -1;
@@ -90,6 +91,8 @@ class IFGFeature
     IID streamlineRiid {};
 
     bool CheckForRealObject(std::string functionName, IUnknown* pObject, IUnknown** ppRealObject);
+    bool IsSlotReady(int index) const;
+    int ResolveDispatchSlot(UINT64& willDispatchFrame);
     int GetDispatchIndex(UINT64& willDispatchFrame);
     virtual void NewFrame() = 0;
 
@@ -100,6 +103,7 @@ class IFGFeature
     virtual const char* Name() = 0;
 
     virtual bool Present() = 0;
+    virtual void PostPresent() {}
     virtual void Activate() = 0;
     virtual void Deactivate() = 0;
     virtual void DestroyFGContext() = 0;
@@ -111,6 +115,8 @@ class IFGFeature
     int GetIndex();
     int GetIndexWillBeDispatched();
     UINT64 StartNewFrame();
+    void ConfirmDispatched(UINT64 frameId);
+    void ClearAllResourceReady();
 
     bool IsResourceReady(FG_ResourceType type, int index = -1);
 
@@ -132,6 +138,7 @@ class IFGFeature
     bool IsJitteredMVs();
     bool IsInvertedDepth();
     bool IsInfiniteDepth();
+    virtual bool IsPassthrough() const { return false; }
 
     void SetFrameCount(UINT64 frameId);
     void SetJitter(float x, float y, int index = -1);

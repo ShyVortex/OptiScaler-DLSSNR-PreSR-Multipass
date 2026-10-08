@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include <dlssnr/DlssNr.h>
 #include "FG_Hooks.h"
 #include <Config.h>
@@ -687,7 +687,7 @@ HRESULT FGHooks::hkResizeBuffers(IDXGISwapChain* This, UINT BufferCount, UINT Wi
                         }
                     }
 
-                    if (swapchainIndex != 0 && Config ::Instance()->FGModifySCIndex.value_or_default())
+                    if (swapchainIndex != 0 && Config::Instance()->FGModifySCIndex.value_or_default())
                     {
                         auto presents = desc.BufferCount - swapchainIndex;
 
@@ -923,7 +923,7 @@ HRESULT FGHooks::hkResizeBuffers1(IDXGISwapChain3* This, UINT BufferCount, UINT 
                         }
                     }
 
-                    if (swapchainIndex != 0 && Config ::Instance()->FGModifySCIndex.value_or_default())
+                    if (swapchainIndex != 0 && Config::Instance()->FGModifySCIndex.value_or_default())
                     {
                         auto presents = desc.BufferCount - swapchainIndex;
 
@@ -1194,7 +1194,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
 
     sl::FrameToken* localToken = nullptr;
     sl::Result tokenResult = sl::Result::eErrorReflexAPI;
-    if (willPresent && fg != nullptr && !fgFeatureActive)
+    if (willPresent && fg != nullptr && !fgFeatureActive && state.activeFgOutput == FGOutput::DLSSG)
         state.dlssgDetectedInterpolationCount = 0;
 
     if (willPresent && fgFeatureActive && state.activeFgOutput == FGOutput::DLSSG)
@@ -1213,6 +1213,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         }
     }
 
+    bool fgDispatched = false;
     if (willPresent && fgFeatureActive)
     {
         if (state.activeFgInput == FGInput::FSRFG)
@@ -1221,7 +1222,7 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
             FSR3FG::ffxPresentCallback();
 
         DlssNr::ApplyToFinishedPicture(This, state.currentCommandQueue);
-        fg->Present();
+        fgDispatched = fg->Present();
     }
     else if (willPresent && fg != nullptr)
     {
@@ -1263,10 +1264,23 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
 
         LOG_DEBUG("Final SyncInterval: {}", SyncInterval);
     }
+    else if (willPresent && fgFeatureActive && state.activeFgOutput == FGOutput::XeFG &&
+             config->XeMfgExtraPacing.value_or(false) && !IdentifyGpu::getPrimaryGpu().usesDxvk)
+    {
+        // On native Windows DXGI, unmetered presentation (SyncInterval=0 + ALLOW_TEARING)
+        // causes generated frames to clump or tear across scanouts, creating visual micro-stutter.
+        // Synchronizing presentation to VBlank (SyncInterval=1) ensures intermediate frames are
+        // held across refresh intervals, delivering genuine visual smoothness.
+        if (SyncInterval < 1)
+            SyncInterval = 1;
+
+        Flags &= ~DXGI_PRESENT_ALLOW_TEARING;
+        LOG_DEBUG("XeMFG ExtraPacing applied: SyncInterval={}, Flags={:X}", SyncInterval, Flags);
+    }
 
     // Used at wrapped_swapchain LocalPresent to determine is frame is interpolated or not
     if (willPresent)
-        state.fgPresentIsCalled = true;
+        state.fgPresentIsCalled = fgDispatched;
 
     HRESULT result;
     if (pPresentParameters == nullptr)
@@ -1282,6 +1296,11 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
     {
         if (result == DXGI_ERROR_DEVICE_REMOVED && state.currentD3D12Device != nullptr)
             Util::GetDeviceRemovedReason(state.currentD3D12Device);
+    }
+
+    if (willPresent && fgFeatureActive && fgDispatched)
+    {
+        fg->PostPresent();
     }
 
     if (tokenResult == sl::Result::eOk && localToken != nullptr && fgFeatureActive &&

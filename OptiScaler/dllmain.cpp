@@ -28,6 +28,7 @@
 #include <fsr4/FSR4ModelSelection.h>
 #include <framegen/dlssg/AmpereMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
+#include <framegen/xefg/XeMfgLoader.h>
 
 #include <hooks/Dxgi_Hooks.h>
 #include <hooks/D3D11_Hooks.h>
@@ -1929,6 +1930,18 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                      (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
+        const bool xeMfgUnlock = Config::Instance()->XeMfgUnlock.value_or_default();
+        if (xeMfgUnlock && !State::Instance().externalFrameGeneration)
+        {
+            auto* cfg = Config::Instance();
+            cfg->FGEnabled.set_volatile_value(true);
+            cfg->FGInput.set_volatile_value(FGInput::DLSSG);
+            cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
+            cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
+            LOG_INFO("XeMfgLoader: XeMFG unlock active, auto-configuring pipeline (FGInput=DLSSG, FGOutput=XeFG, "
+                     "FGEnabled=true)");
+        }
+
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
         State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
         State::Instance().activeFgNvngx = Config::Instance()->FGNvngxReplacement.value_or_default();
@@ -2230,6 +2243,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
     case DLL_PROCESS_DETACH:
         State::Instance().isShuttingDown = true;
+        XeMfgLoader::Shutdown();
         // ExitProcess has already stopped other threads. No DLL unloading, logging,
         // thread joins or GPU cleanup is safe here; the OS reclaims process resources.
         if (lpReserved != nullptr)

@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "IFGFeature.h"
 #include <Config.h>
 #include <low_latency/input/input_common.h>
@@ -37,11 +37,24 @@ UINT64 IFGFeature::StartNewFrame()
 {
     _frameCount++;
 
-    if (_lastDispatchedFrame == 0 || (_frameCount - _lastDispatchedFrame) > 2)
+    if (!IsActive() || IsPaused())
+    {
+        _lastDispatchedFrame = _frameCount;
+        _actuallyDispatchedFrame = _frameCount;
+    }
+    else if (_lastDispatchedFrame == 0)
+    {
+        _lastDispatchedFrame = _frameCount - 1;
+    }
+    else if (_frameCount > _lastDispatchedFrame && (_frameCount - _lastDispatchedFrame) > 2)
     {
         LOG_WARN("Frame count jumped too much! _frameCount: {}, _lastDispatchedFrame: {}", _frameCount,
                  _lastDispatchedFrame);
 
+        _lastDispatchedFrame = _frameCount - 1;
+    }
+    else if (_frameCount <= _lastDispatchedFrame)
+    {
         _lastDispatchedFrame = _frameCount - 1;
     }
 
@@ -132,32 +145,104 @@ bool IFGFeature::CheckForRealObject(std::string functionName, IUnknown* pObject,
     return false;
 }
 
-int IFGFeature::GetDispatchIndex(UINT64& willDispatchFrame)
+bool IFGFeature::IsSlotReady(int index) const
 {
-    LOG_DEBUG("_lastDispatchedFrame: {},  _frameCount: {}", _lastDispatchedFrame, _frameCount);
+    if (index < 0 || index >= BUFFER_COUNT)
+        return false;
 
-    // We are in same frame
-    if (_frameCount == _lastDispatchedFrame)
-        return -1;
+    auto itDepth = _resourceReady[index].find(FG_ResourceType::Depth);
+    if (itDepth == _resourceReady[index].end() || !itDepth->second)
+        return false;
 
-    willDispatchFrame = _lastDispatchedFrame + 1; // By default render next one
+    auto itVelocity = _resourceReady[index].find(FG_ResourceType::Velocity);
+    if (itVelocity == _resourceReady[index].end() || !itVelocity->second)
+        return false;
 
-    auto diff = _frameCount - _lastDispatchedFrame;
-    if (diff > Config::Instance()->FGAllowedFrameAhead.value_or_default() || diff < 0 || _lastDispatchedFrame == 0)
+    return true;
+}
+
+int IFGFeature::ResolveDispatchSlot(UINT64& willDispatchFrame)
+{
+    // Same frame already dispatched
+    if (_frameCount == _actuallyDispatchedFrame && _frameCount != 0)
     {
-        auto index = GetIndex();
+        willDispatchFrame = _actuallyDispatchedFrame;
+        return -1;
+    }
 
-        if (HasResource(FG_ResourceType::Depth, index) || HasResource(FG_ResourceType::Velocity, index) ||
-            HasResource(FG_ResourceType::UIColor, index) || HasResource(FG_ResourceType::HudlessColor, index))
+    // 1. Check if _lastDispatchedFrame is an undispatched frame with ready resources
+    // (e.g. unpause or activation where _lastDispatchedFrame was set by StartNewFrame before present)
+    if (_lastDispatchedFrame > _actuallyDispatchedFrame)
+    {
+        int slot0 = static_cast<int>(_lastDispatchedFrame % BUFFER_COUNT);
+        if (IsSlotReady(slot0))
         {
-            willDispatchFrame = _frameCount; // Set dispatch frame as latest one
+            willDispatchFrame = _lastDispatchedFrame;
+            return slot0;
         }
     }
 
-    _lastDispatchedFrame = willDispatchFrame;
-    _lastFGFrame = State::Instance().fgLastFrame;
+    // 2. Normal sequential candidate: _lastDispatchedFrame + 1
+    UINT64 cand1 = _lastDispatchedFrame + 1;
+    int slot1 = static_cast<int>(cand1 % BUFFER_COUNT);
+    if (IsSlotReady(slot1))
+    {
+        willDispatchFrame = cand1;
+        return slot1;
+    }
 
-    return (willDispatchFrame % BUFFER_COUNT);
+    // 3. If candidate 1 is not ready, check if latest frame (_frameCount) has ready resources
+    if (_frameCount > cand1)
+    {
+        int slotCur = static_cast<int>(_frameCount % BUFFER_COUNT);
+        if (IsSlotReady(slotCur))
+        {
+            willDispatchFrame = _frameCount;
+            return slotCur;
+        }
+
+        // Check intermediate candidate (_frameCount - 1)
+        UINT64 candPrev = _frameCount - 1;
+        if (candPrev > _lastDispatchedFrame)
+        {
+            int slotPrev = static_cast<int>(candPrev % BUFFER_COUNT);
+            if (IsSlotReady(slotPrev))
+            {
+                willDispatchFrame = candPrev;
+                return slotPrev;
+            }
+        }
+    }
+
+    // 4. Initial state fallback when _lastDispatchedFrame == 0: check if current frame slot has ready resources
+    if (_lastDispatchedFrame == 0 && _frameCount > 0)
+    {
+        int slotCur = static_cast<int>(_frameCount % BUFFER_COUNT);
+        if (IsSlotReady(slotCur))
+        {
+            willDispatchFrame = _frameCount;
+            return slotCur;
+        }
+    }
+
+    // No slot ready for generation
+    willDispatchFrame = 0;
+    return -1;
+}
+
+int IFGFeature::GetDispatchIndex(UINT64& willDispatchFrame)
+{
+    LOG_DEBUG("_lastDispatchedFrame: {}, _actuallyDispatchedFrame: {}, _frameCount: {}", _lastDispatchedFrame,
+              _actuallyDispatchedFrame, _frameCount);
+
+    int slot = ResolveDispatchSlot(willDispatchFrame);
+    if (slot >= 0)
+    {
+        _lastDispatchedFrame = willDispatchFrame;
+        _lastFGFrame = State::Instance().fgLastFrame;
+    }
+
+    return slot;
 }
 
 bool IFGFeature::IsActive() { return _isActive || _waitingNewFrameData; }
@@ -180,20 +265,21 @@ bool IFGFeature::IsInfiniteDepth() { return _constants.flags[FG_Flags::InfiniteD
 
 void IFGFeature::SetFrameCount(UINT64 frameId)
 {
-    // Only change frame count, if it's lower than current one
-    // Or higher than allowed frame ahead
-    // if (frameId < _frameCount || (frameId - _frameCount) >
-    // Config::Instance()->FGAllowedFrameAhead.value_or_default())
-    //{
-    //    LOG_DEBUG("Old: {}, New: {}", _frameCount, frameId);
-    //    _frameCount = frameId;
-    //}
-    // else if (frameId != _frameCount)
-    //{
-    //    LOG_TRACE("Prevented setting frame count! Old: {}, New: {}", _frameCount, frameId);
-    //}
-
-    _frameCount = frameId;
+    if (frameId > _frameCount)
+    {
+        _frameCount = frameId;
+    }
+    else if (_frameCount - frameId > 4)
+    {
+        LOG_DEBUG("Frame counter rewind detected. Old: {}, New: {}", _frameCount, frameId);
+        _frameCount = frameId;
+        _lastDispatchedFrame = (frameId > 0 ? frameId - 1 : 0);
+        _actuallyDispatchedFrame = (frameId > 0 ? frameId - 1 : 0);
+    }
+    else
+    {
+        LOG_TRACE("Preserving pipelined frameCount {}. Incoming marker: {}", _frameCount, frameId);
+    }
 }
 
 void IFGFeature::SetJitter(float x, float y, int index)
@@ -298,7 +384,26 @@ void IFGFeature::GetInterpolationPos(UINT& left, UINT& top, int index)
         top = 0;
 }
 
-void IFGFeature::ResetCounters() { _targetFrame = _frameCount; }
+void IFGFeature::ResetCounters()
+{
+    _targetFrame = _frameCount;
+    _lastDispatchedFrame = 0;
+    _actuallyDispatchedFrame = 0;
+    ClearAllResourceReady();
+}
+
+void IFGFeature::ConfirmDispatched(UINT64 frameId)
+{
+    _actuallyDispatchedFrame = frameId;
+    _lastDispatchedFrame = frameId;
+    _resourceReady[frameId % BUFFER_COUNT].clear();
+}
+
+void IFGFeature::ClearAllResourceReady()
+{
+    for (int i = 0; i < BUFFER_COUNT; i++)
+        _resourceReady[i].clear();
+}
 
 void IFGFeature::UpdateTarget()
 {

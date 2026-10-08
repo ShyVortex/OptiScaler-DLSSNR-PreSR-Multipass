@@ -346,6 +346,9 @@ void DLSSG_Dx12::Deactivate()
         StreamlineProxy::ReflexSetOptions()(reflexConst);
 
         _isActive = false;
+        _lastDispatchedFrame = 0;
+        _actuallyDispatchedFrame = 0;
+        ClearAllResourceReady();
     }
 }
 
@@ -612,6 +615,8 @@ bool DLSSG_Dx12::Dispatch()
     }
 
     LOG_DEBUG("Result: Ok");
+
+    ConfirmDispatched(willDispatchFrame);
 
     return true;
 }

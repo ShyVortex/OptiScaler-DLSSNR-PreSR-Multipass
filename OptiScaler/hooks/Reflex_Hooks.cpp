@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Reflex_Hooks.h"
 #include <Config.h>
 
@@ -111,33 +111,39 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
     // LOG_DEBUG("frameID: {}, markerType: {}", pSetLatencyMarkerParams->frameID,
     //           magic_enum::enum_name(pSetLatencyMarkerParams->markerType));
 
+    const bool isRtssMarker = (pSetLatencyMarkerParams->frameID >> 32) != 0;
+
     // Some games just stop sending any async markers when DLSSG is disabled, so a reset is needed
-    if (_lastAsyncMarkerFrameId + 10 < pSetLatencyMarkerParams->frameID)
+    if (!isRtssMarker && _lastAsyncMarkerFrameId + 10 < pSetLatencyMarkerParams->frameID)
     {
         _FgNumFramesToGenerate = 0;
     }
 
     // RTSS reflex markers have a frameid marker in the high bits
-    if (pSetLatencyMarkerParams->frameID >> 32)
+    if (isRtssMarker)
     {
         if (!State::Instance().rtssReflexInjection && State::Instance().activeFgOutput == FGOutput::XeFG)
         {
-            ImGuiToast notification { ImGuiToastType::Warning, 10000 };
-            notification.setTitle("RTSS + XeFG detected");
-            notification.setContent(
-                "RTSS Reflex Injection is known to cause issues.\nEspecially when using XeFG.\nPlease disable it.");
+            ImGuiToast notification { ImGuiToastType::Info, 10000 };
+            notification.setTitle("RTSS + XeFG Active");
+            notification.setContent("RTSS Reflex Injection detected.\nOptiScaler is filtering synthetic markers\nto "
+                                    "protect XeFG frame pacing.");
             ImGui::InsertNotification(notification);
         }
 
         State::Instance().rtssReflexInjection = true;
     }
 
-    // TODO: reflexFrameId gets constantly changed, up and down depending on the marker
-    State::Instance().reflexFrameId = pSetLatencyMarkerParams->frameID;
+    // Sanitize reflexFrameId: use 32-bit truncation if RTSS high bits are set
+    State::Instance().reflexFrameId =
+        isRtssMarker ? (pSetLatencyMarkerParams->frameID & 0xFFFFFFFF) : pSetLatencyMarkerParams->frameID;
 
     // if (pSetLatencyMarkerParams->markerType == PRESENT_END)
-    _lastFrameId[pSetLatencyMarkerParams->markerType] = pSetLatencyMarkerParams->frameID;
-    _lastDev[pSetLatencyMarkerParams->markerType] = pDev;
+    if (!isRtssMarker)
+    {
+        _lastFrameId[pSetLatencyMarkerParams->markerType] = pSetLatencyMarkerParams->frameID;
+        _lastDev[pSetLatencyMarkerParams->markerType] = pDev;
+    }
 
     static bool skip[20] = {};
 
@@ -215,14 +221,21 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
         {
             if (pSetLatencyMarkerParams->markerType == PRESENT_START && State::Instance().currentFG != nullptr)
             {
-                auto frameCount = State::Instance().currentFG->FrameCount();
-                if (pSetLatencyMarkerParams->frameID - frameCount > 1)
-                    LOG_WARN("FrameId Moved too much??? {} -> {}", frameCount, pSetLatencyMarkerParams->frameID);
+                if (!isRtssMarker)
+                {
+                    auto frameCount = State::Instance().currentFG->FrameCount();
+                    if (pSetLatencyMarkerParams->frameID - frameCount > 1)
+                        LOG_WARN("FrameId Moved too much??? {} -> {}", frameCount, pSetLatencyMarkerParams->frameID);
 
-                if (pSetLatencyMarkerParams->frameID != frameCount)
-                    State::Instance().currentFG->SetFrameCount(pSetLatencyMarkerParams->frameID);
+                    if (pSetLatencyMarkerParams->frameID != frameCount)
+                        State::Instance().currentFG->SetFrameCount(pSetLatencyMarkerParams->frameID);
 
-                State::Instance().reflexFrameId = pSetLatencyMarkerParams->frameID;
+                    State::Instance().reflexFrameId = pSetLatencyMarkerParams->frameID;
+                }
+                else
+                {
+                    LOG_TRACE("Ignoring RTSS synthetic marker {} for FG frame count", pSetLatencyMarkerParams->frameID);
+                }
             }
 
             sl::FrameToken* frameToken = nullptr;

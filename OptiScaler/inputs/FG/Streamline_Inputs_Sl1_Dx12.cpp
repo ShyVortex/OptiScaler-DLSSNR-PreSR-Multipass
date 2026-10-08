@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Streamline_Inputs_Sl1_Dx12.h"
 
 #include <Config.h>
@@ -139,6 +139,12 @@ bool Sl1_Inputs_Dx12::applyConstants(const sl1::Constants& values, uint32_t fram
     {
         fgOutput->Deactivate();
         fgOutput->UpdateTarget();
+        return true;
+    }
+    else if (State::Instance().activeFgInput == FGInput::DLSSG &&
+             (fgOutput->IsPassthrough() || State::Instance().dlssgLastSetMode == sl::DLSSGMode::eOff))
+    {
+        LOG_TRACE("SL1 DLSSG FG input in passthrough or off, skipping activation");
         return true;
     }
     else if (!fgOutput->IsActive() && !fgOutput->IsPaused() && !IsTrue(lastConstants.notRenderingGameFrames))
