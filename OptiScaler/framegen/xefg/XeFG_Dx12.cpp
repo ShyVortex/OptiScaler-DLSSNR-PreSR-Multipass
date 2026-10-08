@@ -333,8 +333,10 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
 
     switch (desc->BufferDesc.Scaling)
     {
+    // DXGI_SCALING_ASPECT_RATIO_STRETCH is only valid for CoreWindow/composition swapchains; on an HWND swapchain
+    // CreateSwapChainForHwnd rejects it with DXGI_ERROR_INVALID_CALL. Map centered to stretch for compatibility.
     case DXGI_MODE_SCALING_CENTERED:
-        scDesc.Scaling = DXGI_SCALING_ASPECT_RATIO_STRETCH;
+        scDesc.Scaling = DXGI_SCALING_STRETCH;
         break;
 
     case DXGI_MODE_SCALING_STRETCHED:

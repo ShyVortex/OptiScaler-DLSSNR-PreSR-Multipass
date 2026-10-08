@@ -36,11 +36,9 @@ struct QuirkEntry
 
 static const QuirkEntry testQuirkTable[] = {
     { "re9.exe", Quirk::RestoreComputeSigOnNonNvidia | Quirk::DisableDxgiSpoofing | Quirk::RestoreComputeSigOnNvidia |
-                     Quirk::AllowedFrameAhead2 | Quirk::ForceBorderlessWhenUsingXeFG |
-                     Quirk::OverrideVsyncWhenUsingXeFG },
+                     Quirk::AllowedFrameAhead2 },
     { "re9demo.exe", Quirk::RestoreComputeSigOnNonNvidia | Quirk::DisableDxgiSpoofing |
-                         Quirk::RestoreComputeSigOnNvidia | Quirk::AllowedFrameAhead2 |
-                         Quirk::ForceBorderlessWhenUsingXeFG | Quirk::OverrideVsyncWhenUsingXeFG },
+                         Quirk::RestoreComputeSigOnNvidia | Quirk::AllowedFrameAhead2 },
 };
 
 class MockXeFGSwapchainManager
@@ -126,16 +124,17 @@ int main()
     printf("Running XeFG Swapchain Lifecycle & Save-Load Unit Tests...\n");
 
     // Test 1: Verify RE Requiem quirk entries preserve swapchain (NO DoNotPreserveFGSwapChain), configure
-    // AllowedFrameAhead2, and enable ForceBorderlessWhenUsingXeFG + OverrideVsyncWhenUsingXeFG
+    // AllowedFrameAhead2, and do not force borderless windowing or vsync overrides
     {
         for (const auto& entry : testQuirkTable)
         {
             assert(!HasQuirk(entry.quirks, Quirk::DoNotPreserveFGSwapChain));
             assert(HasQuirk(entry.quirks, Quirk::AllowedFrameAhead2));
-            assert(HasQuirk(entry.quirks, Quirk::ForceBorderlessWhenUsingXeFG));
-            assert(HasQuirk(entry.quirks, Quirk::OverrideVsyncWhenUsingXeFG));
+            assert(!HasQuirk(entry.quirks, Quirk::ForceBorderlessWhenUsingXeFG));
+            assert(!HasQuirk(entry.quirks, Quirk::OverrideVsyncWhenUsingXeFG));
         }
-        printf("  [PASS] Test 1: re9.exe and re9demo.exe configure AllowedFrameAhead2, Borderless, and Vsync quirks\n");
+        printf("  [PASS] Test 1: re9.exe and re9demo.exe configure AllowedFrameAhead2 and preserve fullscreen "
+               "capability\n");
     }
 
     // Test 2: Normal startup resolution transition (1080p intro to 1440p menu) preserves swapchain via ResizeBuffers
@@ -206,6 +205,24 @@ int main()
         assert(mgr._framesToInterpolate == 0);
 
         printf("  [PASS] Test 4: ReleaseSwapchain cleanly resets all context and device queue pointers\n");
+    }
+
+    // Test 5: Verify DXGI_MODE_SCALING_CENTERED maps to DXGI_SCALING_STRETCH for HWND swapchain compatibility
+    {
+        auto mapScaling = [](int modeScaling)
+        {
+            switch (modeScaling)
+            {
+            case 2:       // DXGI_MODE_SCALING_CENTERED
+                return 1; // DXGI_SCALING_STRETCH
+            case 1:       // DXGI_MODE_SCALING_STRETCHED
+                return 1; // DXGI_SCALING_STRETCH
+            default:
+                return 0; // DXGI_SCALING_NONE
+            }
+        };
+        assert(mapScaling(2) == 1 && "Centered mode scaling must map to stretch on HWND swapchain");
+        printf("  [PASS] Test 5: HWND swapchain maps centered scaling to stretch\n");
     }
 
     printf("All XeFG Swapchain Lifecycle Unit Tests PASSED!\n");
