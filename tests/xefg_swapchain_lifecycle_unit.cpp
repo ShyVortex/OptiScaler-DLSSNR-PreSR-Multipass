@@ -13,7 +13,9 @@ enum class Quirk : uint32_t
     DoNotPreserveFGSwapChain = 1 << 1,
     RestoreComputeSigOnNonNvidia = 1 << 2,
     DisableDxgiSpoofing = 1 << 3,
-    RestoreComputeSigOnNvidia = 1 << 4
+    RestoreComputeSigOnNvidia = 1 << 4,
+    ForceBorderlessWhenUsingXeFG = 1 << 5,
+    OverrideVsyncWhenUsingXeFG = 1 << 6
 };
 
 inline Quirk operator|(Quirk a, Quirk b)
@@ -34,9 +36,11 @@ struct QuirkEntry
 
 static const QuirkEntry testQuirkTable[] = {
     { "re9.exe", Quirk::RestoreComputeSigOnNonNvidia | Quirk::DisableDxgiSpoofing | Quirk::RestoreComputeSigOnNvidia |
-                     Quirk::AllowedFrameAhead2 },
+                     Quirk::AllowedFrameAhead2 | Quirk::ForceBorderlessWhenUsingXeFG |
+                     Quirk::OverrideVsyncWhenUsingXeFG },
     { "re9demo.exe", Quirk::RestoreComputeSigOnNonNvidia | Quirk::DisableDxgiSpoofing |
-                         Quirk::RestoreComputeSigOnNvidia | Quirk::AllowedFrameAhead2 },
+                         Quirk::RestoreComputeSigOnNvidia | Quirk::AllowedFrameAhead2 |
+                         Quirk::ForceBorderlessWhenUsingXeFG | Quirk::OverrideVsyncWhenUsingXeFG },
 };
 
 class MockXeFGSwapchainManager
@@ -121,15 +125,17 @@ int main()
 {
     printf("Running XeFG Swapchain Lifecycle & Save-Load Unit Tests...\n");
 
-    // Test 1: Verify RE Requiem quirk entries preserve swapchain (NO DoNotPreserveFGSwapChain) and configure
-    // AllowedFrameAhead2
+    // Test 1: Verify RE Requiem quirk entries preserve swapchain (NO DoNotPreserveFGSwapChain), configure
+    // AllowedFrameAhead2, and enable ForceBorderlessWhenUsingXeFG + OverrideVsyncWhenUsingXeFG
     {
         for (const auto& entry : testQuirkTable)
         {
             assert(!HasQuirk(entry.quirks, Quirk::DoNotPreserveFGSwapChain));
             assert(HasQuirk(entry.quirks, Quirk::AllowedFrameAhead2));
+            assert(HasQuirk(entry.quirks, Quirk::ForceBorderlessWhenUsingXeFG));
+            assert(HasQuirk(entry.quirks, Quirk::OverrideVsyncWhenUsingXeFG));
         }
-        printf("  [PASS] Test 1: re9.exe and re9demo.exe preserve swapchain and configure AllowedFrameAhead2\n");
+        printf("  [PASS] Test 1: re9.exe and re9demo.exe configure AllowedFrameAhead2, Borderless, and Vsync quirks\n");
     }
 
     // Test 2: Normal startup resolution transition (1080p intro to 1440p menu) preserves swapchain via ResizeBuffers

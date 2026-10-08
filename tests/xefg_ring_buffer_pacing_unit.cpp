@@ -59,6 +59,23 @@ class MockFGFeature
         }
     }
 
+    uint32_t _driverTagCount = 0;
+
+    void SetResource(int type, int slot)
+    {
+        if (slot >= 0 && slot < BUFFER_COUNT)
+        {
+            if (type == 0)
+                _depthReady[slot] = true;
+            else if (type == 1)
+                _velocityReady[slot] = true;
+
+            // In passthrough mode, driver tagging is bypassed
+            if (!_passthrough)
+                _driverTagCount++;
+        }
+    }
+
     uint64_t StartNewFrame()
     {
         _frameCount++;
@@ -434,6 +451,12 @@ int main()
 
         // While in passthrough, native frames pass through without tearing down queue
         fg.StartNewFrame(); // frame 2
+        int pSlot = fg.GetIndexWillBeDispatched();
+        uint32_t prevDriverTags = fg._driverTagCount;
+        fg.SetResource(0, pSlot);
+        fg.SetResource(1, pSlot);
+        // Driver tag count MUST NOT increase while in passthrough mode!
+        assert(fg._driverTagCount == prevDriverTags);
         fg._lastDispatchedFrame = fg._frameCount;
         fg._actuallyDispatchedFrame = fg._frameCount;
 
@@ -446,10 +469,12 @@ int main()
         // First resumed frame arrives
         fg.StartNewFrame(); // frame 3
         int dSlot = fg.GetIndexWillBeDispatched();
-        fg._depthReady[dSlot] = true;
+        fg.SetResource(0, dSlot);
         int vSlot = fg.GetIndexWillBeDispatched();
-        fg._velocityReady[vSlot] = true;
+        fg.SetResource(1, vSlot);
         assert(dSlot == vSlot); // No slot-split
+        // Driver tag count MUST increase now that passthrough is disabled!
+        assert(fg._driverTagCount == prevDriverTags + 2);
 
         idx = fg.GetDispatchIndex(df);
         assert(idx == dSlot && df == 3);
@@ -462,7 +487,7 @@ int main()
         fg.ConfirmDispatched(df);
         assert(!fg.IsSlotReady(dSlot));
 
-        printf("  [PASS] Test 8: Warm passthrough preserves queue state across count 0 -> N unpause\n");
+        printf("  [PASS] Test 8: Warm passthrough preserves queue state & sanitizes driver tags across unpause\n");
     }
 
     printf("All XeFG Ring Buffer & Motion Vector Pacing Unit Tests PASSED!\n");
