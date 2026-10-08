@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 
 #include "XeMfgLoader.h"
+#include "XeFGPacing.h"
 
 #include <Config.h>
 #include <Logger.h>
@@ -276,10 +277,33 @@ bool ApplyToMemory(uint8_t* baseAddress, size_t imageSize, unsigned int maxFrame
     }
 
     outStatus.Patched = (outStatus.PatchesApplied == 5);
-    outStatus.PacingDetours = 0;
-    outStatus.PacingInstalled = outStatus.Patched;
-    outStatus.VerifiedPacing = outStatus.Patched;
     g_appliedRecords = patches;
+
+    if (outStatus.Patched && enablePacing)
+    {
+        if (XeFGPacing::Install(baseAddress))
+        {
+            outStatus.PacingDetours = XeFGPacing::InstalledDetourCount();
+            outStatus.PacingInstalled = true;
+            outStatus.VerifiedPacing = true;
+            LOG_INFO("XeMFG unlock: native presentation pacing detours installed ({} thunks hooked)",
+                     outStatus.PacingDetours);
+        }
+        else
+        {
+            outStatus.PacingDetours = 0;
+            outStatus.PacingInstalled = false;
+            outStatus.VerifiedPacing = false;
+            LOG_WARN("XeMFG unlock: XeFGPacing::Install failed or was disabled");
+        }
+    }
+    else
+    {
+        outStatus.PacingDetours = 0;
+        outStatus.PacingInstalled = false;
+        outStatus.VerifiedPacing = false;
+    }
+
     return outStatus.Patched;
 }
 
@@ -386,17 +410,16 @@ void TryApply(HMODULE module)
     }
 
     unsigned int targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
+    bool enablePacing = Config::Instance()->XeMfgExtraPacing.value_or(true);
 
-    bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, false, g_status);
+    bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, enablePacing, g_status);
     if (result)
     {
         g_applied = true;
-        g_status.PacingInstalled = true;
-        g_status.PacingDetours = 0;
-        g_status.VerifiedPacing = true;
         LOG_INFO("XeMFG unlock: successfully unlocked multi-frame generation up to {}X (ceiling: {})",
                  g_status.ConfiguredCeiling + 1, g_status.ConfiguredCeiling);
-        LOG_INFO("XeMFG unlock: native provider presentation deadline pacing verified at 0x224b30");
+        LOG_INFO("XeMFG unlock: native provider presentation deadline pacing status: detours={}, verified={}",
+                 g_status.PacingDetours, g_status.VerifiedPacing);
     }
     else
     {
@@ -409,6 +432,8 @@ void ResetPacingContext() {}
 void Shutdown()
 {
     std::scoped_lock lock(g_mutex);
+
+    XeFGPacing::Uninstall();
 
     if (!g_appliedRecords.empty())
     {

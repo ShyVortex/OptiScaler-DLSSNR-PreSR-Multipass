@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "XeFG_Dx12.h"
 #include "XeMfgLoader.h"
+#include "XeFGPacing.h"
 #include <hudfix/Hudfix_Dx12.h>
 #include <menu/menu_overlay_dx.h>
 #include <resource_tracking/ResTrack_dx12.h>
@@ -947,10 +948,18 @@ bool XeFG_Dx12::Dispatch()
 
     _needResetHistory = false;
 
+    auto frameRenderTime = XeFGPacing::RenderTimeMs();
+
+    if (!(frameRenderTime > 0.0))
+        frameRenderTime = _ftDelta[fIndex];
+
+    if (!(frameRenderTime > 0.0))
+        frameRenderTime = state.lastFGFrameTime;
+
     switch (Config::Instance()->FTInput.value_or_default())
     {
     case FrameTimeSource::Input:
-        constData.frameRenderTime = (float) _ftDelta[fIndex];
+        constData.frameRenderTime = static_cast<float>(frameRenderTime);
         break;
 
     case FrameTimeSource::Opti:
@@ -961,6 +970,8 @@ bool XeFG_Dx12::Dispatch()
         constData.frameRenderTime = 0.0f;
         break;
     }
+
+    XeFGPacing::NoteFedFrameTime(constData.frameRenderTime);
 
     LOG_DEBUG("Reset: {}, Opti FT: {}, Source FT: {}, Set FT: {}, Opti Id: {}, Reflex Id: {}", _reset[fIndex],
               constData.frameRenderTime, _ftDelta[fIndex], constData.frameRenderTime, _frameCount,

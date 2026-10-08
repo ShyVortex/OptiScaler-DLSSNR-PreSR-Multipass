@@ -503,6 +503,9 @@
     <ClInclude Include="framegen\xefg\XeMfgLoader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="framegen\xefg\XeFGPacing.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\Ntdll_Hooks.h">
       <Filter>Header Files</Filter>
     </ClInclude>

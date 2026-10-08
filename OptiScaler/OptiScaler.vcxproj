@@ -482,6 +482,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="inputs\FG\DlssgParameterSanitizer.h" />
     <ClInclude Include="framegen\xefg\XeFG_Dx12.h" />
     <ClInclude Include="framegen\xefg\XeMfgLoader.h" />
+    <ClInclude Include="framegen\xefg\XeFGPacing.h" />
     <ClInclude Include="hooks\Advapi32_Hooks.h" />
     <ClInclude Include="hooks\Crypt32_Hooks.h" />
     <ClInclude Include="hooks\Gdi32_Hooks.h" />
