@@ -1703,19 +1703,27 @@ bool XeFG_Dx12::SetResource(Dx12Resource* inputResource)
         if (type != FG_ResourceType::UIColor ||
             (XeFGProxy::SetUiCompositionState() != nullptr || Config::Instance()->FGDrawUIOverFG.value_or_default()))
         {
-            auto frameId = static_cast<uint32_t>(_frameCount - indexDiff);
-            auto result =
-                XeFGProxy::D3D12TagFrameResource()(_swapChainContext, fResource->cmdList, frameId, &resourceParam);
-            LOG_DEBUG("D3D12TagFrameResource, frameId: {}, type: {} result: {} ({})", frameId,
-                      magic_enum::enum_name(type), magic_enum::enum_name(result), (int32_t) result);
-
-            if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+            if (!_passthrough)
             {
-                State::Instance().fgChanged = true;
-                UpdateTarget();
-                Deactivate();
+                auto frameId = static_cast<uint32_t>(_frameCount - indexDiff);
+                auto result =
+                    XeFGProxy::D3D12TagFrameResource()(_swapChainContext, fResource->cmdList, frameId, &resourceParam);
+                LOG_DEBUG("D3D12TagFrameResource, frameId: {}, type: {} result: {} ({})", frameId,
+                          magic_enum::enum_name(type), magic_enum::enum_name(result), (int32_t) result);
 
-                return false;
+                if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+                {
+                    State::Instance().fgChanged = true;
+                    UpdateTarget();
+                    Deactivate();
+
+                    return false;
+                }
+            }
+            else
+            {
+                LOG_DEBUG("XeFG in passthrough mode, skipping D3D12TagFrameResource for type: {}",
+                          magic_enum::enum_name(type));
             }
         }
 
