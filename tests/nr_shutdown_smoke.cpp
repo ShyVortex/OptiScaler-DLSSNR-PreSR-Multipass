@@ -101,6 +101,15 @@ struct NrState
     std::recursive_mutex mutex;
     struct Late
     {
+        struct Slot
+        {
+            struct Commands
+            {
+                void* Get() const { return nullptr; }
+                explicit operator bool() const { return false; }
+            } commands;
+        };
+        std::vector<Slot> slots;
         void Cancel() {}
     } late;
 };
@@ -114,6 +123,7 @@ struct DlssNr_Dx12
         ++destroyedNr;
     }
     static void Retire(std::unique_ptr<DlssNr_Dx12>);
+    void ResetFinishedCommands(void*) {}
 };
 std::recursive_mutex nrOwnersMutex;
 DlssNr_Dx12* activeNrOwner = nullptr;

@@ -78,7 +78,8 @@ struct Config
 };
 enum class ImGuiToastType
 {
-    Warning
+    Warning,
+    Info
 };
 struct ImGuiToast
 {
