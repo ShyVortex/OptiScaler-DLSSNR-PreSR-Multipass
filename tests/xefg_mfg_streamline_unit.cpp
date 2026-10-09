@@ -24,6 +24,12 @@ enum class DLSSGMode
     eDynamic = 3
 };
 
+enum class Boolean : uint32_t
+{
+    eFalse = 0,
+    eTrue = 1
+};
+
 struct DLSSGOptions
 {
     uint32_t structVersion = 1;
@@ -35,6 +41,7 @@ struct DLSSGState
 {
     uint32_t structVersion = 1;
     uint32_t numFramesToGenerateMax = 1;
+    Boolean bIsDynamicMFGSupported = Boolean::eFalse;
 };
 } // namespace sl
 
@@ -201,10 +208,12 @@ sl::Result SimulateStreamlineGetState(MockState& state, sl::DLSSGState& outState
         MockXeMfgLoader::LastStatus().Applied && !MockXeMfgLoader::LastFailure())
     {
         outState.numFramesToGenerateMax = MockXeMfgLoader::EffectiveMax(1);
+        outState.bIsDynamicMFGSupported = sl::Boolean::eTrue;
     }
     else
     {
         outState.numFramesToGenerateMax = 1;
+        outState.bIsDynamicMFGSupported = sl::Boolean::eFalse;
     }
     return sl::Result::eOk;
 }
@@ -465,6 +474,50 @@ int main()
         assert(gateXeFG.setInterpolatedCountCalls == 2 && "Redundant frames must be completely deduplicated");
 
         printf("  [PASS] Test 7: Streamline SetOptions transition gating and state deduplication.\n");
+    }
+
+    // Test 8: Dynamic Multi-Frame Generation (DMFG) Advertising & Clean Swapchain Deactivation on eOff
+    {
+        ResetStreamlineSetOptionsState();
+        MockState dmfgState;
+        MockConfig dmfgConfig;
+        MockXeFG_Dx12 dmfgXeFG(true); // dlssgInput = true
+
+        MockXeMfgLoader::Enabled = true;
+        MockXeMfgLoader::Status.Applied = true;
+        MockXeMfgLoader::LastFailureFlag = false;
+        MockXeMfgLoader::MaxFrames = 4; // 5X FG
+
+        // 1. GetState must advertise Dynamic MFG support and 4 max frames
+        sl::DLSSGState slState {};
+        slState.structVersion = 4;
+        SimulateStreamlineGetState(dmfgState, slState);
+        assert(slState.numFramesToGenerateMax == 4);
+        assert(slState.bIsDynamicMFGSupported == sl::Boolean::eTrue && "XeMFG must advertise DMFG support to game");
+
+        // 2. SetOptions eOff must cleanly disable swapchain in hardware
+        sl::DLSSGOptions offOpt;
+        offOpt.mode = sl::DLSSGMode::eOff;
+        offOpt.numFramesToGenerate = 0;
+        SimulateStreamlineSetOptions(dmfgState, dmfgConfig, dmfgXeFG, offOpt);
+
+        assert(dmfgXeFG.IsPassthrough());
+        assert(!dmfgXeFG.IsActive());
+        assert(!MockXeFGProxy::Enabled && "Hardware proxy must be SetEnabled(false) on eOff to prevent -12 errors");
+
+        // 3. SetOptions eOn with 3 generated frames re-enables hardware proxy cleanly
+        sl::DLSSGOptions onOpt;
+        onOpt.mode = sl::DLSSGMode::eOn;
+        onOpt.numFramesToGenerate = 3;
+        SimulateStreamlineSetOptions(dmfgState, dmfgConfig, dmfgXeFG, onOpt);
+
+        assert(!dmfgXeFG.IsPassthrough());
+        assert(dmfgXeFG.IsActive());
+        assert(MockXeFGProxy::Enabled && "Hardware proxy must be SetEnabled(true) on eOn");
+        assert(dmfgXeFG.GetInterpolatedFrameCount() == 3);
+
+        printf("  [PASS] Test 8: Dynamic Multi-Frame Generation (DMFG) advertising & clean swapchain deactivation on "
+               "eOff.\n");
     }
 
     printf("[+] All XeFG MFG & Streamline unit tests PASSED successfully!\n");
