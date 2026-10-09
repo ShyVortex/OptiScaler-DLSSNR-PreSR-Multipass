@@ -67,11 +67,21 @@ enum class API
 };
 struct FakeFG
 {
+    bool acceptsCount = true;
+    unsigned count = 1;
+    unsigned setCalls = 0;
     bool IsActive() const { return false; }
     bool IsPaused() const { return false; }
     bool GetDMFGSupport() const { return false; }
-    unsigned GetInterpolatedFrameCount() const { return 0; }
-    bool SetInterpolatedFrameCount(unsigned) { return true; }
+    unsigned GetInterpolatedFrameCount() const { return count; }
+    bool SetInterpolatedFrameCount(unsigned next)
+    {
+        ++setCalls;
+        if (!acceptsCount)
+            return false;
+        count = next;
+        return true;
+    }
 };
 struct State
 {
@@ -488,6 +498,46 @@ int main()
            "Default target must preserve the game's existing Dynamic target");
     options.mode = sl::DLSSGMode::eOn;
     options.dynamicTargetFrameRate = 0.0f;
+
+    // A rejecting backend is the controlled external boundary; all option
+    // acknowledgement, mode, count and Reflex logic here is production code.
+    Reset();
+    FakeFG xeBackend;
+    xeBackend.acceptsCount = false;
+    xeBackend.count = 3;
+    State::Instance().activeFgInput = FGInput::DLSSG;
+    State::Instance().activeFgOutput = FGOutput::XeFG;
+    State::Instance().currentFG = &xeBackend;
+    State::Instance().dlssgLastSetMode = sl::DLSSGMode::eOn;
+    State::Instance().dlssgDetectedInterpolationCount = 3;
+    ReflexHooks::count = 3;
+    Config::Instance()->FGDLSSGOverrideInterpolationCount = 0;
+    StreamlineHooks::updateDlssgOptions();
+    Expect(StreamlineHooks::hkslDLSSGSetOptions(sl::ViewportHandle(0), options) == sl::Result::eErrorInvalidState,
+           "a rejected XeFG Off must propagate backend failure");
+    Expect(State::Instance().dlssgLastSetMode == sl::DLSSGMode::eOn &&
+               State::Instance().dlssgDetectedInterpolationCount == 3 && ReflexHooks::count == 3,
+           "rejected XeFG Off must retain accepted mode/count/Reflex pacing");
+    Expect(StreamlineHooks::dlssgOptionsState.Pending(), "rejected XeFG Off intent must remain pending");
+    xeBackend.acceptsCount = true;
+    Expect(StreamlineHooks::hkslDLSSGSetOptions(sl::ViewportHandle(0), options) == sl::Result::eOk,
+           "unchanged XeFG Off must be retryable after backend rejection");
+    Expect(State::Instance().dlssgLastSetMode == sl::DLSSGMode::eOff &&
+               State::Instance().dlssgDetectedInterpolationCount == 0 && ReflexHooks::count == 0 &&
+               !StreamlineHooks::dlssgOptionsState.Pending(),
+           "successful XeFG retry must commit only the accepted Off transition");
+    Expect(xeBackend.setCalls == 2, "failed XeFG application must not suppress the provider retry");
+
+    Reset();
+    XeMfgLoader::enabled = true;
+    XeMfgLoader::maximum = 3;
+    State::Instance().activeFgInput = FGInput::DLSSG;
+    State::Instance().activeFgOutput = FGOutput::XeFG;
+    sl::DLSSGState xeState {};
+    StreamlineHooks::hkslDLSSGGetState(sl::ViewportHandle(0), xeState, nullptr);
+    Expect(xeState.numFramesToGenerateMax == 3 && xeState.bIsDynamicMFGSupported == sl::Boolean::eTrue &&
+               State::Instance().dlssgGameDMFGSupported,
+           "XeMFG emulation must preserve Dynamic support despite a native false capability flag");
 
     SYSTEM_INFO info {};
     GetSystemInfo(&info);

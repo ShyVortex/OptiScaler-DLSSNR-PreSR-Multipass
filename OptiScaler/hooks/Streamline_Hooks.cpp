@@ -1219,10 +1219,6 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
         if (result == sl::Result::eOk)
         {
             const auto previousMode = state.dlssgLastSetMode;
-            state.dlssgLastSetMode = newOptions.mode;
-            ReflexHooks::setDlssgFrameCount(newOptions.mode == sl::DLSSGMode::eOff ? 0
-                                                                                   : newOptions.numFramesToGenerate);
-
             if (state.activeFgOutput == FGOutput::XeFG)
             {
                 static bool initialSyncDone = false;
@@ -1233,9 +1229,13 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
 
                 if (!initialSyncDone || modeChanged || countChanged)
                 {
+                    if (state.currentFG != nullptr && !state.currentFG->SetInterpolatedFrameCount(targetCount))
+                    {
+                        LOG_WARN("XeFG options rejected: mode {}, generated {}", magic_enum::enum_name(newOptions.mode),
+                                 targetCount);
+                        return sl::Result::eErrorInvalidState;
+                    }
                     initialSyncDone = true;
-                    if (state.currentFG != nullptr)
-                        state.currentFG->SetInterpolatedFrameCount(targetCount);
 
                     state.dlssgDetectedInterpolationCount = static_cast<int>(targetCount);
 
@@ -1251,6 +1251,9 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                     }
                 }
             }
+            state.dlssgLastSetMode = newOptions.mode;
+            ReflexHooks::setDlssgFrameCount(newOptions.mode == sl::DLSSGMode::eOff ? 0
+                                                                                   : newOptions.numFramesToGenerate);
             // The runtime can accept native/safety options while individual UI
             // overrides remain unapplied. Acknowledge only a fully applied request.
             const bool requestedActive =
