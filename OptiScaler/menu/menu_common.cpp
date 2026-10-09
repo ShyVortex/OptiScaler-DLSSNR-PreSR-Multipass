@@ -3800,13 +3800,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "If interpolation has failed, the screen will turn black.");
 
             bool extraPacing = config->XeMfgExtraPacing.value_or_default();
-            if (ImGui::Checkbox("Provider Thunk Pacing (Extra Pacing)##xemfg", &extraPacing))
+            if (ImGui::Checkbox("Provider / VBlank Pacing (Extra Pacing)##xemfg", &extraPacing))
             {
                 config->XeMfgExtraPacing = extraPacing;
             }
             ShowHelpMarker("Installs the custom provider scheduler/deadline presentation hooks.\n"
+                           "Native non-DXVK XeFG presents also request VBlank pacing (no tearing).\n"
+                           "An explicit VSync override takes precedence.\n"
                            "OFF (Default) preserves native XeSS-FG pacing.\n"
-                           "Save Settings and restart after changing. This does not force VSync.");
+                           "Save Settings and restart to change provider hooks; DXGI pacing follows the setting.");
         }
 
         ImGui::Unindent();
