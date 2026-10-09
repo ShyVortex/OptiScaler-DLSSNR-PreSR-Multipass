@@ -318,13 +318,19 @@ static sl::Result dummy_slDLSSGGetState(const sl::ViewportHandle& viewport, sl::
     state.numFramesActuallyPresented = 1; // TODO: can do better
     if (state.structVersion >= 2)
     {
-        state.numFramesToGenerateMax = 1;
+        const unsigned int maximum =
+            State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession()
+                ? XeMfgLoader::EffectiveMax(1)
+                : 1;
+        state.numFramesToGenerateMax = maximum;
         state.bIsVsyncSupportAvailable = sl::Boolean::eTrue;
     }
     if (state.structVersion >= 4)
     {
-        const bool dynamicMfg = Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() ||
-                                Config::Instance()->FGDLSSGForceDMFG.value_or_default();
+        const bool dynamicMfg =
+            Config::Instance()->FGDLSSGOverrideForceDMFG.value_or_default() ||
+            Config::Instance()->FGDLSSGForceDMFG.value_or_default() ||
+            (State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession());
         if (dynamicMfg)
             state.bIsDynamicMFGSupported = sl::Boolean::eTrue;
     }
@@ -1390,7 +1396,9 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
             state.numFramesToGenerateMax = maximum;
         }
 
-        const bool dynamicSupported = fg != nullptr && fg->GetDMFGSupport();
+        const bool dynamicSupported =
+            (fg != nullptr && fg->GetDMFGSupport()) ||
+            (State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession());
         if (originalStructVersion >= 4)
         {
             state.bIsDynamicMFGSupported = dynamicSupported ? sl::Boolean::eTrue : sl::Boolean::eFalse;

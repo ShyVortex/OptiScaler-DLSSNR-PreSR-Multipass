@@ -1079,7 +1079,15 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
         _framesToInterpolate = 0;
         _needResetHistory = true;
 
-        LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0)");
+        if (_swapChainContext != nullptr && XeFGProxy::SetEnabled() != nullptr)
+        {
+            XeFGProxy::SetEnabled()(_swapChainContext, false);
+            _isActive = false;
+        }
+
+        ClearAllResourceReady();
+
+        LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0, enabled=false)");
         return true;
     }
 
