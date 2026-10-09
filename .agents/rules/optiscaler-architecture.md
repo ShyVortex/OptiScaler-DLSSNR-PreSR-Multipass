@@ -147,19 +147,28 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - 5 transactional binary patches in `libxess_fg.dll` (`U1/frame-count-fallback`, `U2/model-downgrade`, `U3/default-ceiling`, `U4/override-clamp`, `U5/reported-maximum`) unlocking up to 6X Multi-Frame Generation across all GPU vendors.
        - Presentation pacing verification (`0x224cf0`, `0x21ee30`, `0x224b30`).
        - Post-attach initialization hook in `OptiScaler/dllmain.cpp` (`XeMfgLoader::TryApply()`).
+       - **Mandatory Native Thunk Pacing Engine (`XeFGPacing.h`)**:
+         - `XeFGPacing::Install` must run unconditionally whenever XeMFG is patched (`outStatus.Patched == true`).
+         - Never gate native thunk pacing behind optional DXGI `ExtraPacing` or config switches; without `XeFGPacing`, `libxess_fg.dll` dumps intermediate generated frames in < 1 ms unmetered bursts and collapses `frameRenderTime` to 0.0f, ruining visual smoothness.
+         - Decoupled frame render time (`XeFGPacing::RenderTimeMs()`) must feed valid delta time to Intel in `XeFG_Dx12::Dispatch()`.
+       - **Dynamic In-Memory Ceiling Adaptation**:
+         - `XeMfgLoader::SetMaxGeneratedFrames` must support live in-memory byte rewriting of `U3`, `U4`, and `U5` with `VirtualProtect` and `FlushInstructionCache`. Never make the ceiling immutable for the session or lock out the menu slider.
+         - `EnabledForSession()` must evaluate dynamically; never latch it with `static const bool`.
      - **Configuration Backend & Defaults**:
-       - `Config.h`: `XeMfgUnlock` (defaults to `false` when unset / `auto`), `XeMfgMaxFrames` (defaults to 3 / 4X FG), `XeMfgExtraPacing` (defaults to `true`).
+       - `Config.h`: `XeMfgUnlock` (defaults to `false` when unset / `auto`), `XeMfgMaxFrames` (defaults to 3 / 4X FG), `XeMfgExtraPacing` (defaults to `false`, controlling only the DXGI swapchain VBlank lock in `FG_Hooks.cpp`).
        - `Config.cpp`: Parsing and saving `UnlockMFG`, `MaxInterpolatedFrames`, and `ExtraPacing` under `[XeMFG]`.
-       - `OptiScaler.ini`: `[XeMFG]` section with `UnlockMFG=auto` (resolves to `false`), `MaxInterpolatedFrames=3`, `ExtraPacing=true`.
-     - **Pipeline Auto-Configuration (`OptiScaler/dllmain.cpp`)**:
+       - `OptiScaler.ini`: `[XeMFG]` section with `UnlockMFG=auto` (resolves to `false`), `MaxInterpolatedFrames=3`, `ExtraPacing=false`.
+     - **Pipeline Auto-Configuration & Swapchain Lifecycle (`OptiScaler/dllmain.cpp`, `Streamline_Hooks.cpp`)**:
        - When `XeMfgUnlock` is enabled and `!externalFrameGeneration`:
          `FGEnabled = true`, `FGInput = FGInput::DLSSG`, `FGOutput = FGOutput::XeFG`, and `FGNvngxReplacement = None`.
+       - When Streamline receives `DLSSGMode::eOff`, cleanly set `XeFGProxy::SetEnabled(false)` on the swapchain context so Intel does not expect motion vectors or depth buffers while FG is disabled, preventing `-12` mismatch storms. Re-enable upon transitioning back to `eOn`.
      - **Streamline & NGX Capability Unlocking**:
        - `OptiScaler/proxies/NVNGX_Proxy.h`: Interception of NGX Feature 11 (`FrameGeneration`) across DX12, DX11, and Vulkan to report `Supported` with `MinHWArchitecture = 0`.
-       - `OptiScaler/hooks/Streamline_Hooks.cpp`: Interposer hook attachment (`hkslIsFeatureSupported`, `hkslIsFeatureLoaded`, etc.), architecture spoofing (`shouldSpoofArch`), synthetic DLSSG state advertising (`hkslDLSSGGetState` with `EffectiveMax`), and multiplier routing (`hkslDLSSGSetOptions` -> `XeFG`).
+       - `OptiScaler/hooks/Streamline_Hooks.cpp`: Interposer hook attachment (`hkslIsFeatureSupported`, `hkslIsFeatureLoaded`, etc.), architecture spoofing (`shouldSpoofArch`), synthetic DLSSG state advertising (`hkslDLSSGGetState` with `EffectiveMax`), dynamic MFG support (`bIsDynamicMFGSupported = sl::Boolean::eTrue`), and multiplier routing (`hkslDLSSGSetOptions` -> `XeFG`).
        - `OptiScaler/NVNGX_Parameter.cpp`: Advertising `FrameGeneration.Available = 1`, `DLSSG.Available = 1`, and `DLSSG.MultiFrameCountMax = XeMfgLoader::EffectiveMax(1)`.
      - **In-Game Menu UI (`OptiScaler/menu/menu_common.cpp`)**:
        - Dedicated `Intel Xe Multi-Frame Generation (XeMFG)` subsection with toggle, multiplier slider, burst pacing checkbox, diagnostic badges (`Patches: active (5/5)`), and live multiplier synchronization (`In-Game Multiplier: %dX (Active)`).
+       - Live slider adjustments must call `XeMfgLoader::SetMaxGeneratedFrames(maxFrames)` directly.
        - Strict mutual exclusion enforcement between Ada MFG, Ampere SM86 MFG, and XeMFG across config and menu toggles.
      - **Associated Automated Unit Tests**:
        - `tests/xemfg_loader_unit.cpp`
