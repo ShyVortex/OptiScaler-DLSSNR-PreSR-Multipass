@@ -87,6 +87,12 @@ namespace DlssNr
 void ClearStatus(void*) {}
 bool Shutdown();
 } // namespace DlssNr
+// This is the NR shutdown fixture, not a XeMFG lifetime test. Keep the
+// external Xe cleanup boundary stubbed; it must be reviewed separately.
+namespace XeMfgLoader
+{
+void Shutdown() {}
+} // namespace XeMfgLoader
 struct DLSSFeature
 {
     static void Shutdown() {}
