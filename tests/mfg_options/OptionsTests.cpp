@@ -69,6 +69,7 @@ struct FakeFG
 {
     bool IsActive() const { return false; }
     bool IsPaused() const { return false; }
+    bool GetDMFGSupport() const { return false; }
     unsigned GetInterpolatedFrameCount() const { return 0; }
     bool SetInterpolatedFrameCount(unsigned) { return true; }
 };
@@ -195,6 +196,11 @@ static void Reset()
     ReflexHooks::count = 1;
     warnings = calls = getCalls = 0;
     nextResult = sl::Result::eOk;
+    StreamlineHooks::o_slDLSSGSetOptions = RuntimeSet;
+    StreamlineHooks::o_slDLSSGGetState = RuntimeGet;
+    XeMfgLoader::enabled = false;
+    XeMfgLoader::maximum = 1;
+    XeMfgLoader::failure = XeMfgLoader::Failure::None;
     fakeNativeMaximum = 1;
     onSet = {};
     MenuOverlayBase::visible = false;
@@ -203,11 +209,12 @@ static void Reset()
 }
 // SEH contains a possible CPU read access violation in the unpatched method.
 // Nothing executes GPU code and an expected violation never escapes this process.
+static sl::Result guardedResult = sl::Result::eOk;
 static bool CallWithoutReadFault(const sl::DLSSGOptions* options)
 {
     __try
     {
-        StreamlineHooks::hkslDLSSGSetOptions(sl::ViewportHandle(0), *options);
+        guardedResult = StreamlineHooks::hkslDLSSGSetOptions(sl::ViewportHandle(0), *options);
         return true;
     }
     __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
@@ -327,6 +334,31 @@ int main()
                StreamlineHooks::dlssgOptionsState.Pending(),
            "future-ABI rejection must not commit pacing, mode or pending intent");
     options.structVersion = 5;
+
+    // The fallback hook can be returned even when the native plugin is absent.
+    for (auto version : { 0u, 6u })
+    {
+        Reset();
+        StreamlineHooks::o_slDLSSGSetOptions = nullptr;
+        options.structVersion = version;
+        Expect(CallWithoutReadFault(&options), "unknown ABI without an original must not call a null function");
+        Expect(guardedResult == sl::Result::eErrorInvalidParameter && calls == 0,
+               "unknown ABI without an original must report an explicit unsupported request");
+    }
+    options.structVersion = 5;
+
+    Reset();
+    StreamlineHooks::o_slDLSSGGetState = nullptr;
+    State::Instance().activeFgInput = FGInput::DLSSG;
+    State::Instance().activeFgOutput = FGOutput::XeFG;
+    sl::DLSSGState legacyState {};
+    legacyState.structVersion = 1;
+    legacyState.numFramesToGenerateMax = 0xA5A5A5A5;
+    StreamlineHooks::hkslDLSSGGetState(sl::ViewportHandle(0), legacyState, nullptr);
+    Expect(State::Instance().dlssgMfgMax == 1, "v1 synthesis must cache a validated maximum, not caller padding");
+    Expect(legacyState.numFramesToGenerateMax == 0xA5A5A5A5 && legacyState.structVersion == 1,
+           "v1 synthesis must preserve the absent maximum field and caller version");
+    Expect(!State::Instance().dlssgGameDMFGSupported, "static XeFG must not advertise Dynamic MFG");
 
     Reset();
     State::Instance().dlssgMfgMax = 5;
