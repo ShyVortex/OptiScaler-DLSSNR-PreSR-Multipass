@@ -151,8 +151,8 @@ int main(int argc, char** argv)
         {
             const bool isUnlock = setting == &config->XeMfgUnlock;
             *setting = !isUnlock;
-            Expect(XeMfgLoader::EnabledForSession() == !applied && XeMfgLoader::Pending() == !applied,
-                   "editing saved provider intent dynamically affects unapplied sessions");
+            Expect(!XeMfgLoader::EnabledForSession() && !XeMfgLoader::Pending(),
+                   "disabling unlock or selecting a conflicting provider must reject dynamic admission");
             if (applied)
                 Expect(XeMfgLoader::EffectiveMax(1) == 3 && image.bytes[0x1a517e] == 3,
                        "configuration edits must preserve the installed and advertised session ceiling");
@@ -163,11 +163,13 @@ int main(int argc, char** argv)
         const auto savedExternal = config->ExternalFrameGeneration.value_for_config();
         const auto savedUnlock = config->XeMfgUnlock.value_for_config();
         XeMfgLoader::TryApply(image.Module());
-        Expect(XeMfgLoader::LastStatus().Patched && XeMfgLoader::EffectiveMax(1) == 3 && !XeMfgLoader::Pending(),
-               "an admitted session must retain its original decision through provider loading");
+        Expect(XeMfgLoader::LastStatus().Patched == applied && !XeMfgLoader::Pending(),
+               "rejected admission must preserve an applied image but must not patch a pending image");
+        Expect(XeMfgLoader::EffectiveMax(1) == (applied ? 3u : 1u) && image.bytes[0x20da4f] == (applied ? 0xe9 : 0x0f),
+               "provider loading must reflect the actual applied image, not an obsolete admission latch");
         Expect(config->ExternalFrameGeneration.value_for_config() == savedExternal &&
                    config->XeMfgUnlock.value_for_config() == savedUnlock,
-               "session admission must not overwrite edited next-launch settings");
+               "dynamic admission must not overwrite the user's provider settings");
     }
     else if (name == "ceiling-live")
     {
