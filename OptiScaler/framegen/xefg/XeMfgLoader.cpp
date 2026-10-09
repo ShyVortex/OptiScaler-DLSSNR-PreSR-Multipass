@@ -387,9 +387,8 @@ void TryApply(HMODULE module)
     }
 
     unsigned int targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
-    bool enablePacing = Config::Instance()->XeMfgExtraPacing.value_or_default();
 
-    bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, enablePacing, g_status);
+    bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, true, g_status);
     if (result)
     {
         g_applied = true;

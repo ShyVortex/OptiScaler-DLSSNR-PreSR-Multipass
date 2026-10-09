@@ -62,7 +62,6 @@
 #define XE_RETURN_ADDRESS() __builtin_return_address(0)
 #endif
 
-#include "Config.h"
 #include "Logger.h"
 #include "SysUtils.h"
 
@@ -174,7 +173,7 @@ inline int64_t g_pacedBursts = 0;
 inline bool g_loggedFirstBurst = false;
 
 using SchedFn = bool (*)(void*, void*, uint8_t, void*, uint32_t);
-using RingSnapshotFn = void* (*) (void*, void*);
+using RingSnapshotFn = void* (*)(void*, void*);
 
 inline SchedFn g_schedNative = nullptr;
 inline RingSnapshotFn g_ringSnapshot = nullptr;
@@ -192,7 +191,7 @@ inline double g_fedFrameTimeMs = 0.0;
 
 constexpr int32_t SchedLogLimit = 12;
 
-using TimestampFn = void* (*) (void*, int64_t*, void*, void*, uint32_t, uint32_t);
+using TimestampFn = void* (*)(void*, int64_t*, void*, void*, uint32_t, uint32_t);
 
 inline TimestampFn g_tsNative = nullptr;
 inline uint8_t* g_ring = nullptr;
@@ -648,13 +647,6 @@ inline bool Install(uint8_t* base)
 
     if (base == nullptr)
         return false;
-
-    auto config = Config::Instance();
-    if (config && !config->XeMfgExtraPacing.value_or_default())
-    {
-        LOG_INFO("XeFG pacing: disabled by config (XeMFG\\ExtraPacing)");
-        return false;
-    }
 
     QueryPerformanceFrequency(&g_freq);
 
