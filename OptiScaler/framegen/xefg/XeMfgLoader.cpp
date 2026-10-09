@@ -158,10 +158,12 @@ bool EnabledForSession()
     auto config = Config::Instance();
     if (!config)
         return false;
-    // Reject conflicting provider selections consistently, including INI loads.
-    // Do not overwrite saved user intent when this session cannot admit XeMFG.
-    return config->XeMfgUnlock.value_or_default() && !config->ExternalFrameGeneration.value_or_default() &&
-           !config->FGDLSSGAdaMfgUnlock.value_or_default() && !config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    // Latch before the first FG load/query, including rejected sessions.
+    // UI edits preserve saved intent and take effect only on the next launch.
+    static const bool enabled =
+        config->XeMfgUnlock.value_or_default() && !config->ExternalFrameGeneration.value_or_default() &&
+        !config->FGDLSSGAdaMfgUnlock.value_or_default() && !config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    return enabled;
 }
 
 bool Pending()

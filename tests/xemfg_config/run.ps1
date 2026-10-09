@@ -26,7 +26,7 @@ cl /nologo /std:c++20 /EHsc /W4 /DUNICODE /D_UNICODE /FI"$PSScriptRoot/Mocks.h" 
 if ($LASTEXITCODE) { throw 'Production XeMFG configuration regression compilation failed.' }
 if (!$Case.Count) {
     $Case = @('default-off','saved-off','explicit-on','external-conflict','ada-conflict','ampere-conflict',
-        'scanner-end','ceiling-live','menu-recovery')
+        'scanner-end','ceiling-live','menu-recovery','session-unlock-off','session-pending','session-applied')
 }
 $failed = @()
 foreach ($name in $Case) {

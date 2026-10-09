@@ -120,6 +120,54 @@ int main(int argc, char** argv)
         Expect(!XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] == 0x0f,
                "rejected provider must not patch Intel code");
         Expect(config->XeMfgUnlock.value_for_config() == true, "admission must preserve saved user intent");
+        config->ExternalFrameGeneration = false;
+        config->FGDLSSGAdaMfgUnlock = false;
+        config->FGDLSSGAmpereMfgUnlock = false;
+        Expect(!XeMfgLoader::EnabledForSession() && !XeMfgLoader::Pending(),
+               "clearing a rejected session's saved conflict must require restart");
+        XeMfgLoader::TryApply(image.Module());
+        Expect(!XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] == 0x0f,
+               "a rejected session must not patch after a configuration edit");
+    }
+    else if (name == "session-unlock-off")
+    {
+        config->XeMfgUnlock = false;
+        Expect(!XeMfgLoader::EnabledForSession(), "disabled session must reject Xe admission");
+        config->XeMfgUnlock = true;
+        Expect(!XeMfgLoader::EnabledForSession() && !XeMfgLoader::Pending(),
+               "enabling saved intent must not admit Xe until restart");
+        XeMfgLoader::TryApply(image.Module());
+        Expect(!XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] == 0x0f,
+               "a disabled session must not patch after enabling saved intent");
+    }
+    else if (name == "session-pending" || name == "session-applied")
+    {
+        const bool applied = name == "session-applied";
+        Expect(XeMfgLoader::EnabledForSession(), "session must admit Xe before its first provider load/query");
+        if (applied)
+            XeMfgLoader::TryApply(image.Module());
+        for (auto* setting : { &config->XeMfgUnlock, &config->ExternalFrameGeneration, &config->FGDLSSGAdaMfgUnlock,
+                               &config->FGDLSSGAmpereMfgUnlock })
+        {
+            const bool isUnlock = setting == &config->XeMfgUnlock;
+            *setting = !isUnlock;
+            Expect(XeMfgLoader::EnabledForSession() && XeMfgLoader::Pending() == !applied,
+                   "editing saved provider intent must not change admitted or pending session ownership");
+            if (applied)
+                Expect(XeMfgLoader::EffectiveMax(1) == 3 && image.bytes[0x1a517e] == 3,
+                       "configuration edits must preserve the installed and advertised session ceiling");
+            *setting = isUnlock;
+        }
+        config->ExternalFrameGeneration = true;
+        config->XeMfgUnlock = false;
+        const auto savedExternal = config->ExternalFrameGeneration.value_for_config();
+        const auto savedUnlock = config->XeMfgUnlock.value_for_config();
+        XeMfgLoader::TryApply(image.Module());
+        Expect(XeMfgLoader::LastStatus().Patched && XeMfgLoader::EffectiveMax(1) == 3 && !XeMfgLoader::Pending(),
+               "an admitted session must retain its original decision through provider loading");
+        Expect(config->ExternalFrameGeneration.value_for_config() == savedExternal &&
+                   config->XeMfgUnlock.value_for_config() == savedUnlock,
+               "session admission must not overwrite edited next-launch settings");
     }
     else if (name == "ceiling-live")
     {
