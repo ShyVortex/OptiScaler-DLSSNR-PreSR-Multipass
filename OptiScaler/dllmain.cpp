@@ -1930,7 +1930,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                      (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
-        const bool xeMfgUnlock = Config::Instance()->XeMfgUnlock.value_or_default();
+        const bool xeMfgUnlock = XeMfgLoader::EnabledForSession();
         if (xeMfgUnlock && !State::Instance().externalFrameGeneration)
         {
             auto* cfg = Config::Instance();

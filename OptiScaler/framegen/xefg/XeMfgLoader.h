@@ -48,7 +48,7 @@ unsigned int EffectiveMax(unsigned int nativeMaximum = 1);
 // Applies the 5 unlock patches to libxess_fg.dll / igxess_fg.dll
 void TryApply(HMODULE module = nullptr);
 
-// Dynamically sets the max generated frames ceiling
+// Sets the ceiling before installation only; changing a live session requires restart.
 void SetMaxGeneratedFrames(unsigned int maxFrames);
 
 Failure LastFailure();

@@ -907,7 +907,7 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     static std::string config;
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     bool shouldSpoofArch = Config::Instance()->StreamlineSpoofing.value_or_default() &&
                            (State::Instance().activeFgInput == FGInput::NvngxFG ||
                             State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive);
@@ -2143,7 +2143,7 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
                 }
 
                 const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-                const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+                const bool xeMfgActive = XeMfgLoader::EnabledForSession();
                 if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive)
                 {
                     if (o_slIsFeatureSupported != nullptr)
@@ -2324,7 +2324,7 @@ void StreamlineHooks::unhookDlssg()
 void StreamlineHooks::hookDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
@@ -2379,7 +2379,7 @@ void StreamlineHooks::unhookLocalDlssg()
 void StreamlineHooks::hookLocalDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
@@ -2552,7 +2552,7 @@ void StreamlineHooks::unhookCommon()
 void StreamlineHooks::hookCommon(HMODULE slCommon)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();

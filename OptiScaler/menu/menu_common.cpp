@@ -3191,7 +3191,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     auto& primaryGpu = *ctx.primaryGpu;
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeActive = config->XeMfgUnlock.value_or_default();
+    const bool xeActive = XeMfgLoader::EnabledForSession();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
@@ -3650,7 +3650,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         // Mutual exclusion: disable if Ada or Ampere is already active
         const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-        const bool disableXeMfg = adaActive || ampereActive;
+        const bool externalActive = config->ExternalFrameGeneration.value_or_default();
+        const bool disableXeMfg = !xeUnlock && (adaActive || ampereActive || externalActive);
 
         if (disableXeMfg)
         {
@@ -3664,8 +3665,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else
             {
-                ShowHelpMarker("Disabled because the Ampere (SM86) MFG unlock is active.\n"
-                               "Disable AmpereMfgUnlock first, Save Settings and restart.");
+                ShowHelpMarker(externalActive ? "Disabled because external frame generation is selected.\n"
+                                                "Disable External first, Save Settings and restart."
+                                              : "Disabled because the Ampere (SM86) MFG unlock is active.\n"
+                                                "Disable AmpereMfgUnlock first, Save Settings and restart.");
             }
         }
         else
@@ -3768,8 +3771,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (ImGui::SliderInt("Max Generated Frames##xemfg", &maxFrames, 1, 5, currentLabel))
             {
                 config->XeMfgMaxFrames = maxFrames;
-                if (XeMfgLoader::IsEnabled())
-                    XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(maxFrames));
             }
             ShowHelpMarker(
                 "Maximum generated frames advertised to the game engine via Streamline and allowed in XeFG.\n"
@@ -3798,14 +3799,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "If interpolation is active, motion will remain visible.\n"
                            "If interpolation has failed, the screen will turn black.");
 
-            bool extraPacing = config->XeMfgExtraPacing.value_or(false);
-            if (ImGui::Checkbox("Display VBlank Sync (Extra Pacing)##xemfg", &extraPacing))
+            bool extraPacing = config->XeMfgExtraPacing.value_or_default();
+            if (ImGui::Checkbox("Provider Thunk Pacing (Extra Pacing)##xemfg", &extraPacing))
             {
                 config->XeMfgExtraPacing = extraPacing;
             }
-            ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
-                           "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
-                           "Enable only if your display exhibits severe tear-lines without V-Sync.");
+            ShowHelpMarker("Installs the custom provider scheduler/deadline presentation hooks.\n"
+                           "OFF (Default) preserves native XeSS-FG pacing.\n"
+                           "Save Settings and restart after changing. This does not force VSync.");
         }
 
         ImGui::Unindent();
@@ -4866,7 +4867,7 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
         }
     }
 
-    const bool xeMfgActive = config->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
 
     // XeFG controls
     if (xeMfgActive && state.activeFgOutput == FGOutput::XeFG)

@@ -158,7 +158,10 @@ bool EnabledForSession()
     auto config = Config::Instance();
     if (!config)
         return false;
-    return config->XeMfgUnlock.value_or_default();
+    // Reject conflicting provider selections consistently, including INI loads.
+    // Do not overwrite saved user intent when this session cannot admit XeMFG.
+    return config->XeMfgUnlock.value_or_default() && !config->ExternalFrameGeneration.value_or_default() &&
+           !config->FGDLSSGAdaMfgUnlock.value_or_default() && !config->FGDLSSGAmpereMfgUnlock.value_or_default();
 }
 
 bool Pending()
@@ -323,37 +326,9 @@ void SetMaxGeneratedFrames(unsigned int maxFrames)
 {
     std::scoped_lock lock(g_mutex);
     uint32_t clamped = std::clamp(maxFrames, 1u, kMaxSupportedFrames);
+    if (g_applied || !g_appliedRecords.empty())
+        return; // Keep both code and advertised capability fixed for this session.
     g_status.ConfiguredCeiling = clamped;
-
-    if (g_applied && !g_appliedRecords.empty())
-    {
-        uint8_t frameByte = static_cast<uint8_t>(clamped);
-        for (auto& rec : g_appliedRecords)
-        {
-            if (!rec.address || !rec.applied)
-                continue;
-
-            size_t byteOffset = 0;
-            if (strcmp(rec.name, "U3/default-ceiling") == 0)
-                byteOffset = 1;
-            else if (strcmp(rec.name, "U4/override-clamp") == 0)
-                byteOffset = 6;
-            else if (strcmp(rec.name, "U5/reported-maximum") == 0)
-                byteOffset = 1;
-            else
-                continue;
-
-            DWORD oldProtect = 0;
-            if (VirtualProtect(rec.address, rec.replacement.size(), PAGE_EXECUTE_READWRITE, &oldProtect))
-            {
-                rec.address[byteOffset] = frameByte;
-                rec.replacement[byteOffset] = frameByte;
-                DWORD restoredProtect = 0;
-                VirtualProtect(rec.address, rec.replacement.size(), oldProtect, &restoredProtect);
-                FlushInstructionCache(GetCurrentProcess(), rec.address, rec.replacement.size());
-            }
-        }
-    }
 }
 
 void TryApply(HMODULE module)
@@ -410,7 +385,7 @@ void TryApply(HMODULE module)
     }
 
     unsigned int targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
-    bool enablePacing = Config::Instance()->XeMfgExtraPacing.value_or(true);
+    bool enablePacing = Config::Instance()->XeMfgExtraPacing.value_or_default();
 
     bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, enablePacing, g_status);
     if (result)

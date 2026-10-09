@@ -815,7 +815,7 @@ void InitNGXParameters(NVSDK_NGX_Parameter* InParams, API api)
     }
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
 #if defined(OPTISCALER_RTX40_MFG)
     MfgUnlock::TryApply();
     const bool adaMfgActive = MfgUnlock::EnabledForSession();
