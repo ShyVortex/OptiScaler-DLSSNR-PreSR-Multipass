@@ -37,6 +37,7 @@ struct Config
     Option<int> FGDLSSGOverrideInterpolationCount;
     Option<bool> FGDLSSGOverrideForceDMFG;
     Option<float> FGDLSSGFramerateTargetDMFG;
+    Option<int> FGXeFGInterpolationCount;
     static Config* Instance()
     {
         static Config config;
@@ -56,7 +57,8 @@ enum class FGInput
 enum class FGOutput
 {
     NoFG,
-    DLSSG
+    DLSSG,
+    XeFG
 };
 enum class API
 {
@@ -68,6 +70,7 @@ struct FakeFG
     bool IsActive() const { return false; }
     bool IsPaused() const { return false; }
     unsigned GetInterpolatedFrameCount() const { return 0; }
+    bool SetInterpolatedFrameCount(unsigned) { return true; }
 };
 struct State
 {
@@ -77,6 +80,7 @@ struct State
     bool dlssgGameDMFGSupported = false;
     std::optional<int> dlssgMfgMax;
     sl::DLSSGMode dlssgLastSetMode = sl::DLSSGMode::eOff;
+    int dlssgDetectedInterpolationCount = 0;
     bool externalFrameGeneration = false;
     API swapchainApi = API::DX12;
     bool menuOverlayIsVulkan = false;
@@ -110,6 +114,19 @@ unsigned EffectiveMax(unsigned nativeMaximum)
     return failure == Failure::None ? std::max(nativeMaximum, maximum) : 1;
 }
 } // namespace MfgUnlock
+namespace XeMfgLoader
+{
+using Failure = MfgUnlock::Failure;
+static bool enabled = false;
+static unsigned maximum = 1;
+static Failure failure = Failure::None;
+bool EnabledForSession() { return enabled; }
+Failure LastFailure() { return failure; }
+unsigned EffectiveMax(unsigned nativeMaximum)
+{
+    return failure != Failure::None ? 1 : (enabled ? std::max(nativeMaximum, maximum) : nativeMaximum);
+}
+} // namespace XeMfgLoader
 namespace ReflexHooks
 {
 static unsigned count = 1;
