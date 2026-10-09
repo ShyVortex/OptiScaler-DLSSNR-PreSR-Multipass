@@ -650,7 +650,7 @@ inline bool Install(uint8_t* base)
         return false;
 
     auto config = Config::Instance();
-    if (config && !config->XeMfgExtraPacing.value_or(true))
+    if (config && !config->XeMfgExtraPacing.value_or_default())
     {
         LOG_INFO("XeFG pacing: disabled by config (XeMFG\\ExtraPacing)");
         return false;

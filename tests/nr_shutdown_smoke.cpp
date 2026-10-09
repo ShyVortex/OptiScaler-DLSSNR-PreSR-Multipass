@@ -87,6 +87,12 @@ namespace DlssNr
 void ClearStatus(void*) {}
 bool Shutdown();
 } // namespace DlssNr
+// This is the NR shutdown fixture, not a XeMFG lifetime test. Keep the
+// external Xe cleanup boundary stubbed; it must be reviewed separately.
+namespace XeMfgLoader
+{
+void Shutdown() {}
+} // namespace XeMfgLoader
 struct DLSSFeature
 {
     static void Shutdown() {}
@@ -101,6 +107,15 @@ struct NrState
     std::recursive_mutex mutex;
     struct Late
     {
+        struct Slot
+        {
+            struct Commands
+            {
+                void* Get() const { return nullptr; }
+                explicit operator bool() const { return false; }
+            } commands;
+        };
+        std::vector<Slot> slots;
         void Cancel() {}
     } late;
 };
@@ -114,6 +129,7 @@ struct DlssNr_Dx12
         ++destroyedNr;
     }
     static void Retire(std::unique_ptr<DlssNr_Dx12>);
+    void ResetFinishedCommands(void*) {}
 };
 std::recursive_mutex nrOwnersMutex;
 DlssNr_Dx12* activeNrOwner = nullptr;

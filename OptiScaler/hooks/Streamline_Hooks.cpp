@@ -907,7 +907,7 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
     static std::string config;
 
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     bool shouldSpoofArch = Config::Instance()->StreamlineSpoofing.value_or_default() &&
                            (State::Instance().activeFgInput == FGInput::NvngxFG ||
                             State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive);
@@ -1135,6 +1135,8 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
     // caller's storage and extensions instead of forwarding a sliced temporary.
     if (options.structVersion < 1 || options.structVersion > 5)
     {
+        if (o_slDLSSGSetOptions == nullptr)
+            return sl::Result::eErrorInvalidParameter;
 #if defined(OPTISCALER_RTX40_MFG)
         if (MfgUnlock::LastFailure() != MfgUnlock::Failure::None)
             return sl::Result::eErrorInvalidParameter;
@@ -1284,8 +1286,9 @@ sl::Result StreamlineHooks::hkslDLSSGSetOptions(const sl::ViewportHandle& viewpo
                                         newOptions.mode == sl::DLSSGMode::eAuto ||
                                         newOptions.mode == sl::DLSSGMode::eDynamic;
 
-    const bool canEnableDynamic =
-        state.dlssgGameDMFGSupported || (state.streamlineVersion >= feature_version { 2, 11, 0 });
+    // An API version can represent Dynamic options without the active backend
+    // supporting them. Require an actual positive capability query.
+    const bool canEnableDynamic = state.dlssgGameDMFGSupported;
     bool enableDynamicMode = requested.values.forceDynamic && canEnableDynamic && dlssgPotentiallyActive;
 
     if (enableDynamicMode)
@@ -1377,22 +1380,24 @@ sl::Result StreamlineHooks::hkslDLSSGGetState(const sl::ViewportHandle& viewport
             state.numFramesActuallyPresented = fg->GetInterpolatedFrameCount() + 1;
         }
 
+        const unsigned int maximum =
+            State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession()
+                ? XeMfgLoader::EffectiveMax(1)
+                : 1;
         if (originalStructVersion >= 2)
         {
             state.bIsVsyncSupportAvailable = sl::Boolean::eTrue;
-            if (State::Instance().activeFgOutput == FGOutput::XeFG && XeMfgLoader::EnabledForSession())
-                state.numFramesToGenerateMax = XeMfgLoader::EffectiveMax(1);
-            else
-                state.numFramesToGenerateMax = 1;
+            state.numFramesToGenerateMax = maximum;
         }
 
+        const bool dynamicSupported = fg != nullptr && fg->GetDMFGSupport();
         if (originalStructVersion >= 4)
         {
-            state.bIsDynamicMFGSupported = sl::Boolean::eTrue;
+            state.bIsDynamicMFGSupported = dynamicSupported ? sl::Boolean::eTrue : sl::Boolean::eFalse;
         }
 
-        State::Instance().dlssgGameDMFGSupported = true;
-        State::Instance().dlssgMfgMax = state.numFramesToGenerateMax;
+        State::Instance().dlssgGameDMFGSupported = dynamicSupported;
+        State::Instance().dlssgMfgMax = maximum <= static_cast<unsigned int>(INT_MAX) ? static_cast<int>(maximum) : 0;
 
         return sl::Result::eOk;
     }
@@ -2138,7 +2143,7 @@ void StreamlineHooks::hookInterposer(HMODULE slInterposer)
                 }
 
                 const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-                const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+                const bool xeMfgActive = XeMfgLoader::EnabledForSession();
                 if (State::Instance().activeFgInput == FGInput::DLSSG || ampereMfgActive || xeMfgActive)
                 {
                     if (o_slIsFeatureSupported != nullptr)
@@ -2319,7 +2324,7 @@ void StreamlineHooks::unhookDlssg()
 void StreamlineHooks::hookDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
@@ -2374,7 +2379,7 @@ void StreamlineHooks::unhookLocalDlssg()
 void StreamlineHooks::hookLocalDlssg(HMODULE slDlssg)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
@@ -2547,7 +2552,7 @@ void StreamlineHooks::unhookCommon()
 void StreamlineHooks::hookCommon(HMODULE slCommon)
 {
     const bool ampereMfgActive = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
-    const bool xeMfgActive = Config::Instance()->XeMfgUnlock.value_or_default();
+    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
     if (State::Instance().externalFrameGeneration && !ampereMfgActive && !xeMfgActive)
         return;
     LOG_FUNC();
