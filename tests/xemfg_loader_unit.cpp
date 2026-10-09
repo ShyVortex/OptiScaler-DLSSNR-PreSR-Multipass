@@ -173,6 +173,22 @@ class SimulatedXeMfgEngine
         applied = false;
     }
 
+    void SetMaxGeneratedFrames(uint32_t maxFrames)
+    {
+        uint32_t clamped = std::clamp(maxFrames, 1u, 5u);
+        maxGeneratedFrames = clamped;
+        if (applied && !appliedRecords.empty())
+        {
+            uint8_t frameByte = static_cast<uint8_t>(clamped);
+            if (appliedRecords.size() >= 5)
+            {
+                appliedRecords[2].address[1] = frameByte;
+                appliedRecords[3].address[6] = frameByte;
+                appliedRecords[4].address[1] = frameByte;
+            }
+        }
+    }
+
     uint32_t lastFramesPresented = 0;
     int lastFrameGenResult = 0;
     bool isFrameGenEnabled = false;
@@ -509,6 +525,52 @@ int main()
         assert(pacingImg == pristineImage && "UninstallPacing must restore pristine thunk bytes");
         printf("  [PASS] Test 9: Native XeFGPacing thunk hooking, scheduler routing, and deadline repair across 4X "
                "burst.\n");
+    }
+
+    // Test 10: Live in-memory ceiling byte rewriting via SetMaxGeneratedFrames
+    {
+        std::vector<uint8_t> testImg;
+        XeMfgTest::PopulateValidImage(testImg);
+        bool ok = engine.Apply(testImg.data(), testImg.size(), 3);
+        assert(ok);
+        assert(engine.maxGeneratedFrames == 3);
+        assert(engine.EffectiveMax(1) == 3);
+        assert(testImg[0x1a517d + 1] == 3);
+        assert(testImg[0x1a45c2 + 6] == 3);
+        assert(testImg[0x20973b + 1] == 3);
+
+        // Dynamically adjust ceiling to 5 (6X Multi-Frame Generation)
+        engine.SetMaxGeneratedFrames(5);
+        assert(engine.maxGeneratedFrames == 5);
+        assert(engine.EffectiveMax(1) == 5);
+        assert(testImg[0x1a517d + 1] == 5 && "U3 ceiling byte must be updated in-memory");
+        assert(testImg[0x1a45c2 + 6] == 5 && "U4 clamp byte must be updated in-memory");
+        assert(testImg[0x20973b + 1] == 5 && "U5 reported max byte must be updated in-memory");
+
+        // Dynamically adjust ceiling down to 2 (3X FG)
+        engine.SetMaxGeneratedFrames(2);
+        assert(engine.maxGeneratedFrames == 2);
+        assert(engine.EffectiveMax(1) == 2);
+        assert(testImg[0x1a517d + 1] == 2);
+        assert(testImg[0x1a45c2 + 6] == 2);
+        assert(testImg[0x20973b + 1] == 2);
+
+        engine.Rollback();
+        printf("  [PASS] Test 10: Live in-memory ceiling adaptation byte rewriting (U3, U4, U5).\n");
+    }
+
+    // Test 11: Mandatory Native Thunk Pacing Installation Unconditional on ExtraPacing Flags
+    {
+        std::vector<uint8_t> pacingImg = pristineImage;
+        bool pacingOk = engine.InstallPacing(pacingImg.data(), pacingImg.size());
+        assert(pacingOk);
+        assert(engine.pacingInstalled && "Pacing must install unconditionally");
+        assert(engine.pacingDetours == 3 && "All 3 native thunks must be detoured");
+
+        engine.UninstallPacing(pacingImg.data());
+        assert(!engine.pacingInstalled);
+        assert(engine.pacingDetours == 0);
+        printf("  [PASS] Test 11: Mandatory native presentation pacing detours installed unconditionally.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");

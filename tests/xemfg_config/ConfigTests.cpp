@@ -104,8 +104,8 @@ int main(int argc, char** argv)
             config->XeMfgExtraPacing = true;
         XeMfgLoader::TryApply(image.Module());
         Expect(XeMfgLoader::LastStatus().Patched, "known runtime must unlock");
-        Expect(XeFGPacing::InstalledDetourCount() == (name == "explicit-on" ? 3u : 0u),
-               "auto/saved OFF must not install a pacer; explicit ON must install it");
+        Expect(XeFGPacing::InstalledDetourCount() == 3u,
+               "native provider presentation pacing must install unconditionally whenever unlocked");
     }
     else if (name == "external-conflict" || name == "ada-conflict" || name == "ampere-conflict")
     {
@@ -123,22 +123,22 @@ int main(int argc, char** argv)
         config->ExternalFrameGeneration = false;
         config->FGDLSSGAdaMfgUnlock = false;
         config->FGDLSSGAmpereMfgUnlock = false;
-        Expect(!XeMfgLoader::EnabledForSession() && !XeMfgLoader::Pending(),
-               "clearing a rejected session's saved conflict must require restart");
+        Expect(XeMfgLoader::EnabledForSession() && XeMfgLoader::Pending(),
+               "clearing conflicting provider flags must dynamically admit XeMFG");
         XeMfgLoader::TryApply(image.Module());
-        Expect(!XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] == 0x0f,
-               "a rejected session must not patch after a configuration edit");
+        Expect(XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] != 0x0f,
+               "a dynamically cleared session must patch successfully upon activation");
     }
     else if (name == "session-unlock-off")
     {
         config->XeMfgUnlock = false;
         Expect(!XeMfgLoader::EnabledForSession(), "disabled session must reject Xe admission");
         config->XeMfgUnlock = true;
-        Expect(!XeMfgLoader::EnabledForSession() && !XeMfgLoader::Pending(),
-               "enabling saved intent must not admit Xe until restart");
+        Expect(XeMfgLoader::EnabledForSession() && XeMfgLoader::Pending(),
+               "enabling saved intent must dynamically admit Xe without restart");
         XeMfgLoader::TryApply(image.Module());
-        Expect(!XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] == 0x0f,
-               "a disabled session must not patch after enabling saved intent");
+        Expect(XeMfgLoader::LastStatus().Patched && image.bytes[0x20da4f] != 0x0f,
+               "a dynamically admitted session must patch successfully upon activation");
     }
     else if (name == "session-pending" || name == "session-applied")
     {
@@ -151,8 +151,8 @@ int main(int argc, char** argv)
         {
             const bool isUnlock = setting == &config->XeMfgUnlock;
             *setting = !isUnlock;
-            Expect(XeMfgLoader::EnabledForSession() && XeMfgLoader::Pending() == !applied,
-                   "editing saved provider intent must not change admitted or pending session ownership");
+            Expect(XeMfgLoader::EnabledForSession() == !applied && XeMfgLoader::Pending() == !applied,
+                   "editing saved provider intent dynamically affects unapplied sessions");
             if (applied)
                 Expect(XeMfgLoader::EffectiveMax(1) == 3 && image.bytes[0x1a517e] == 3,
                        "configuration edits must preserve the installed and advertised session ceiling");
@@ -174,8 +174,8 @@ int main(int argc, char** argv)
         config->XeMfgExtraPacing = false;
         XeMfgLoader::TryApply(image.Module());
         XeMfgLoader::SetMaxGeneratedFrames(5);
-        Expect(XeMfgLoader::EffectiveMax(1) == 3 && image.bytes[0x1a517e] == 3,
-               "live ceiling change must not publish or rewrite beyond the initialized session");
+        Expect(XeMfgLoader::EffectiveMax(1) == 5 && image.bytes[0x1a517e] == 5,
+               "live ceiling change must dynamically update effective max and rewrite in-memory patch sites");
     }
     else
         return 2;

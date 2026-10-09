@@ -62,7 +62,6 @@
 #define XE_RETURN_ADDRESS() __builtin_return_address(0)
 #endif
 
-#include "Config.h"
 #include "Logger.h"
 #include "SysUtils.h"
 
@@ -648,13 +647,6 @@ inline bool Install(uint8_t* base)
 
     if (base == nullptr)
         return false;
-
-    auto config = Config::Instance();
-    if (config && !config->XeMfgExtraPacing.value_or_default())
-    {
-        LOG_INFO("XeFG pacing: disabled by config (XeMFG\\ExtraPacing)");
-        return false;
-    }
 
     QueryPerformanceFrequency(&g_freq);
 

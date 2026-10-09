@@ -3771,6 +3771,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (ImGui::SliderInt("Max Generated Frames##xemfg", &maxFrames, 1, 5, currentLabel))
             {
                 config->XeMfgMaxFrames = maxFrames;
+                if (XeMfgLoader::IsEnabled())
+                    XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(maxFrames));
             }
             ShowHelpMarker(
                 "Maximum generated frames advertised to the game engine via Streamline and allowed in XeFG.\n"
@@ -3778,8 +3780,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "2 = 3X FG (2 generated frames)\n"
                 "3 = 4X FG (3 generated frames, default)\n"
                 "4 = 5X FG (4 generated frames)\n"
-                "5 = 6X FG (5 generated frames)\n"
-                "Save Settings and restart after changing.");
+                "5 = 6X FG (5 generated frames)");
 
             bool fgDV = config->FGXeFGDebugView.value_or_default();
             if (ImGui::Checkbox("Debug Markers (Corners)##xemfg", &fgDV))
@@ -3799,16 +3800,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "If interpolation is active, motion will remain visible.\n"
                            "If interpolation has failed, the screen will turn black.");
 
-            bool extraPacing = config->XeMfgExtraPacing.value_or_default();
-            if (ImGui::Checkbox("Provider / VBlank Pacing (Extra Pacing)##xemfg", &extraPacing))
+            bool extraPacing = config->XeMfgExtraPacing.value_or(false);
+            if (ImGui::Checkbox("Display VBlank Sync (Extra Pacing)##xemfg", &extraPacing))
             {
                 config->XeMfgExtraPacing = extraPacing;
             }
-            ShowHelpMarker("Installs the custom provider scheduler/deadline presentation hooks.\n"
-                           "Native non-DXVK XeFG presents also request VBlank pacing (no tearing).\n"
-                           "An explicit VSync override takes precedence.\n"
-                           "OFF (Default) preserves native XeSS-FG pacing.\n"
-                           "Save Settings and restart to change provider hooks; DXGI pacing follows the setting.");
+            ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
+                           "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
+                           "Enable only if your display exhibits severe tear-lines without V-Sync.");
         }
 
         ImGui::Unindent();
