@@ -46,6 +46,19 @@ void NrBarrier(ID3D12GraphicsCommandList* commandList, ID3D12Resource* resource,
     commandList->ResourceBarrier(1, &barrier);
 }
 
+void ResolveNrRenderDimensions(NVSDK_NGX_Parameter* parameters, unsigned int& width, unsigned int& height)
+{
+    width = 0;
+    height = 0;
+    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
+    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
+    if (width == 0 || height == 0)
+    {
+        parameters->Get(NVSDK_NGX_Parameter_Width, &width);
+        parameters->Get(NVSDK_NGX_Parameter_Height, &height);
+    }
+}
+
 } // namespace
 
 bool DlssNr::CanRunBeforeUpscale_Dx12(NVSDK_NGX_Parameter* parameters)
@@ -54,8 +67,7 @@ bool DlssNr::CanRunBeforeUpscale_Dx12(NVSDK_NGX_Parameter* parameters)
     if (color == nullptr || !HasSupportedNrSubrects(parameters, true))
         return false;
     unsigned int width = 0, height = 0;
-    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
-    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
+    ResolveNrRenderDimensions(parameters, width, height);
     const auto desc = color->GetDesc();
     // The NR scratch has one mip and CopyActiveColor copies subresource 0. A multi-mip input can
     // run before SR only when scratch normalization also preserves the source colour format.
@@ -147,8 +159,7 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
     frame.ExposureState = states.exposure;
     if (frame.PreExposure <= 1e-6f)
         frame.PreExposure = 1.0f;
-    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &frame.RenderSubrectWidth);
-    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &frame.RenderSubrectHeight);
+    ResolveNrRenderDimensions(parameters, frame.RenderSubrectWidth, frame.RenderSubrectHeight);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, &frame.DepthSubrectBaseY);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &frame.MotionSubrectBaseX);

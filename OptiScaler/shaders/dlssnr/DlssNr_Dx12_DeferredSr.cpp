@@ -152,9 +152,11 @@ auto DlssNr_Dx12::State::DeferredSrContext::Before(ID3D12GraphicsCommandList* cm
             return;
         }
     const auto inDesc = color->GetDesc(), outDesc = output->GetDesc();
-    const auto active =
-        DlssNr::PreSrColorExtent(inDesc, UInt(source, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width),
-                                 UInt(source, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height));
+    const auto renderW =
+        UInt(source, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, UInt(source, NVSDK_NGX_Parameter_Width));
+    const auto renderH = UInt(source, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height,
+                              UInt(source, NVSDK_NGX_Parameter_Height));
+    const auto active = DlssNr::PreSrColorExtent(inDesc, renderW, renderH);
     if (!active || !DlssNr::PreSrColorExtent(outDesc, 0, 0) || inDesc.MipLevels != 1 || active->width > outDesc.Width ||
         active->height > outDesc.Height)
     {

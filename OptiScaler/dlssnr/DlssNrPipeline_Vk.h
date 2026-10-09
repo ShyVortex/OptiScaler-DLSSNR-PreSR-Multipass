@@ -47,6 +47,11 @@ inline bool HasSupportedSubrects(NVSDK_NGX_Parameter* parameters, bool beforeUps
         unsigned int width = 0, height = 0;
         parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
         parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
+        if (width == 0 || height == 0)
+        {
+            parameters->Get(NVSDK_NGX_Parameter_Width, &width);
+            parameters->Get(NVSDK_NGX_Parameter_Height, &height);
+        }
         return colour.Image && ((width == 0) == (height == 0)) && width <= colour.Width && height <= colour.Height;
     }
     return true;
@@ -75,6 +80,11 @@ inline DlssNrFrameInfo_Vk FrameInfo(NVSDK_NGX_Parameter* parameters, bool before
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, &frame.PreExposure);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &frame.RenderSubrectWidth);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &frame.RenderSubrectHeight);
+    if (frame.RenderSubrectWidth == 0 || frame.RenderSubrectHeight == 0)
+    {
+        parameters->Get(NVSDK_NGX_Parameter_Width, &frame.RenderSubrectWidth);
+        parameters->Get(NVSDK_NGX_Parameter_Height, &frame.RenderSubrectHeight);
+    }
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, &frame.ColorSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, &frame.ColorSubrectBaseY);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);
