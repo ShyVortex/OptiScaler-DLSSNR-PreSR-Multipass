@@ -10,6 +10,13 @@ struct ffxContext_wrap
 
     ~ffxContext_wrap()
     {
+        if (State::Instance().isShuttingDown)
+        {
+            // Deliberately leak the context: static destruction at process exit
+            // can run this under the loader lock, where a driver call is unsafe.
+            return;
+        }
+
         if (!ctx)
             return;
 

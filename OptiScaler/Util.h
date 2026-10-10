@@ -2,6 +2,9 @@
 #include "SysUtils.h"
 
 #include <filesystem>
+#include <chrono>
+#include <functional>
+#include <memory>
 
 #include <dxgi1_6.h>
 #include <d3d11.h>
@@ -58,9 +61,23 @@ void LoadProxyLibrary(const std::wstring& name, const std::wstring& optiPath, co
 
 std::map<Luid, std::filesystem::path> GetDriverStore();
 
+// Retires an object for delayed destruction without destroying it on a background thread.
+// GPU objects (upscaler features, NGX feature handles, FFX/FSR contexts) must not be torn
+// down concurrently with the render thread's in-flight driver work: releasing them from a
+// detached thread while the render thread is inside the driver causes access violations in
+// nvwgf2umx (seen as a c0000005 crash ~2s after a backend switch). Retired objects are
+// destroyed by ProcessDelayedDestroys() on the calling (render) thread once the delay has
+// elapsed, preserving the original GPU-drain margin while removing the cross-thread race.
+void RetireDelayedDestroy(std::function<void()> destroy);
+
+// Destroys matured entries from the retire queue on the CALLING thread. Must be called from
+// the thread that owns the graphics work (the per-frame evaluate paths already do this).
+void ProcessDelayedDestroys();
+
 template <typename T> void DelayedDestroy(std::unique_ptr<T> ptr)
 {
-    std::thread([p = std::move(ptr)]() mutable { std::this_thread::sleep_for(std::chrono::seconds(2)); }).detach();
+    auto holder = std::make_shared<std::unique_ptr<T>>(std::move(ptr));
+    RetireDelayedDestroy([holder]() { holder->reset(); });
 }
 
 }; // namespace Util
