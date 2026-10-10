@@ -1050,6 +1050,10 @@ static NVSDK_NGX_Result TryEvaluateOptiFeature(ID3D12GraphicsCommandList* InCmdL
                                                NVSDK_NGX_Parameter* InParameters,
                                                PFN_NVSDK_NGX_ProgressCallback InCallback)
 {
+    // Retired upscaler features (backend changes) must be destroyed on this render thread,
+    // never on a background thread while the driver is in use here.
+    Util::ProcessDelayedDestroys();
+
     State& state = State::Instance();
     const Config& cfg = *Config::Instance();
     const uint32_t handleId = InFeatureHandle->Id;
