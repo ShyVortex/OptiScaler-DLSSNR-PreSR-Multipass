@@ -476,12 +476,13 @@ int main()
         printf("  [PASS] Test 7: Streamline SetOptions transition gating and state deduplication.\n");
     }
 
-    // Test 8: Dynamic Multi-Frame Generation (DMFG) Advertising & Clean Swapchain Deactivation on eOff
+    // Test 8: Model-only Dynamic MFG advertising and On -> Off -> On transitions.
+    // This does not execute production hooks or validate Intel hardware behavior.
     {
         ResetStreamlineSetOptionsState();
         MockState dmfgState;
         MockConfig dmfgConfig;
-        MockXeFG_Dx12 dmfgXeFG(true); // dlssgInput = true
+        MockXeFG_Dx12 dmfgXeFG;
 
         MockXeMfgLoader::Enabled = true;
         MockXeMfgLoader::Status.Applied = true;
@@ -495,7 +496,13 @@ int main()
         assert(slState.numFramesToGenerateMax == 4);
         assert(slState.bIsDynamicMFGSupported == sl::Boolean::eTrue && "XeMFG must advertise DMFG support to game");
 
-        // 2. SetOptions eOff must cleanly disable swapchain in hardware
+        // 2. Begin On so eOff cannot pass through the already-Off deduplication branch.
+        sl::DLSSGOptions initialOpt;
+        initialOpt.mode = sl::DLSSGMode::eOn;
+        initialOpt.numFramesToGenerate = 1;
+        SimulateStreamlineSetOptions(dmfgState, dmfgConfig, dmfgXeFG, initialOpt);
+
+        // The model's eOff transition disables its proxy.
         sl::DLSSGOptions offOpt;
         offOpt.mode = sl::DLSSGMode::eOff;
         offOpt.numFramesToGenerate = 0;
@@ -516,8 +523,7 @@ int main()
         assert(MockXeFGProxy::Enabled && "Hardware proxy must be SetEnabled(true) on eOn");
         assert(dmfgXeFG.GetInterpolatedFrameCount() == 3);
 
-        printf("  [PASS] Test 8: Dynamic Multi-Frame Generation (DMFG) advertising & clean swapchain deactivation on "
-               "eOff.\n");
+        printf("  [PASS] Test 8: Model Dynamic MFG advertising and On -> Off -> On transitions.\n");
     }
 
     printf("[+] All XeFG MFG & Streamline unit tests PASSED successfully!\n");

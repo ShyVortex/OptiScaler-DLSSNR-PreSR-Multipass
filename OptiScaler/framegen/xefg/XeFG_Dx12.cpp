@@ -1075,16 +1075,27 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
 
     if (interpolatedFrameCount == 0)
     {
+        if (_swapChainContext != nullptr)
+        {
+            auto setEnabled = XeFGProxy::SetEnabled();
+            if (setEnabled == nullptr)
+            {
+                LOG_ERROR("XeFG cannot enter passthrough: SetEnabled is unavailable");
+                return false;
+            }
+            const auto result = setEnabled(_swapChainContext, false);
+            if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+            {
+                LOG_ERROR("XeFG SetEnabled(false) error: {} ({})", magic_enum::enum_name(result),
+                          static_cast<int>(result));
+                return false;
+            }
+        }
+
         _passthrough = true;
         _framesToInterpolate = 0;
         _needResetHistory = true;
-
-        if (_swapChainContext != nullptr && XeFGProxy::SetEnabled() != nullptr)
-        {
-            XeFGProxy::SetEnabled()(_swapChainContext, false);
-            _isActive = false;
-        }
-
+        _isActive = false;
         ClearAllResourceReady();
 
         LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0, enabled=false)");
