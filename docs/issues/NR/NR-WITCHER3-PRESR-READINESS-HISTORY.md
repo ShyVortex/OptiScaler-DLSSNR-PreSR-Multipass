@@ -37,6 +37,20 @@ DX12-only; it does not alter Vulkan scheduling or feature lifetime.
 checks observed and unseen Off/On, independent owners, stable history, initial
 Reset, and existing retry/capture behavior. Its boundaries do not render pixels.
 
+## Game reconstruction history
+
+The existing accepted-route identity distinguished raw input (0) from private
+denoise-first stages (1–3), but treated successful ordinary Pre-SR NR as raw.
+Track actual ordinary Color substitution as route 4. Entry/fallback changes
+temporarily set the game's Reset; accepted evaluation commits the route, rejected
+evaluation leaves the transition pending for retry. Stable routes retain history.
+Caller Reset and raw game jitter are restored/preserved by the existing scope.
+NR still precedes game reconstruction when configured Pre-SR; no FG order changes.
+
+The production-extracted `tests/nr_game_history` suite covers ordinary entry,
+fallback, stable frames, rejected transitions, retry, all private route crossings,
+caller Reset and jitter restoration. No new telemetry or user options are added.
+
 No model/runtime, MFG provider or policy, jitter, or default NR placement changes.
 Local hardware is RTX 4090/Ada. Neither Witcher 3 nor an Intel GPU is available;
 CP2077 testing cannot establish Witcher or Intel-provider compatibility.
