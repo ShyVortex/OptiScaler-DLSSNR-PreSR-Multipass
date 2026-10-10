@@ -157,6 +157,7 @@ void RenderMenu(Config* config, float menuResScale)
         if (PipelineUi::CheckboxWrapped("Enable Neural Rendering", &enabled, toggleWidth))
         {
             config->DlssNrEnabled = enabled;
+            RequestHistoryReset();
             if (enabled && !config->DlssNrRunBeforeSr.has_value())
                 config->DlssNrRunBeforeSr = true;
         }

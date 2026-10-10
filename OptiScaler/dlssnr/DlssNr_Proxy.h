@@ -39,7 +39,8 @@ class Context
     // True when the driver's nvngx is initialised and exports what this path needs.
     static bool Available();
 
-    // Creation records GPU work. A feature becomes ready only in a later submission epoch.
+    // Creation records GPU work. Readiness requires the exact creation recording's completion;
+    // submissionEpoch is diagnostic/frame identity, never evidence of submission or completion.
     unsigned int Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
                          unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready);
     bool HasFeature() const;

@@ -58,5 +58,11 @@ void RequestCapture(unsigned int frames)
     ++requests.captureGeneration;
 }
 
+void RequestHistoryReset()
+{
+    std::lock_guard lock(statusMutex);
+    ++requests.historyGeneration;
+}
+
 std::optional<double> LastGpuTime() { return ReadStatus(Backend::Dx12).gpuTime; }
 } // namespace DlssNr
