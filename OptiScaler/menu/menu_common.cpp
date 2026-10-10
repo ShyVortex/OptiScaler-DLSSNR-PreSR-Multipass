@@ -1520,6 +1520,7 @@ void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
         {
             inputDlssNr = false;
             config->DlssNrEnabled = !config->DlssNrEnabled.value_or_default();
+            DlssNr::RequestHistoryReset();
             LOG_DEBUG("Neural Rendering toggle key pressed, setting DlssNrEnabled to {}",
                       config->DlssNrEnabled.value_or_default());
 

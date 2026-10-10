@@ -38,6 +38,10 @@ auto DlssNr_Dx12::State::ConsumeControls() -> void
         enlargementStatus.clear();
     }
     const auto requested = DlssNr::ReadControlRequests();
+    // Remember UI transitions even if Off and On occurred between render calls.
+    // Reset temporal history without rebuilding the existing model features.
+    if (!cfg.DlssNrEnabled.value_or_default() || requested.historyGeneration != controls.historyGeneration)
+        nr.reset = true;
     if (requested.retryGeneration != controls.retryGeneration)
     {
         for (auto& model : nr.models)
