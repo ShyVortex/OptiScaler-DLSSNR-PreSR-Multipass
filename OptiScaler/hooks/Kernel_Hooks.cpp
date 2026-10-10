@@ -86,6 +86,30 @@ static inline HMODULE CheckLoad(const std::wstring& name)
     return nullptr;
 }
 
+// AmpereMfg internal mode (plan §6b): after the first successful lazy load of nvngx_dlssg.dll, log which
+// module the handle actually resolved to - the decisive substitution triage line. Shared by the A/W
+// GetModuleHandle masquerade hooks; fires exactly once per process.
+static bool s_ampereMfgDlssgIdentityLogged = false;
+
+static inline void LogAmpereMfgDlssgIdentity(HMODULE module)
+{
+    if (!State::Instance().ampereMfgInternalActive || s_ampereMfgDlssgIdentityLogged)
+        return;
+
+    s_ampereMfgDlssgIdentityLogged = true;
+
+    wchar_t modulePath[MAX_PATH] {};
+    if (GetModuleFileNameW(module, modulePath, MAX_PATH) == 0)
+    {
+        DWORD lastError = GetLastError();
+        LOG_ERROR("AmpereMfg internal: GetModuleFileNameW failed on the lazy-loaded nvngx_dlssg.dll (error: {})",
+                  lastError);
+        return;
+    }
+
+    LOG_INFO("AmpereMfg internal: nvngx_dlssg.dll identity resolves to {}", wstring_to_string(modulePath));
+}
+
 VALIDATE_HOOK(hk_K32_GetProcAddress, Kernel32Proxy::PFN_GetProcAddress)
 FARPROC WINAPI KernelHooks::hk_K32_GetProcAddress(HMODULE hModule, LPCSTR lpProcName)
 {
@@ -146,7 +170,10 @@ HMODULE WINAPI KernelHooks::hk_K32_GetModuleHandleA(LPCSTR lpModuleName)
                 {
                     original = LoadLibraryW(State::Instance().NVNGX_DLSSG_Path.value().c_str());
                     if (original != nullptr)
+                    {
+                        LogAmpereMfgDlssgIdentity(original);
                         return original;
+                    }
                 }
                 return nullptr;
             }
@@ -203,7 +230,10 @@ HMODULE WINAPI KernelHooks::hk_K32_GetModuleHandleW(LPCWSTR lpModuleName)
                 {
                     original = LoadLibraryW(State::Instance().NVNGX_DLSSG_Path.value().c_str());
                     if (original != nullptr)
+                    {
+                        LogAmpereMfgDlssgIdentity(original);
                         return original;
+                    }
                 }
                 return nullptr;
             }

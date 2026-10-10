@@ -224,11 +224,15 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
 
 /// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3,
 /// MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame, DynamicMFG/DynamicTargetFPS).
+/// In internal mode (internalModeActive), auto/absent SpoofArchToGame resolves to 0: OptiScaler's own
+/// caller-scoped NvAPI GetArchInfo spoof owns the Streamline plugin-eviction gate; explicit 1/0 is
+/// still written as-is (escape hatch).
 inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const std::string& preset = "Auto",
                                        const std::string& kernelImg = "Auto", int hwBilinear = 0,
                                        const std::string& router = "Auto", int logLevel = 1,
                                        const std::string& spoofArch = "Auto", bool dynamicMfg = false,
-                                       float dynamicTargetFps = 0.0f, bool hasDynamicMfgSupport = false)
+                                       float dynamicTargetFps = 0.0f, bool hasDynamicMfgSupport = false,
+                                       bool internalModeActive = false)
 {
     // Clamping of MaxGeneratedFrames for 0.3.x: 1 to 5 (5 = 6X)
     if (maxFrames <= 0 || maxFrames > 5)
@@ -282,6 +286,8 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
         ss << "SpoofArchToGame=1\n";
     else if (spoofArch == "0" || spoofArch == "false")
         ss << "SpoofArchToGame=0\n";
+    else if (internalModeActive)
+        ss << "SpoofArchToGame=0\n";
     ss << "\n";
     ss << "[Logging]\n";
     ss << "Level=" << validLogLevel << "\n";
@@ -312,6 +318,24 @@ inline void ResolveControlModeAndMultiplier(bool dynamicMfg, int explicitOverrid
         outMode = 2;
         int clamped = (explicitOverrideFrames > maxCeiling) ? maxCeiling : explicitOverrideFrames;
         outMultiplier = static_cast<uint32_t>(clamped + 1);
+    }
+    else
+    {
+        outMode = 0;
+        outMultiplier = 0;
+    }
+}
+
+/// Resolves the SilyNoMeta DLSSG_RequestControl mode and multiplier for the internal FG route:
+/// - Dynamic MFG explicitly requested: mode 1 (Dynamic), multiplier 0 (target FPS is conveyed separately)
+/// - Default: mode 0 (FollowGame / Driver mode), multiplier 0; OptiScaler owns the multiplier via
+///   slDLSSGSetOptions / InterpolationCount; a fixed multiplier (mode 2) would fight it
+inline void ResolveControlModeAndMultiplierInternal(bool dynamicMfg, uint32_t& outMode, uint32_t& outMultiplier)
+{
+    if (dynamicMfg)
+    {
+        outMode = 1;
+        outMultiplier = 0;
     }
     else
     {

@@ -72,6 +72,24 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGDLSSGAdaMfgUnlock.set_from_config(readBool("DLSSG", "AdaMfgUnlock"));
             FGDLSSGAdaBlackwellKernels.set_from_config(readBool("DLSSG", "AdaBlackwellKernels"));
             FGDLSSGAmpereMfgUnlock.set_from_config(readBool("DLSSG", "AmpereMfgUnlock"));
+            if (auto ampereMode = readString("DLSSG", "AmpereMfgMode"); ampereMode.has_value())
+            {
+                if (lstrcmpiA(ampereMode.value().c_str(), "internal") == 0)
+                    FGDLSSGAmpereMfgMode.set_from_config("Internal");
+                else if (lstrcmpiA(ampereMode.value().c_str(), "external") == 0)
+                    FGDLSSGAmpereMfgMode.set_from_config("External");
+                else
+                {
+                    LOG_WARN("Config: Invalid DLSSG.AmpereMfgMode value: {}. Falling back to External.",
+                             ampereMode.value());
+                    FGDLSSGAmpereMfgMode.set_from_config("External");
+                }
+
+                // Startup-only: mirror the effective parsed mode into State
+                State::Instance().ampereMfgMode = FGDLSSGAmpereMfgMode.value_or("External") == "Internal"
+                                                      ? AmpereMfgMode::Internal
+                                                      : AmpereMfgMode::External;
+            }
             FGDLSSGAmpereMfgMaxFrames.set_from_config(readInt("DLSSG", "AmpereMfgMaxFrames"));
             if (FGDLSSGAmpereMfgMaxFrames.has_value() &&
                 (FGDLSSGAmpereMfgMaxFrames.value() < 0 || FGDLSSGAmpereMfgMaxFrames.value() > 5))
@@ -188,7 +206,11 @@ bool Config::Reload(std::filesystem::path iniPath)
 
             if (FGDLSSGAmpereMfgUnlock.value_or_default())
             {
-                ExternalFrameGeneration.set_from_config(true);
+                // External (default) keeps the historic external-FG forcing; Internal keeps the
+                // internal FG route active (see AmpereMfgMode in OptiScaler.ini).
+                if (FGDLSSGAmpereMfgMode.value_or("External") != "Internal")
+                    ExternalFrameGeneration.set_from_config(true);
+
                 FGDLSSGAdaMfgUnlock.set_from_config(false);
             }
 
@@ -1128,11 +1150,16 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("FrameGen", "Enabled", GetBoolValue(Instance()->FGEnabled.value_for_config()).c_str());
         ini.SetValue(
             "FrameGen", "External",
-            GetBoolValue(Instance()->ExternalFrameGeneration.value_for_config_or(false) || ampereUnlock).c_str());
+            GetBoolValue(Instance()->ExternalFrameGeneration.value_for_config_or(false) ||
+                         (ampereUnlock &&
+                          Instance()->FGDLSSGAmpereMfgMode.value_for_config_or("External") != "Internal"))
+                .c_str());
         ini.SetValue("DLSSG", "AdaMfgUnlock", GetBoolValue(adaUnlock).c_str());
         ini.SetValue("DLSSG", "AdaBlackwellKernels",
                      GetBoolValue(Instance()->FGDLSSGAdaBlackwellKernels.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgUnlock", GetBoolValue(ampereUnlock).c_str());
+        ini.SetValue("DLSSG", "AmpereMfgMode",
+                     Instance()->FGDLSSGAmpereMfgMode.value_for_config_or("External").c_str());
         ini.SetValue("DLSSG", "AmpereMfgMaxFrames",
                      GetIntValue(Instance()->FGDLSSGAmpereMfgMaxFrames.value_for_config()).c_str());
         ini.SetValue("DLSSG", "AmpereMfgKernelImage",
