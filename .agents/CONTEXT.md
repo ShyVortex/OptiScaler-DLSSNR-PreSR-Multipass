@@ -120,6 +120,7 @@ Every implementation plan created for the project must document:
    - `docs/issues/FG/` — Frame Generation (DLSS-G, FSR-FG, XeFG, Smooth Motion, external proxies)
    - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
    - `docs/issues/NR/` — Neural Rendering (DLSS-NR)
+   - **Mandatory Hardware & OS Accuracy Verification**: When writing the Overview & Environment section of any report, the agent MUST ALWAYS actively query and verify real system and hardware details via terminal commands (`uname -r`, `/etc/os-release`, `nvidia-smi`) before authoring the document. Never guess, estimate, or reuse stale/placeholder environmental metadata.
 
 ## Intel Xe Multi-Frame Generation (XeMFG & XeMFG-SR) Architecture
 

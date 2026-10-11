@@ -25,6 +25,9 @@ description: Implementation planning, task progression, testing, and explicit ap
      - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
      - `docs/issues/NR/` — Neural Rendering (DLSS-NR)
    - The document must record the environment, reported symptoms, validity assessment, root cause, applied solution, and test verification.
+   - **Mandatory Hardware & OS Accuracy Verification**:
+     - When writing the Overview & Environment section of any report under `docs/issues/`, the agent MUST ALWAYS actively check and verify real system and hardware details using terminal commands (e.g. `uname -r`, `/etc/os-release`, `nvidia-smi`) before authoring the document.
+     - Never guess, estimate, or copy stale/placeholder OS distributions, kernel versions, GPU models, or driver versions into issue documentation. Accurate, verified environmental metadata is mandatory.
 
 5. **Mandatory Unit Tests**:
    - Every implementation plan MUST feature automated unit tests to validate each component or enhancement.
