@@ -15,6 +15,13 @@
 static inline uint64_t _lastFrameId[20] = { 0 };
 static inline IUnknown* _lastDev[20] = { 0 };
 
+static inline bool IsXeFGActive()
+{
+    const auto& state = State::Instance();
+    return state.activeFgOutput == FGOutput::XeFG && state.currentFGSwapchain != nullptr &&
+           state.currentFG != nullptr && state.currentFG->IsActive() && !state.currentFG->IsPaused();
+}
+
 // #define LOG_REFLEX_CALLS
 
 std::optional<TimingEntry> ReflexHooks::timingData[TimingType::TimingTypeCOUNT] {};
@@ -34,7 +41,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetSleepMode(IUnknown* pDev, NV_SET_SLEEP_
     if (_minimumIntervalUs != 0)
         pSetSleepModeParams->minimumIntervalUs = _minimumIntervalUs;
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
 
     return o_NvAPI_D3D_SetSleepMode(pDev, pSetSleepModeParams);
@@ -80,7 +87,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_Sleep(IUnknown* pDev)
         }
     }
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D_Sleep(pDev);
 
     _lastSleepDev = pDev;
@@ -93,7 +100,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_GetLatency(IUnknown* pDev, NV_LATENCY_RESU
     LOG_FUNC();
 #endif
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D_GetLatency(pDev, pGetLatencyParams);
 
     return o_NvAPI_D3D_GetLatency(pDev, pGetLatencyParams);
@@ -122,7 +129,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
     // RTSS reflex markers have a frameid marker in the high bits
     if (isRtssMarker)
     {
-        if (!State::Instance().rtssReflexInjection && State::Instance().activeFgOutput == FGOutput::XeFG)
+        if (!State::Instance().rtssReflexInjection && IsXeFGActive())
         {
             ImGuiToast notification { ImGuiToastType::Info, 10000 };
             notification.setTitle("RTSS + XeFG Active");
@@ -291,7 +298,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_SetLatencyMarker(IUnknown* pDev,
         }
     }
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D_SetLatencyMarker(pDev, pSetLatencyMarkerParams);
 
     return o_NvAPI_D3D_SetLatencyMarker(pDev, pSetLatencyMarkerParams);
@@ -378,7 +385,7 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D12_SetAsyncFrameMarker(ID3D12CommandQueue* 
     //    }
     //}
 
-    if (State::Instance().activeFgOutput == FGOutput::XeFG)
+    if (IsXeFGActive())
         return nvapi_calls::NvAPI_D3D12_SetAsyncFrameMarker(pCommandQueue, pSetAsyncFrameMarkerParams);
 
     return o_NvAPI_D3D12_SetAsyncFrameMarker(pCommandQueue, pSetAsyncFrameMarkerParams);
@@ -725,7 +732,7 @@ void ReflexHooks::setFPSLimit(float fps)
         memcpy(&temp, &_lastSleepParams, sizeof(NV_SET_SLEEP_MODE_PARAMS));
         temp.minimumIntervalUs = _minimumIntervalUs;
 
-        if (State::Instance().activeFgOutput == FGOutput::XeFG)
+        if (IsXeFGActive())
             nvapi_calls::NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);
         else
             o_NvAPI_D3D_SetSleepMode(_lastSleepDev, &temp);
