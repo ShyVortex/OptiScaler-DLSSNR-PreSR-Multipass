@@ -372,6 +372,36 @@ bool Config::Reload(std::filesystem::path iniPath)
             XeMfgExtraPacing.set_from_config(readBool("XeMFG", "ExtraPacing"));
             if (!XeMfgExtraPacing.has_value())
                 XeMfgExtraPacing.set_from_config(readBool("XeFG", "ExtraPacing"));
+
+            // XeMFG-SR Injector (games with DLSS-SR but without native DLSS-FG)
+            XeMfgSrEnable.set_from_config(readBool("XeMFG-SR", "Enable"));
+            if (!XeMfgSrEnable.has_value())
+                XeMfgSrEnable.set_from_config(readBool("XeMFG", "EnableSR"));
+
+            XeMfgSrGeneratedFrames.set_from_config(readInt("XeMFG-SR", "GeneratedFrames"));
+            if (!XeMfgSrGeneratedFrames.has_value())
+                XeMfgSrGeneratedFrames.set_from_config(readInt("XeMFG", "SrGeneratedFrames"));
+            if (XeMfgSrGeneratedFrames.has_value() &&
+                (XeMfgSrGeneratedFrames.value() < 1 || XeMfgSrGeneratedFrames.value() > 5))
+                XeMfgSrGeneratedFrames.reset();
+
+            // Strict mutual exclusion: primary XeMFG takes precedence over XeMFG-SR
+            if (XeMfgUnlock.value_or_default())
+            {
+                if (XeMfgSrEnable.value_or_default())
+                {
+                    LOG_WARN("Config: Primary XeMFG (native DLSS-G) is enabled; disabling XeMFG-SR injector due to "
+                             "mutual exclusion");
+                    XeMfgSrEnable.set_from_config(false);
+                }
+            }
+
+            // Universal MFG mutual exclusion with Ada, Ampere, and external FG
+            if (FGDLSSGAdaMfgUnlock.value_or_default() || FGDLSSGAmpereMfgUnlock.value_or_default() ||
+                ExternalFrameGeneration.value_or_default())
+            {
+                XeMfgSrEnable.set_from_config(false);
+            }
         }
 
         {
@@ -1289,6 +1319,13 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("XeMFG", "MaxInterpolatedFrames",
                      GetIntValue(Instance()->XeMfgMaxFrames.value_for_config()).c_str());
         ini.SetValue("XeMFG", "ExtraPacing", GetBoolValue(Instance()->XeMfgExtraPacing.value_for_config()).c_str());
+    }
+
+    // XeMFG-SR Injector
+    {
+        ini.SetValue("XeMFG-SR", "Enable", GetBoolValue(Instance()->XeMfgSrEnable.value_for_config()).c_str());
+        ini.SetValue("XeMFG-SR", "GeneratedFrames",
+                     GetIntValue(Instance()->XeMfgSrGeneratedFrames.value_for_config()).c_str());
     }
 
     {

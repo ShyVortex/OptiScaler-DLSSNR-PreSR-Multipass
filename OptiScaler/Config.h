@@ -773,6 +773,10 @@ class Config
     CustomOptional<int> XeMfgMaxFrames { 3 };
     CustomOptional<bool> XeMfgExtraPacing { false }; // Optional native DXGI VBlank pacing, not provider thunk hooks
 
+    // XeMFG-SR Injector (games with DLSS-SR but without native DLSS-FG)
+    CustomOptional<bool> XeMfgSrEnable { false };
+    CustomOptional<int> XeMfgSrGeneratedFrames { 2 };
+
     // DLSSG
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance
     CustomOptional<bool> FGDLSSGUseGamesReflexMarkers { true };
