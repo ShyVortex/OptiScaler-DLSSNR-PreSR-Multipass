@@ -1942,6 +1942,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                      "FGEnabled=true)");
         }
 
+        const bool xeMfgSrActive = XeMfgLoader::SrEnabledForSession();
+        if (xeMfgSrActive && !State::Instance().externalFrameGeneration)
+        {
+            auto* cfg = Config::Instance();
+            cfg->FGEnabled.set_volatile_value(true);
+            cfg->FGInput.set_volatile_value(FGInput::Upscaler);
+            cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
+            cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
+            const int srFrames = std::clamp(cfg->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
+            cfg->FGXeFGInterpolationCount.set_volatile_value(srFrames);
+            LOG_INFO("XeMfgLoader: XeMFG-SR injector active, auto-configuring pipeline (FGInput=Upscaler, "
+                     "FGOutput=XeFG, InterpolationCount={}, FGEnabled=true)",
+                     srFrames);
+        }
+
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
         State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
         State::Instance().activeFgNvngx = Config::Instance()->FGNvngxReplacement.value_or_default();

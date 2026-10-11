@@ -162,10 +162,22 @@ bool EnabledForSession()
            !config->FGDLSSGAdaMfgUnlock.value_or_default() && !config->FGDLSSGAmpereMfgUnlock.value_or_default();
 }
 
+bool SrEnabledForSession()
+{
+    auto config = Config::Instance();
+    if (!config)
+        return false;
+    return config->XeMfgSrEnable.value_or_default() && !config->XeMfgUnlock.value_or_default() &&
+           !config->ExternalFrameGeneration.value_or_default() && !config->FGDLSSGAdaMfgUnlock.value_or_default() &&
+           !config->FGDLSSGAmpereMfgUnlock.value_or_default();
+}
+
+bool AnyEnabledForSession() { return EnabledForSession() || SrEnabledForSession(); }
+
 bool Pending()
 {
     std::scoped_lock lock(g_mutex);
-    return EnabledForSession() && !g_status.Patched && !g_status.PatchFailed;
+    return AnyEnabledForSession() && !g_status.Patched && !g_status.PatchFailed;
 }
 
 unsigned int UnlockedMax()
@@ -364,7 +376,7 @@ void TryApply(HMODULE module)
     if (g_applied || g_status.Patched || g_status.PatchFailed)
         return;
 
-    if (!EnabledForSession())
+    if (!AnyEnabledForSession())
     {
         LOG_DEBUG("XeMFG unlock: disabled in configuration");
         return;
@@ -410,7 +422,11 @@ void TryApply(HMODULE module)
         }
     }
 
-    unsigned int targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
+    unsigned int targetCeiling = kDefaultMaxFrames;
+    if (SrEnabledForSession())
+        targetCeiling = Config::Instance()->XeMfgSrGeneratedFrames.value_or(2);
+    else
+        targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
 
     bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, true, g_status);
     if (result)

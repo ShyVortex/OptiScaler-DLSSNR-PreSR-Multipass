@@ -36,7 +36,9 @@ enum class Failure
 
 Status LastStatus();
 bool EnabledForSession();
-inline bool IsEnabled() { return EnabledForSession(); }
+bool SrEnabledForSession();
+bool AnyEnabledForSession();
+inline bool IsEnabled() { return AnyEnabledForSession(); }
 bool Pending();
 
 // The generated frame ceiling the patches unlocked, or 1 when unpatched/stock
