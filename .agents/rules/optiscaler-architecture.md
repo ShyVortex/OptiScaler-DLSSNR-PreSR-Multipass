@@ -190,13 +190,22 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - **Automatic Pipeline Auto-Configuration (`OptiScaler/dllmain.cpp`)**:
        - When `XeMfgLoader::SrEnabledForSession()` is active without external FG:
          `FGEnabled = true`, `FGInput = FGInput::Upscaler`, `FGOutput = FGOutput::XeFG`, `FGNvngxReplacement = None`, and `FGXeFGInterpolationCount = srFrames`.
+       - Post-attach initialization must invoke `fakenvapi::init(true)` early to ensure the low latency context is allocated before Reflex calls arrive.
+     - **Reflex Hook SwapChain & Feature State Gating (`OptiScaler/hooks/Reflex_Hooks.cpp`)**:
+       - Reflex hooks (`hkNvAPI_D3D_SetSleepMode`, `hkNvAPI_D3D_Sleep`, `hkNvAPI_D3D_GetLatency`, `hkNvAPI_D3D_SetLatencyMarker`, `hkNvAPI_D3D12_SetAsyncFrameMarker`, `setFPSLimit`) must **never** hijack game calls to `nvapi_calls` unless XeFG is fully initialized and actively presenting (`state.activeFgOutput == FGOutput::XeFG && state.currentFGSwapchain != nullptr && state.currentFG != nullptr && state.currentFG->IsActive() && !state.currentFG->IsPaused()`).
+       - When XeFG is inactive or when the swapchain has not yet been bound to XeFG, calls must smoothly fall through to native driver Reflex (`o_NvAPI_D3D_...`), preventing null dereferences on uninitialized contexts and ensuring games with native Reflex / DLSS-SR continue operating cleanly.
+     - **Thread-Safe `LowLatencyCtx` Lazy-Initialization & Null Guards (`OptiScaler/nvapi/fakenvapi/`)**:
+       - `LowLatencyCtx::get()` in `low_latency.h` must be thread-safe with `std::scoped_lock` on static mutex `s_mutex` and self-initializing (`if (!lowlatency_ctx) init();`), guaranteeing it never returns `nullptr`.
+       - All 13 dispatch functions in `nvapi_calls.cpp` must null-guard `LowLatencyCtx::get()`, returning `ERROR()` on null context instead of dereferencing `nullptr + 8`.
      - **In-Game Menu Overlay UI (`OptiScaler/menu/menu_common.cpp`)**:
        - Dedicated `Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR)` collapsible subsection rendered before the `if (state.externalFrameGeneration || ...)` early return.
-       - Interactive checkbox `"Enable XeMFG-SR Injector (Multi-Frame Generation)##xemfg_sr"` auto-configuring the pipeline, initiating `XeFGProxy::InitXeFG()`, applying `XeMfgLoader::TryApply()`, and enforcing bidirectional mutual exclusion with other FG unlockers and Smooth Motion.
+       - Interactive checkbox `"Enable XeMFG-SR Injector (Multi-Frame Generation; restart)##xemfg_sr"` auto-configuring the pipeline, initiating `fakenvapi::init(true)`, `XeFGProxy::InitXeFG()`, applying `XeMfgLoader::TryApply()`, and enforcing bidirectional mutual exclusion with other FG unlockers and Smooth Motion.
        - Dynamic slider `"Generated Frames##xemfg_sr"` (1 to 5 / 2X to 6X FG) dynamically updating `XeMfgLoader::SetMaxGeneratedFrames` and `currentFG->SetInterpolatedFrameCount`.
        - Status badge (`DLL: found | Patches: 5/5 | Pacing: active`), presentation telemetry from `xefgSwapChainGetLastPresentStatus`, and live multiplier indicator (`In-Game Multiplier: %dX (Active)`).
+       - Diagnostic prompt when swapchain is unbound (`state.currentFGSwapchain == nullptr`): `"Note: Save Settings and restart the game to initialize the XeFG SwapChain."`.
        - Diagnostic checkboxes: `Debug Markers (Corners)`, `Only Interpolated Frames`, and `Display VBlank Sync (Extra Pacing)`.
      - **Associated Automated Unit Tests**:
        - `tests/xemfg_sr_unit.cpp`
        - `tests/xemfg_menu_exclusion_unit.cpp`
+       - `tests/xemfg_sr_crash_fix_unit.cpp`
 

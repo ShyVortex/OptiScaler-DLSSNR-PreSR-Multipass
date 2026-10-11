@@ -138,3 +138,11 @@ Every implementation plan created for the project must document:
 - **In-Game Menu Overlay**: Dedicated `Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR)` subsection in `menu_common.cpp` with interactive one-click setup, dynamic multiplier slider (2X to 6X / 1 to 5 interpolated frames) with live in-memory byte rewriting (`SetMaxGeneratedFrames`), diagnostic badges, presentation telemetry, and corner debug markers.
 - **Mutual Exclusion**: Strict universal mutual exclusion in `Config.cpp` and `menu_common.cpp` against primary `XeMfgUnlock`, `AdaMfgUnlock`, `AmpereMfgUnlock`, `SmoothMotion`, and `ExternalFrameGeneration`.
 - **Config**: `[XeMFG-SR]` `Enable`, `GeneratedFrames` (1..5).
+
+### XeMFG-SR Lifecycle Safety, Reflex Gating & LowLatencyCtx Thread Safety
+- **Helldivers 2 Defect Resolution**: Fixed immediate crash (`0xc0000005` at `nullptr + 8`) caused by uninitialized `LowLatencyCtx::get()`, missing null guards in `nvapi_calls`, and unguarded Reflex hook hijacking when XeMFG-SR was enabled mid-game.
+- **Reflex Hook SwapChain Gating**: In `Reflex_Hooks.cpp`, `IsXeFGActive()` strictly verifies `activeFgOutput == FGOutput::XeFG && currentFGSwapchain != nullptr && currentFG != nullptr && currentFG->IsActive() && !currentFG->IsPaused()`. If inactive or if the swapchain is not yet bound to XeFG, Reflex calls fall through smoothly to native driver Reflex (`o_NvAPI_D3D_...`).
+- **LowLatencyCtx Lazy-Init & Null Guards**: `LowLatencyCtx::get()` in `low_latency.h` is self-initializing and thread-safe via `std::scoped_lock`. All dispatch functions in `nvapi_calls.cpp` null-guard `LowLatencyCtx::get()`. Early `fakenvapi::init(true)` calls are placed in `dllmain.cpp` and `menu_common.cpp`.
+- **Menu Guidance & SwapChain Diagnostics**: `menu_common.cpp` marks XeMFG-SR checkbox as requiring restart (`(restart)`), and displays `"Note: Save Settings and restart the game to initialize the XeFG SwapChain."` whenever `currentFGSwapchain == nullptr`.
+- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing).
+
