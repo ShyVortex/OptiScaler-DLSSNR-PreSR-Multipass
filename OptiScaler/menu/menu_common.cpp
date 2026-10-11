@@ -3890,7 +3890,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
                         const int srFrames = std::clamp(config->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
                         config->FGXeFGInterpolationCount = srFrames;
-                        state.fgInterpolationCount = srFrames;
 
                         XeFGProxy::InitXeFG();
                         if (XeMfgLoader::IsEnabled())
@@ -4001,7 +4000,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     config->XeMfgSrGeneratedFrames = srFrames;
                     config->FGXeFGInterpolationCount = srFrames;
-                    state.fgInterpolationCount = srFrames;
                     if (XeMfgLoader::IsEnabled())
                         XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(srFrames));
                     if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
