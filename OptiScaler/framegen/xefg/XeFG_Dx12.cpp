@@ -443,6 +443,10 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
         _isActive = false;
         LOG_INFO("XeFG initialized in passthrough mode for DLSSG input");
     }
+    else
+    {
+        _framesToInterpolate = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
+    }
 
     _gameCommandQueue = realQueue;
     _swapChain = *swapChain;
@@ -610,6 +614,10 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
         _framesToInterpolate = 0;
         _isActive = false;
         LOG_INFO("XeFG swapchain1 initialized in passthrough mode for DLSSG input");
+    }
+    else
+    {
+        _framesToInterpolate = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
     }
 
     _gameCommandQueue = realQueue;
@@ -805,7 +813,8 @@ bool XeFG_Dx12::Dispatch()
             LOG_INFO("Interpolation count changed {} -> {}", _framesToInterpolate,
                      Config::Instance()->FGXeFGInterpolationCount.value_or_default());
 
-            state.WAR_xefgRequestFGToggle = true;
+            if (!XeMfgLoader::AnyEnabledForSession())
+                state.WAR_xefgRequestFGToggle = true;
 
 #ifndef DONT_USE_XMX
             ScopedSkipSpoofingGlobal skipSpoofingGlobal {};
@@ -949,6 +958,9 @@ bool XeFG_Dx12::Dispatch()
     _needResetHistory = false;
 
     auto frameRenderTime = XeFGPacing::RenderTimeMs();
+
+    if (frameRenderTime < 1.0 || (_ftDelta[fIndex] > 0.0 && frameRenderTime < 0.25 * _ftDelta[fIndex]))
+        frameRenderTime = _ftDelta[fIndex];
 
     if (!(frameRenderTime > 0.0))
         frameRenderTime = _ftDelta[fIndex];

@@ -4012,7 +4012,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                         XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(srFrames));
                     if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
                         state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
-                    state.fgChanged = true;
                 }
                 ShowHelpMarker("Number of interpolated frames generated per real DLSS-SR rendered frame.\n"
                                "1 = 2X FG (1 interpolated frame)\n"
