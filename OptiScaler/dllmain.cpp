@@ -43,6 +43,7 @@
 #include <hooks/Streamline_Hooks.h>
 
 #include <nvapi/NvApiHooks.h>
+#include <nvapi/fakenvapi.h>
 
 #include "spoofing/User32_Spoofing.h"
 
@@ -1938,6 +1939,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             cfg->FGInput.set_volatile_value(FGInput::DLSSG);
             cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
+            fakenvapi::init(true);
             LOG_INFO("XeMfgLoader: XeMFG unlock active, auto-configuring pipeline (FGInput=DLSSG, FGOutput=XeFG, "
                      "FGEnabled=true)");
         }
@@ -1952,6 +1954,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
             const int srFrames = std::clamp(cfg->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
             cfg->FGXeFGInterpolationCount.set_volatile_value(srFrames);
+            fakenvapi::init(true);
             LOG_INFO("XeMfgLoader: XeMFG-SR injector active, auto-configuring pipeline (FGInput=Upscaler, "
                      "FGOutput=XeFG, InterpolationCount={}, FGEnabled=true)",
                      srFrames);

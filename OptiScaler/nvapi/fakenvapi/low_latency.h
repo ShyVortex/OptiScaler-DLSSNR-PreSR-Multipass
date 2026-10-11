@@ -7,6 +7,7 @@
 
 #include "low_latency/ll_util.h"
 #include <optional>
+#include <mutex>
 
 class LowLatency
 {
@@ -77,18 +78,26 @@ class LowLatencyCtx
   public:
     static void init()
     {
+        std::scoped_lock lock(s_mutex);
         if (!lowlatency_ctx)
             lowlatency_ctx = new LowLatency();
     }
 
     static void shutdown()
     {
+        std::scoped_lock lock(s_mutex);
         delete lowlatency_ctx;
         lowlatency_ctx = nullptr;
     }
 
-    static LowLatency* get() { return lowlatency_ctx; }
+    static LowLatency* get()
+    {
+        if (!lowlatency_ctx)
+            init();
+        return lowlatency_ctx;
+    }
 
   private:
     static LowLatency* lowlatency_ctx;
+    static inline std::mutex s_mutex {};
 };

@@ -3891,6 +3891,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                         const int srFrames = std::clamp(config->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
                         config->FGXeFGInterpolationCount = srFrames;
 
+                        fakenvapi::init(true);
                         XeFGProxy::InitXeFG();
                         if (XeMfgLoader::IsEnabled())
                             XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(srFrames));
