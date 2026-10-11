@@ -4047,6 +4047,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
                                "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
                                "Enable only if your display exhibits severe tear-lines without V-Sync.");
+
+                bool fgBorderless = config->FGXeFGForceBorderless.value_or_default();
+                if (ImGui::Checkbox("Force Borderless Window (restart)##xemfg_sr", &fgBorderless))
+                {
+                    config->FGXeFGForceBorderless = fgBorderless;
+                }
+                ShowHelpMarker("Forces borderless windowed mode on swapchains.\n"
+                               "Required for games that use DXGI exclusive fullscreen (e.g. Helldivers 2),\n"
+                               "as Intel XeFG disables frame interpolation in exclusive fullscreen.");
             }
 
             ImGui::Unindent();

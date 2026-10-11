@@ -385,6 +385,10 @@ bool Config::Reload(std::filesystem::path iniPath)
                 (XeMfgSrGeneratedFrames.value() < 1 || XeMfgSrGeneratedFrames.value() > 5))
                 XeMfgSrGeneratedFrames.reset();
 
+            auto srForceBorderless = readBool("XeMFG-SR", "ForceBorderless");
+            if (srForceBorderless.has_value())
+                FGXeFGForceBorderless.set_from_config(srForceBorderless);
+
             // Strict mutual exclusion: primary XeMFG takes precedence over XeMFG-SR
             if (XeMfgUnlock.value_or_default())
             {
@@ -1326,6 +1330,8 @@ bool Config::SaveIni(std::filesystem::path destination)
         ini.SetValue("XeMFG-SR", "Enable", GetBoolValue(Instance()->XeMfgSrEnable.value_for_config()).c_str());
         ini.SetValue("XeMFG-SR", "GeneratedFrames",
                      GetIntValue(Instance()->XeMfgSrGeneratedFrames.value_for_config()).c_str());
+        ini.SetValue("XeMFG-SR", "ForceBorderless",
+                     GetBoolValue(Instance()->FGXeFGForceBorderless.value_for_config()).c_str());
     }
 
     {
