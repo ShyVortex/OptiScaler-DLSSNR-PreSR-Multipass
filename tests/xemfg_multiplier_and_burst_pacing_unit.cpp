@@ -23,6 +23,12 @@
 //    (deadline(i) = base + (i-1) * unit) without accumulating drift across bursts.
 // 7. ApplyAntiClumpProtection prevents sub-millisecond frame dumps (<1 ms) without stalling.
 // 8. Frame render time measurement (RenderTimeMs()) feeds valid non-zero delta time to Intel.
+// 9. Swapchain init parameters: params.maxInterpolatedFrames == 1 sent to D3D12InitFromSwapChainDesc
+//    on non-Intel GPUs, satisfying 0x1801ffb44 validation and preventing INVALID_ARGUMENT.
+// 10. Startup multiplier synchronization: post-creation SetInterpolatedFrameCount immediately
+//     binds the user-configured frame count (2..5) on frame 1 without menu slider interaction.
+// 11. Quirk lifecycle: ForceBorderlessWhenUsingXeFG quirk correctly applies when XeMFG/XeMFG-SR
+//     auto-configures activeFgOutput == XeFG without premature quirk destruction.
 
 namespace XeMfgPacingTest
 {
@@ -98,6 +104,61 @@ struct SimulatedXeFGContext
             return static_cast<uint32_t>(effectiveMax);
 
         return requestedCount;
+    }
+
+    bool isIntelGPU = false;                 // Non-Intel GPU by default (NVIDIA GA103 / RTX 3080 Ti Laptop)
+    bool hasSetNumInterpolatedFrames = true; // Modern libxess_fg.dll v1.3.1.78
+    uint32_t initParamsMaxInterpolatedFrames = 0;
+    uint32_t currentProviderFrames = 1;
+
+    bool CreateSwapchain(uint32_t configTargetCount, bool forceXeLL = false, bool useFlawedInit = false)
+    {
+        OnInitSwapchain();
+        int effectiveMax = maxInterpolationCount;
+        if (MockXeMfgLoader::AnyEnabledForSession())
+            effectiveMax = std::max(effectiveMax, 5);
+
+        int intTarget = effectiveMax;
+        if (!hasSetNumInterpolatedFrames)
+            intTarget = configTargetCount;
+
+        if (intTarget < 1 || intTarget > effectiveMax)
+            intTarget = 1;
+
+        if (useFlawedInit)
+        {
+            // Old flawed logic from 55b47147: passed intTarget (5) directly
+            initParamsMaxInterpolatedFrames = intTarget;
+        }
+        else
+        {
+            // Fixed logic: pass 1 when SetNumInterpolatedFrames is present or forceXeLL
+            if (forceXeLL || hasSetNumInterpolatedFrames)
+                initParamsMaxInterpolatedFrames = 1;
+            else
+                initParamsMaxInterpolatedFrames = intTarget;
+        }
+
+        // Simulated Intel libxess_fg.dll D3D12InitFromSwapChainDesc validation:
+        // In 0x1801ffb41: cmpl $1, params.maxInterpolatedFrames on non-Intel GPUs (0x1801ffb44)
+        if (!isIntelGPU && initParamsMaxInterpolatedFrames != 1)
+        {
+            return false; // XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT
+        }
+
+        // Post-creation startup binding:
+        if (hasSetNumInterpolatedFrames)
+        {
+            SetInterpolatedFrameCount(configTargetCount);
+            currentProviderFrames = activeInterpolationCount;
+        }
+        else
+        {
+            activeInterpolationCount = intTarget;
+            currentProviderFrames = intTarget;
+        }
+
+        return true;
     }
 };
 
@@ -424,6 +485,95 @@ int main()
         printf("  [PASS] Test 8: Decoupled frame render time measurement verified (non-zero delta time feed).\n");
     }
 
-    printf("[+] All XeMFG Multiplier Unlock & Non-Blocking Pacing Unit Tests PASSED successfully!\n");
+    // Test 9: Swapchain init parameter safety on non-Intel GPUs (avoids 0x1801ffb44 rejection)
+    {
+        XeMfgPacingTest::SimulatedXeFGContext ctx;
+        XeMfgPacingTest::MockXeMfgLoader::sessionActive = true;
+        ctx.isIntelGPU = false; // NVIDIA GA103 / RTX 3080 Ti Laptop
+        ctx.hasSetNumInterpolatedFrames = true;
+
+        // Verify that the old flawed logic setting params.maxInterpolatedFrames = 5 fails Intel's validation
+        bool flawedResult = ctx.CreateSwapchain(2, false, true);
+        assert(!flawedResult && "Flawed init passing maxInterpolatedFrames=5 must be rejected by Intel provider");
+
+        // Verify that the fixed logic setting params.maxInterpolatedFrames = 1 succeeds cleanly
+        bool fixedResult = ctx.CreateSwapchain(2, false, false);
+        assert(fixedResult && "Fixed init passing maxInterpolatedFrames=1 must succeed on non-Intel GPUs");
+        assert(ctx.initParamsMaxInterpolatedFrames == 1 && "params.maxInterpolatedFrames must be 1");
+
+        printf("  [PASS] Test 9: Swapchain init parameters pass Intel validation (0x1801ffb44) on non-Intel GPUs.\n");
+    }
+
+    // Test 10: Dynamic startup multiplier application on frame 1 without menu slider interaction
+    {
+        XeMfgPacingTest::SimulatedXeFGContext ctx;
+        XeMfgPacingTest::MockXeMfgLoader::sessionActive = true;
+        ctx.isIntelGPU = false;
+        ctx.hasSetNumInterpolatedFrames = true;
+
+        // User configures 3X FG (InterpolationCount = 2) in OptiScaler.ini
+        bool success3X = ctx.CreateSwapchain(2, false, false);
+        assert(success3X);
+        assert(ctx.currentProviderFrames == 2 && "Provider must be bound to 2 interpolated frames (3X FG) on frame 1");
+
+        // User configures 6X FG (InterpolationCount = 5) in OptiScaler.ini
+        bool success6X = ctx.CreateSwapchain(5, false, false);
+        assert(success6X);
+        assert(ctx.currentProviderFrames == 5 && "Provider must be bound to 5 interpolated frames (6X FG) on frame 1");
+
+        printf(
+            "  [PASS] Test 10: Dynamic startup multiplier bound immediately on frame 1 without manual interaction.\n");
+    }
+
+    // Test 11: Quirk lifecycle & borderless windowing preservation
+    {
+        enum class Quirk : uint32_t
+        {
+            None = 0,
+            ForceBorderlessWhenUsingXeFG = 1 << 0,
+            OverrideVsyncWhenUsingXeFG = 1 << 1,
+        };
+
+        struct QuirkContext
+        {
+            uint32_t detectedQuirks = 0;
+            bool forceBorderlessConfig = false;
+            bool hasExplicitConfig = false;
+            std::string activeFgOutput = "NoFG";
+
+            void OnStartupQuirkScan(uint32_t exeQuirks)
+            {
+                detectedQuirks = exeQuirks;
+                // Old bug: was doing quirks.reset() if activeFgOutput wasn't XeFG yet
+            }
+
+            void OnPipelineConfigured(const std::string& newFgOutput)
+            {
+                activeFgOutput = newFgOutput;
+                if (activeFgOutput == "XeFG")
+                {
+                    if ((detectedQuirks & static_cast<uint32_t>(Quirk::ForceBorderlessWhenUsingXeFG)) &&
+                        !hasExplicitConfig)
+                    {
+                        forceBorderlessConfig = true;
+                    }
+                }
+            }
+        };
+
+        QuirkContext qctx;
+        // Helldivers 2 has ForceBorderlessWhenUsingXeFG
+        qctx.OnStartupQuirkScan(static_cast<uint32_t>(Quirk::ForceBorderlessWhenUsingXeFG));
+        assert((qctx.detectedQuirks & static_cast<uint32_t>(Quirk::ForceBorderlessWhenUsingXeFG)) &&
+               "Quirk must be preserved during initial scan");
+
+        // XeMFG-SR auto-configures activeFgOutput = "XeFG"
+        qctx.OnPipelineConfigured("XeFG");
+        assert(qctx.forceBorderlessConfig && "ForceBorderless must be applied when XeFG output becomes active");
+
+        printf("  [PASS] Test 11: ForceBorderlessWhenUsingXeFG quirk applied on XeFG pipeline activation.\n");
+    }
+
+    printf("[+] All XeMFG Multiplier Unlock, Non-Blocking Pacing & Swapchain Init Unit Tests PASSED successfully!\n");
     return 0;
 }

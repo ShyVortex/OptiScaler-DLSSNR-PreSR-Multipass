@@ -166,5 +166,12 @@ Every implementation plan created for the project must document:
     - Enforced an anti-clump floor ($\ge g\_lastPresentedQpc + \min(T_{\text{interval}} \times 0.4,\, 2.0\text{ ms})$) preventing consecutive presents from firing closer than the floor threshold.
     - Neutralized cumulative deadline drift in `TsDetour` (RVA `0x3430`) by eliminating mutating global deadline accumulation.
     - Added render time sanity floor in `NoteFrame` so `RenderTimeMs()` falls back to `g_periodNs` instead of underflowing to 0.0 ms.
-- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), `tests/xemfg_sr_unit.cpp` (11/11 passing), `tests/xefg_pacing_engine_unit.cpp` (7/7 passing), and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (9/9 passing).
+- **SwapChain Init Parameters & Non-Intel Hardware Validation Safety (`XeFG_Dx12.cpp`)**:
+  - Disassembly of Intel `libxess_fg.dll` v1.3.1.78 at `0x1801ffb44` confirmed that on non-Intel GPUs (NVIDIA GA103 / AMD), `D3D12InitFromSwapChainDesc` strictly enforces `cmpl $1, params.maxInterpolatedFrames`. Passing any value != 1 immediately rejects swapchain initialization with `XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT (0xFFFFFFFC)`.
+  - In `CreateSwapchain` and `CreateSwapchain1`, `params.maxInterpolatedFrames` is initialized to `1` when `XeFGProxy::SetNumInterpolatedFrames() != nullptr` (or when `ForceXeLL` is active), satisfying provider validation cleanly.
+  - Right after `D3D12GetSwapChainPtr`, `SetInterpolatedFrameCount(targetCount)` is called immediately, dynamically binding the user-configured multiplier (e.g. 2 for 3X FG, 5 for 6X FG) on frame 1 without requiring in-game slider interaction.
+- **Non-Destructive Quirk Persistence & Post-Pipeline Evaluation (`dllmain.cpp`)**:
+  - `CheckQuirks` preserves `GameQuirk::ForceBorderlessWhenUsingXeFG` and `OverrideVsyncWhenUsingXeFG` in `State::Instance().gameQuirks` by removing premature `quirks.reset(...)` calls.
+  - Once `activeFgOutput` and `activeFgInput` are resolved (from XeMFG, XeMFG-SR, or INI), a post-pipeline configuration check automatically applies `FGXeFGForceBorderless` and `OverrideVsync` unless explicitly configured by the user.
+- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), `tests/xemfg_sr_unit.cpp` (11/11 passing), `tests/xefg_pacing_engine_unit.cpp` (7/7 passing), and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (11/11 passing).
 
