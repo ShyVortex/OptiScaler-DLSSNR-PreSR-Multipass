@@ -3846,7 +3846,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (disableXeSr)
             {
                 ImGui::BeginDisabled();
-                ImGui::Checkbox("Enable XeMFG-SR Injector (Multi-Frame Generation)##xemfg_sr", &srEnable);
+                ImGui::Checkbox("Enable XeMFG-SR Injector (Multi-Frame Generation; restart)##xemfg_sr", &srEnable);
                 ImGui::EndDisabled();
                 if (adaActive)
                 {
@@ -3868,7 +3868,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else
             {
-                if (ImGui::Checkbox("Enable XeMFG-SR Injector (Multi-Frame Generation)##xemfg_sr", &srEnable))
+                if (ImGui::Checkbox("Enable XeMFG-SR Injector (Multi-Frame Generation; restart)##xemfg_sr", &srEnable))
                 {
                     config->XeMfgSrEnable = srEnable;
                     if (srEnable)
@@ -3918,7 +3918,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     "but lack native DLSS Frame Generation or Streamline integration.\n"
                     "Siphons depth, motion vectors, and color buffers from DLSS-SR passes into XeFG.\n"
                     "Allows 3X, 4X, 5X, and 6X Multi-Frame Generation across Intel, AMD, and NVIDIA GPUs.\n"
-                    "Works live without requiring a game restart if libxess_fg.dll is present.");
+                    "Requires a restart if enabled mid-game so the DXGI SwapChain can be initialized with XeFG.\n"
+                    "Once active, generated frame multiplier sliders adjust live during active gameplay.");
             }
 
             if (srEnable)
@@ -3941,6 +3942,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                                                     : "not applied");
                     ImGui::TextWrapped("DLL: %s | Patches: %s | Pacing: %s", status.ModuleFound ? "found" : "missing",
                                        patchStr.c_str(), pacingStr.c_str());
+                }
+
+                if (state.currentFGSwapchain == nullptr)
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
+                                       "Note: Save Settings and restart the game to initialize the XeFG SwapChain.");
                 }
 
                 if (status.HasPresentTelemetry)
