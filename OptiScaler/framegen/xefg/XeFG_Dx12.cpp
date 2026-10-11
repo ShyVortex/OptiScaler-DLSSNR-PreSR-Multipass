@@ -383,10 +383,10 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     if (_framesToInterpolate > intTarget)
         Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(intTarget);
 
-    if (Config::Instance()->ForceXeLL.value_or_default())
+    if (Config::Instance()->ForceXeLL.value_or_default() || XeFGProxy::SetNumInterpolatedFrames() != nullptr)
         params.maxInterpolatedFrames = 1;
-
-    params.maxInterpolatedFrames = intTarget;
+    else
+        params.maxInterpolatedFrames = intTarget;
 
     params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
 
@@ -451,7 +451,16 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     }
     else
     {
-        _framesToInterpolate = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
+        _framesToInterpolate = 0;
+        const auto targetCount = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
+        if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
+        {
+            SetInterpolatedFrameCount(targetCount);
+        }
+        else
+        {
+            _framesToInterpolate = targetCount;
+        }
     }
 
     _gameCommandQueue = realQueue;
@@ -559,10 +568,10 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     if (_framesToInterpolate > intTarget)
         Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(intTarget);
 
-    if (Config::Instance()->ForceXeLL.value_or_default())
+    if (Config::Instance()->ForceXeLL.value_or_default() || XeFGProxy::SetNumInterpolatedFrames() != nullptr)
         params.maxInterpolatedFrames = 1;
-
-    params.maxInterpolatedFrames = intTarget;
+    else
+        params.maxInterpolatedFrames = intTarget;
 
     params.initFlags = XEFG_SWAPCHAIN_INIT_FLAG_NONE;
 
@@ -629,7 +638,16 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     }
     else
     {
-        _framesToInterpolate = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
+        _framesToInterpolate = 0;
+        const auto targetCount = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
+        if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
+        {
+            SetInterpolatedFrameCount(targetCount);
+        }
+        else
+        {
+            _framesToInterpolate = targetCount;
+        }
     }
 
     _gameCommandQueue = realQueue;
