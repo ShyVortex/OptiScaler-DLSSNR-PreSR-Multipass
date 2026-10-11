@@ -34,4 +34,7 @@ description: Implementation planning, task progression, testing, and explicit ap
    - **Pre-execution Approval**: The agent MUST NOT proceed to execution without explicit user approval of the implementation plan.
    - **Inter-task Approval**: The agent MUST pause and obtain explicit user approval between tasks before proceeding to subsequent tasks.
 
-
+7. **Mandatory `.agents` Context & Architecture Updates for Core Features**:
+   - Whenever new core architectural features, unlockers, or pipeline capabilities are implemented (e.g. XeMFG, XeMFG-SR, Smooth Motion, DLSS-NR Pre-SR, etc.):
+     - The workspace architecture guidelines in `.agents/rules/optiscaler-architecture.md` MUST be updated with preservation invariants, configuration backends, mutual exclusions, lifecycle hooks, and regression safety rules for the new feature.
+     - The workspace context overview in `.agents/CONTEXT.md` MUST be updated to record the new feature architecture, touched components, configuration keys, and active runtime pipelines.
