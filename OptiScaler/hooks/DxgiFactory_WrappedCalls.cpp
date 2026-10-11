@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DxgiFactory_WrappedCalls.h"
+#include "DxgiSwapchainSizing.h"
 
 #include "FG_Hooks.h"
 #include "D3D11_Hooks.h"
@@ -110,9 +111,13 @@ HRESULT DxgiFactoryWrappedCalls::CreateSwapChain(IDXGIFactory* realFactory, Wrap
         return res;
     }
 
-    if (pDesc->BufferDesc.Height < 100 || pDesc->BufferDesc.Width < 100)
+    const bool sizeToWindow = ResolveWindowSizedSwapchain(localDesc);
+
+    if (localDesc.BufferDesc.Height < 100 || localDesc.BufferDesc.Width < 100)
     {
-        LOG_WARN("Overlay call!");
+        LOG_WARN("Overlay call! Width: {}, Height: {}, Format: {}, Count: {}, Hwnd: {:X}, Windowed: {}",
+                 pDesc->BufferDesc.Width, pDesc->BufferDesc.Height, (UINT) pDesc->BufferDesc.Format, pDesc->BufferCount,
+                 (SIZE_T) pDesc->OutputWindow, pDesc->Windowed);
 
         ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
         ScopedSkipParentWrapping skipParentWrapping {};
@@ -120,6 +125,10 @@ HRESULT DxgiFactoryWrappedCalls::CreateSwapChain(IDXGIFactory* realFactory, Wrap
         auto res = realFactory->CreateSwapChain(pDevice, pDesc == nullptr ? nullptr : &localDesc, ppSwapChain);
         return res;
     }
+
+    if (sizeToWindow)
+        LOG_INFO("CreateSwapChain: 0x0 size-to-window descriptor, Hwnd: {:X}, Count: {}, wrapping normally",
+                 (SIZE_T) pDesc->OutputWindow, pDesc->BufferCount);
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, Windowed: {}, SkipWrapping: {}",
               localDesc.BufferDesc.Width, localDesc.BufferDesc.Height, (UINT) localDesc.BufferDesc.Format,
@@ -477,9 +486,11 @@ HRESULT DxgiFactoryWrappedCalls::CreateSwapChainForHwnd(IDXGIFactory2* realFacto
         return result;
     }
 
-    if (pDesc->Height < 100 || pDesc->Width < 100)
+    const bool sizeToWindow = ResolveWindowSizedSwapchain(localDesc, hWnd);
+
+    if (localDesc.Height < 100 || localDesc.Width < 100)
     {
-        LOG_WARN("Overlay call!");
+        LOG_WARN("Overlay call! Width: {}, Height: {}", pDesc->Width, pDesc->Height);
         HRESULT result;
 
         {
@@ -494,6 +505,10 @@ HRESULT DxgiFactoryWrappedCalls::CreateSwapChainForHwnd(IDXGIFactory2* realFacto
 
         return result;
     }
+
+    if (sizeToWindow)
+        LOG_INFO("CreateSwapChainForHwnd: 0x0 size-to-window descriptor, Hwnd: {:X}, Count: {}, wrapping normally",
+                 (size_t) hWnd, pDesc->BufferCount);
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}",
               localDesc.Width, localDesc.Height, (UINT) localDesc.Format, localDesc.BufferCount, localDesc.Flags,
