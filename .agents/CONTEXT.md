@@ -121,6 +121,20 @@ Every implementation plan created for the project must document:
    - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
    - `docs/issues/NR/` — Neural Rendering (DLSS-NR)
 
+## Intel Xe Multi-Frame Generation (XeMFG & XeMFG-SR) Architecture
 
+### XeMFG Native Streamline Integration (`XeMfgUnlock`)
+- **Target**: Games supporting Streamline DLSS Frame Generation.
+- **Provider**: Intel XeSS-FG (`libxess_fg.dll` / `igxess_fg.dll`).
+- **Core Loader**: `OptiScaler/framegen/xefg/XeMfgLoader.h/cpp` applying 5 transactional binary patches (`U1`–`U5`) to unlock up to 6X Multi-Frame Generation across all GPU vendors.
+- **Native Thunk Presentation Pacing**: `OptiScaler/framegen/xefg/XeFGPacing.h` hooking presentation deadlines and scheduler thunks to prevent micro-stutter and burst bunching.
+- **Config**: `[XeMFG]` `UnlockMFG`, `MaxInterpolatedFrames` (1..5), `ExtraPacing`.
 
-
+### XeMFG-SR Injector for DLSS Super Resolution Titles (`XeMfgSrEnable`)
+- **Target**: Games supporting DLSS Super Resolution (SR) but lacking native DLSS Frame Generation or Streamline integration.
+- **Pipeline Routing**: Siphons color buffers, motion vectors, depth, and exposure from DLSS-SR evaluate passes (`NVSDK_NGX_D3D12_EvaluateFeature`) via `FGInput::Upscaler` into `FGOutput::XeFG`.
+- **Loader Dual Activation**: `XeMfgLoader::SrEnabledForSession()` and `AnyEnabledForSession()` activate patches and dynamically resolve ceiling to `XeMfgSrGeneratedFrames`.
+- **Pipeline Auto-Configuration**: Post-attach in `dllmain.cpp` automatically sets volatile overrides: `FGEnabled = true`, `FGInput = FGInput::Upscaler`, `FGOutput = FGOutput::XeFG`, `FGNvngxReplacement = None`, and `FGXeFGInterpolationCount = srFrames`.
+- **In-Game Menu Overlay**: Dedicated `Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR)` subsection in `menu_common.cpp` with interactive one-click setup, dynamic multiplier slider (2X to 6X / 1 to 5 interpolated frames) with live in-memory byte rewriting (`SetMaxGeneratedFrames`), diagnostic badges, presentation telemetry, and corner debug markers.
+- **Mutual Exclusion**: Strict universal mutual exclusion in `Config.cpp` and `menu_common.cpp` against primary `XeMfgUnlock`, `AdaMfgUnlock`, `AmpereMfgUnlock`, `SmoothMotion`, and `ExternalFrameGeneration`.
+- **Config**: `[XeMFG-SR]` `Enable`, `GeneratedFrames` (1..5).

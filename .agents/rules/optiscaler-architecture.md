@@ -174,3 +174,29 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/xemfg_loader_unit.cpp`
        - `tests/xefg_mfg_streamline_unit.cpp`
 
+9. **Preservation of Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) Injector Across Upstream Merges**:
+   - Upstream author (`wilsjo2`) does not maintain the XeMFG-SR injector pipeline for games with DLSS Super Resolution lacking native DLSS-FG or Streamline.
+   - When merging changes from upstream `wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass`, XeMFG-SR components and all related work must **NEVER** be removed, overwritten, disabled, or regressed:
+     - **Core Loader & Session Gating (`XeMfgLoader.h`, `XeMfgLoader.cpp`)**:
+       - `XeMfgLoader::SrEnabledForSession()` evaluating dynamically: `XeMfgSrEnable && !XeMfgUnlock && !externalFrameGeneration && !Ada && !Ampere`.
+       - `XeMfgLoader::AnyEnabledForSession()` uniting primary XeMFG and XeMFG-SR session states.
+       - Dynamic target ceiling resolution in `XeMfgLoader::TryApply()` resolving to `XeMfgSrGeneratedFrames` (clamped 1 to 5) when in SR mode.
+       - Dynamic in-memory ceiling adaptation: `XeMfgLoader::SetMaxGeneratedFrames` rewrites `U3`, `U4`, and `U5` byte targets live in `libxess_fg.dll`.
+     - **Configuration Backend & Defaults**:
+       - `Config.h`: `XeMfgSrEnable` (defaults to `false` when unset / `auto`), `XeMfgSrGeneratedFrames` (defaults to 2 / 3X FG, clamped 1 to 5).
+       - `Config.cpp`: Parsing, legacy key migration (`[XeMFG] EnableSR`, `SrGeneratedFrames`), value clamping, and saving under `[XeMFG-SR]`.
+       - `OptiScaler.ini`: Dedicated `[XeMFG-SR]` section with descriptive comments.
+       - Strict universal mutual exclusion in `Config.cpp`: primary `XeMfgUnlock`, `AdaMfgUnlock`, `AmpereMfgUnlock`, and `ExternalFrameGeneration` strictly override and suppress `XeMfgSrEnable`.
+     - **Automatic Pipeline Auto-Configuration (`OptiScaler/dllmain.cpp`)**:
+       - When `XeMfgLoader::SrEnabledForSession()` is active without external FG:
+         `FGEnabled = true`, `FGInput = FGInput::Upscaler`, `FGOutput = FGOutput::XeFG`, `FGNvngxReplacement = None`, and `FGXeFGInterpolationCount = srFrames`.
+     - **In-Game Menu Overlay UI (`OptiScaler/menu/menu_common.cpp`)**:
+       - Dedicated `Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR)` collapsible subsection rendered before the `if (state.externalFrameGeneration || ...)` early return.
+       - Interactive checkbox `"Enable XeMFG-SR Injector (Multi-Frame Generation)##xemfg_sr"` auto-configuring the pipeline, initiating `XeFGProxy::InitXeFG()`, applying `XeMfgLoader::TryApply()`, and enforcing bidirectional mutual exclusion with other FG unlockers and Smooth Motion.
+       - Dynamic slider `"Generated Frames##xemfg_sr"` (1 to 5 / 2X to 6X FG) dynamically updating `XeMfgLoader::SetMaxGeneratedFrames` and `currentFG->SetInterpolatedFrameCount`.
+       - Status badge (`DLL: found | Patches: 5/5 | Pacing: active`), presentation telemetry from `xefgSwapChainGetLastPresentStatus`, and live multiplier indicator (`In-Game Multiplier: %dX (Active)`).
+       - Diagnostic checkboxes: `Debug Markers (Corners)`, `Only Interpolated Frames`, and `Display VBlank Sync (Extra Pacing)`.
+     - **Associated Automated Unit Tests**:
+       - `tests/xemfg_sr_unit.cpp`
+       - `tests/xemfg_menu_exclusion_unit.cpp`
+
