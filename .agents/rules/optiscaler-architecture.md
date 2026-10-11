@@ -154,12 +154,12 @@ description: Architecture, frame generation, and safety rules for OptiScaler
           - **End-to-End Burst Pacing & Anti-Clump Protection**:
             - Support 2X Frame Generation (`multiplier < 2` guard), pacing the single generated frame to the exact 50% halfway point ($T_{\text{base}} + T_{\text{interval}}$).
             - Unconditionally pace the final generated frame (`isLast == true`, caller `LastFrameCallerRva = 0x220467`), eliminating sub-millisecond frame dumps (0.28–0.47 ms).
-            - **Complete Burst Presentation for Base Application Frames (`PaceBaseFrame()`)**:
-              - In `libxess_fg.dll`, within each `xefgSwapChainPresent` call, both generated frame(s) (callers `0x2202ED` / `0x220467`) and base application frame (callers `0x220A52` / `0x220DAD`) present through thunk `0x25C0`.
-              - `PaceBaseFrame()` paces the base frame to $T_{\text{anchor}} + (M - 1) \times T_{\text{interval}}$, delivering uniform intervals across all $M$ presentations ($18.2\text{ ms}$ at 2X, $12.1\text{ ms}$ at 3X, $9.1\text{ ms}$ at 4X, $6.1\text{ ms}$ at 6X) and completely eliminating 2.187 ms dumps and 34.3 ms stalls.
-              - Measure base frame intervals via `PushPeriod(burstDeltaNs)` to update median cycle periods and keep `g_renderTimeNs` accurate.
-            - Dynamic anti-clump floor ($\ge g\_lastPresentedQpc + T_{\text{interval}} / 2$) preventing consecutive presents from colliding on late arrivals.
-            - Neutralize cumulative deadline drift in `TsDetour` (RVA `0x3430`) by eliminating mutating global deadline accumulation.
+            - **Strict Prohibition on Base Frame Thread Blocking (`NoteBasePresent()`)**:
+              - In `libxess_fg.dll`, within each `xefgSwapChainPresent` call, callers `0x220A52` and `0x220DAD` represent the base application frame presenting synchronously on the game engine's main render thread.
+              - The base application frame must **NEVER** be blocked with `WaitUntil`, sleep, or spin-wait. It must present immediately via `NoteBasePresent()` with **0 wait** and return control directly to the engine so the game renders at full native framerate (30–60+ FPS). Pacing must strictly apply to generated frames (`0x2202ED`, `0x220467`).
+              - In `NoteBasePresent()`, `PushPeriod` must measure pure engine submission time by subtracting `burstBlockQpc` from `deltaNs`, completely preventing presentation delays from triggering the self-referential recursive feedback loop that collapsed frame rate to 9.2 FPS (108.55 ms).
+              - `TsDetour` (RVA `0x3430`) must set uniform deadlines for generated frames: $\text{deadline}(i) = \text{base} + (i - 1) \times \text{step}$, resetting on every burst to prevent inter-cycle drift.
+              - Anti-clump protection in `ApplyAntiClumpProtection` clamps consecutive presents to the minimum floor ($\ge 1.5\text{ ms}$) without stalling the main thread for whole frame intervals.
             - Fall back to `g_periodNs` in `NoteFrame` when inter-frame intervals collapse under 1 ms to prevent zeroed frame render time reporting.
         - **Multiplier Ceiling Uncap (`XeFG_Dx12.cpp`)**:
           - `_maxInterpolationCount` must be initialized to `std::max(_maxInterpolationCount, 5)` in `CreateSwapchain` / `CreateSwapchain1` when `XeMfgLoader::AnyEnabledForSession()`.

@@ -152,11 +152,12 @@ Every implementation plan created for the project must document:
 - **OptiFG Menu Auto-Management**: In `menu_common.cpp`, `Frame Generation (OptiFG)` automatically displays the managed notice and hides manual controls and `Advanced OptiFG Settings` when XeMFG-SR is active.
 - **End-to-End Presentation Burst Pacing & Multiplier Ceiling Uncap**:
   - **Multiplier Ceiling Uncap in `XeFG_Dx12.cpp`**: `_maxInterpolationCount` initialized to 5 on swapchain creation when XeMFG is active; `SetInterpolatedFrameCount` and `Dispatch` calculate `effectiveMax = std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(...))` up to 5, dynamically raising `_maxInterpolationCount` and eliminating clamping warnings.
-  - **Complete Presentation Burst Pacing for Base Frames in `XeFGPacing.h`**:
-    - Disassembly of `libxess_fg.dll` confirmed that within each `xefgSwapChainPresent` call, both generated frames (`0x2202ED` / `0x220467`) and base frames (`0x220A52` / `0x220DAD`) present via thunk `0x25C0`.
-    - `PaceBaseFrame()` paces the base frame to $T_{\text{anchor}} + (M - 1) \times T_{\text{interval}}$, eliminating the 2.187 ms dump and 34.3 ms stall and delivering uniform $18.2\text{ ms}$ cadence at 2X, $12.1\text{ ms}$ at 3X, $9.1\text{ ms}$ at 4X, and $6.1\text{ ms}$ at 6X.
-    - Anti-clump protection floor dynamically scaled to half of presentation interval (`intervalQpc / 2`).
-    - Base frame intervals feed median filtering (`PushPeriod(burstDeltaNs)`), maintaining valid, non-zero `RenderTimeMs()` feeds to `XeFG_Dx12::Dispatch()`.
+  - **Non-Blocking Base Frame Presentation & Feedback Loop Elimination in `XeFGPacing.h`**:
+    - Disassembly of `libxess_fg.dll` confirmed that within each `xefgSwapChainPresent` call, the base application frame (callers `0x220A52` / `0x220DAD`) presents synchronously on the game engine's main render thread.
+    - Base frames present immediately via `NoteBasePresent()` with **0 wait**, returning control directly to the engine and permitting full native framerate (30–60+ FPS).
+    - In `NoteBasePresent()`, `PushPeriod` subtracts `burstBlockQpc` from `deltaNs`, isolating pure engine render time and completely eliminating the runaway recurrence feedback loop ($T_{n+1} = T_{\text{render}} + \frac{M-1}{M} T_n$) that previously inflated frame times to 108.55 ms (9.2 FPS).
+    - `TsDetour` (RVA `0x3430`) partitions uniform deadlines across generated frames 1..5 for Intel's native background presentation worker thread (`0x7A30`) with zero inter-burst drift.
+    - `ApplyAntiClumpProtection` clamps consecutive generated presents to the minimum floor ($\ge 1.5\text{ ms}$) without stalling the main thread for whole frame intervals.
 - **Wall-Clock Native Thunk Pacing Overhaul & Anti-Clump Protection**:
   - Overhauled `OptiScaler/framegen/xefg/XeFGPacing.h` with wall-clock QPC timing and anchored interval scheduling:
     - Supported 2X Frame Generation (`multiplier < 2` guard), pacing the single generated frame to the exact 50% halfway point ($T_{\text{base}} + T_{\text{interval}}$).

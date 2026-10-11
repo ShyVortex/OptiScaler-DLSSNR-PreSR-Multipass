@@ -7,20 +7,22 @@
 #include <string>
 #include <vector>
 
-// Unit test suite for XeMFG multi-frame generation multiplier uncap (2X-6X)
-// and end-to-end presentation burst pacing in XeFG_Dx12 and XeFGPacing.
+// Unit test suite for XeMFG multi-frame generation multiplier uncap (2X-6X),
+// non-blocking base frame presentation, recursive feedback loop isolation,
+// and TsDetour uniform background worker deadline scheduling.
 //
 // Validates:
 // 1. XeFG_Dx12 multiplier ceiling uncap: SetInterpolatedFrameCount accepts 2..5 (3X-6X FG)
 //    without clamping to 1 when XeMFG is active.
 // 2. XeFG_Dx12 clamping retention when XeMFG is inactive (stock behavior preserved).
 // 3. Dispatch validation respects effectiveMax (up to 5) instead of stock 1.
-// 4. 2X Full-burst pacing: generated frame (50%) and base frame (100%) presented with exact 18.2 ms spacing.
-// 5. 3X Full-burst pacing: gen 1 (33%), gen 2 (67%), and base (100%) presented with exact 12.1 ms spacing.
-// 6. 4X & 6X Full-burst pacing: complete cadence uniformity across all presentations in the cycle.
-// 7. Elimination of 2 ms dump: verifies consecutive presents never dump with sub-interval latency.
-// 8. Dynamic anti-clump protection floor (interval / 2) on irregular render arrivals.
-// 9. Frame render time measurement derived from consecutive base frames feeds valid delta time.
+// 4. Non-blocking base frame presentation: NoteBasePresent() executes with 0 wait time.
+// 5. Zero feedback loop: NoteBasePresent() excludes burst blocking, preventing frame time
+//    inflation (stays locked at native render time instead of ballooning to 108 ms).
+// 6. TsDetour (RVA 0x3430) partitions deadlines evenly across generated frames 1..count
+//    (deadline(i) = base + (i-1) * unit) without accumulating drift across bursts.
+// 7. ApplyAntiClumpProtection prevents sub-millisecond frame dumps (<1 ms) without stalling.
+// 8. Frame render time measurement (RenderTimeMs()) feeds valid non-zero delta time to Intel.
 
 namespace XeMfgPacingTest
 {
@@ -99,13 +101,12 @@ struct SimulatedXeFGContext
     }
 };
 
-// Simulated End-to-End XeFGPacing Presentation Engine
+// Simulated XeFGPacing Presentation & Deadline Engine
 struct SimulatedXeFGPacer
 {
     int64_t freq = 10000000LL; // 10 MHz QPC frequency (1 tick = 100 ns)
     int64_t lastBaseFrameQpc = 0;
     int64_t lastPresentedQpc = 0;
-    int64_t burstAnchorQpc = 0;
     int64_t periodNs = 0;
     int64_t intervalQpc = 0;
     int64_t samples[SampleCount] {};
@@ -113,11 +114,14 @@ struct SimulatedXeFGPacer
     int32_t samplePos = 0;
     int64_t pacedFrames = 0;
     int64_t pacedBursts = 0;
+    int64_t burstBlockQpc = 0;
     int64_t renderTimeNs = 0;
     int64_t lastMultiplier = 2;
-    int32_t clumpCount = 0;
 
-    std::vector<int64_t> presentationLog; // Recorded swapchain present timestamps
+    // TsDetour state
+    int64_t burstBaseDeadlineNs = 0;
+    int64_t burstStepNs = 0;
+    int64_t tsRebased = 0;
 
     int64_t NsFromQpc(int64_t delta) const { return freq > 0 ? (delta * 1000000000LL) / freq : 0; }
     int64_t QpcFromNs(int64_t ns) const { return freq > 0 ? (ns * freq) / 1000000000LL : 0; }
@@ -152,113 +156,77 @@ struct SimulatedXeFGPacer
         periodNs = sorted[sampleCount / 2];
     }
 
-    // Paces generated frames (index 1..count)
-    int64_t PaceGeneratedFrame(uint64_t index, uint64_t count, int64_t arrivalQpc)
+    // Non-blocking base frame present handler (0 ms wait, zero thread stall)
+    void NoteBasePresent(int64_t nowQpc)
     {
-        const int64_t multiplier = static_cast<int64_t>(count) + 1;
-        if (multiplier < 2)
-            return arrivalQpc;
-
-        lastMultiplier = multiplier;
-
-        if (periodNs <= 0)
-            periodNs = 33333333LL;
-
-        const int64_t intervalNs = periodNs / multiplier;
-        const int64_t interval = QpcFromNs(intervalNs);
-        intervalQpc = interval;
-
-        if (index == 1)
-        {
-            burstAnchorQpc = arrivalQpc;
-            int64_t targetQpc = arrivalQpc;
-
-            // Anti-clump check relative to preceding cycle's presentation
-            if (lastPresentedQpc != 0)
-            {
-                const int64_t minGapQpc = interval / 2;
-                const int64_t antiClumpFloor = lastPresentedQpc + minGapQpc;
-                if (targetQpc < antiClumpFloor)
-                    targetQpc = antiClumpFloor;
-            }
-
-            burstAnchorQpc = targetQpc;
-            CommitPresentation(targetQpc);
-            return targetQpc;
-        }
-
-        // Subsequent generated frames (index 2..count for 3X-6X FG)
-        int64_t targetQpc = burstAnchorQpc + static_cast<int64_t>(index - 1) * interval;
-
-        if (lastPresentedQpc != 0)
-        {
-            const int64_t minGapQpc = interval / 2;
-            const int64_t antiClumpFloor = lastPresentedQpc + minGapQpc;
-            if (targetQpc < antiClumpFloor)
-                targetQpc = antiClumpFloor;
-        }
-
-        CommitPresentation(targetQpc);
-        return targetQpc;
-    }
-
-    // Paces the base application frame (frame M of the burst)
-    int64_t PaceBaseFrame(int64_t arrivalQpc)
-    {
-        int64_t multiplier = lastMultiplier;
-        if (multiplier < 2)
-            multiplier = 2;
-
-        if (periodNs <= 0)
-            periodNs = 33333333LL;
-
-        const int64_t intervalNs = periodNs / multiplier;
-        const int64_t interval = QpcFromNs(intervalNs);
-        intervalQpc = interval;
-
-        int64_t targetQpc = arrivalQpc;
-        if (burstAnchorQpc != 0 && interval > 0)
-        {
-            targetQpc = burstAnchorQpc + static_cast<int64_t>(multiplier - 1) * interval;
-
-            if (lastPresentedQpc != 0)
-            {
-                const int64_t minGapQpc = interval / 2;
-                const int64_t antiClumpFloor = lastPresentedQpc + minGapQpc;
-                if (targetQpc < antiClumpFloor)
-                    targetQpc = antiClumpFloor;
-            }
-        }
-
         if (lastBaseFrameQpc != 0)
         {
-            const int64_t burstDeltaNs = NsFromQpc(targetQpc - lastBaseFrameQpc);
-            if (burstDeltaNs >= 5000000LL && burstDeltaNs <= 200000000LL)
+            const int64_t deltaNs = NsFromQpc(nowQpc - lastBaseFrameQpc);
+            if (deltaNs >= 5000000LL && deltaNs <= 200000000LL)
             {
-                PushPeriod(burstDeltaNs);
+                // Subtract burst blocking duration so PushPeriod isolates pure engine render time
+                const int64_t blockNs = NsFromQpc(burstBlockQpc);
+                const int64_t pureRenderNs = deltaNs > blockNs ? deltaNs - blockNs : deltaNs;
+
+                PushPeriod(pureRenderNs);
                 renderTimeNs = periodNs;
             }
         }
 
-        lastBaseFrameQpc = targetQpc;
-        CommitPresentation(targetQpc);
+        lastPresentedQpc = nowQpc;
+        lastBaseFrameQpc = nowQpc;
         pacedBursts++;
-        return targetQpc;
+        burstBlockQpc = 0;
     }
 
-    void CommitPresentation(int64_t qpc)
+    // Anti-clump protection on generated frames (enforces >= 1.5 ms gap without stalling for full intervals)
+    int64_t ApplyAntiClumpProtection(uint64_t index, uint64_t count, int64_t arrivalQpc)
     {
-        if (lastPresentedQpc != 0)
+        const int64_t multiplier = static_cast<int64_t>(count) + 1;
+        if (periodNs <= 0)
+            periodNs = 33333333LL;
+
+        const int64_t intervalNs = periodNs / multiplier;
+        const int64_t interval = QpcFromNs(intervalNs);
+
+        int64_t presentedQpc = arrivalQpc;
+        if (lastPresentedQpc != 0 && interval > 0)
         {
-            const int64_t gapNs = NsFromQpc(qpc - lastPresentedQpc);
-            // Gap less than 2.5 ms is considered a severe saw-tooth clump
-            if (gapNs < 2500000LL)
-                clumpCount++;
+            const int64_t minGapNs = (intervalNs * 2) / 5;
+            const int64_t cappedMinGapNs =
+                minGapNs > 2000000LL ? 2000000LL : (minGapNs < 500000LL ? 500000LL : minGapNs);
+            const int64_t antiClumpFloorQpc = lastPresentedQpc + QpcFromNs(cappedMinGapNs);
+            if (presentedQpc < antiClumpFloorQpc)
+                presentedQpc = antiClumpFloorQpc;
         }
 
-        lastPresentedQpc = qpc;
-        presentationLog.push_back(qpc);
+        burstBlockQpc += presentedQpc - arrivalQpc;
+        lastPresentedQpc = presentedQpc;
         pacedFrames++;
+        return presentedQpc;
+    }
+
+    // Simulated TsDetour deadline calculator
+    int64_t CalculateDeadline(int64_t nativeOut, int64_t medianNs, uint32_t index, uint32_t countPlus1)
+    {
+        const int64_t unit = medianNs / static_cast<int64_t>(countPlus1);
+        if (unit <= 0)
+            return nativeOut;
+
+        if (index == 1)
+        {
+            burstBaseDeadlineNs = nativeOut;
+            burstStepNs = unit;
+        }
+
+        int64_t calculatedDeadline = nativeOut;
+        if (burstBaseDeadlineNs != 0)
+        {
+            calculatedDeadline = burstBaseDeadlineNs + static_cast<int64_t>(index - 1) * burstStepNs;
+            tsRebased++;
+        }
+
+        return calculatedDeadline;
     }
 
     double RenderTimeMs() const { return renderTimeNs > 0 ? renderTimeNs / 1000000.0 : 0.0; }
@@ -268,7 +236,7 @@ struct SimulatedXeFGPacer
 
 int main()
 {
-    printf("[+] Starting XeMFG Multiplier Unlock & Burst Pacing Comprehensive Unit Tests...\n");
+    printf("[+] Starting XeMFG Multiplier Unlock & Non-Blocking Pacing Comprehensive Unit Tests...\n");
 
     // Test 1: Multiplier uncap in XeFG_Dx12 with active XeMFG session
     {
@@ -328,189 +296,134 @@ int main()
         printf("  [PASS] Test 3: Dispatch validation accepts 2X-6X counts without down-clamping.\n");
     }
 
-    // Test 4: 2X Full-burst presentation pacing (Generated Frame at 50%, Base Frame at 100%)
+    // Test 4: Non-blocking base frame presentation (0 ms wait, returns immediately)
     {
         XeMfgPacingTest::SimulatedXeFGPacer pacer;
-        const int64_t framePeriodNs = 36400000LL; // 36.4 ms (~27.5 fps base, matching Helldivers 2 log)
-        pacer.PushPeriod(framePeriodNs);
+        const int64_t t0 = 100000000LL;
 
-        const int64_t burst1Start = 100000000LL;
+        // Base frame present must execute immediately with 0 added delay
+        pacer.NoteBasePresent(t0);
+        assert(pacer.lastBaseFrameQpc == t0);
+        assert(pacer.lastPresentedQpc == t0);
+        assert(pacer.burstBlockQpc == 0 && "Burst block QPC must be cleanly reset");
+        assert(pacer.pacedBursts == 1);
 
-        // Burst 1:
-        // Frame 1 (Generated): arrived from GPU at burst1Start
-        int64_t gen1Qpc = pacer.PaceGeneratedFrame(1, 1, burst1Start);
-        // Frame 2 (Base application frame): arrived at burst1Start + small delta
-        int64_t base1Qpc = pacer.PaceBaseFrame(burst1Start + pacer.QpcFromNs(2000000LL));
-
-        // Burst 2 (next frame, engine completed next cycle after ~36.4 ms):
-        const int64_t burst2Start = burst1Start + pacer.QpcFromNs(framePeriodNs);
-        int64_t gen2Qpc = pacer.PaceGeneratedFrame(1, 1, burst2Start);
-        int64_t base2Qpc = pacer.PaceBaseFrame(burst2Start + pacer.QpcFromNs(2000000LL));
-
-        // Verify spacing:
-        // Spacing between Gen 1 and Base 1
-        int64_t delta1Ns = pacer.NsFromQpc(base1Qpc - gen1Qpc);
-        // Spacing between Base 1 and Gen 2
-        int64_t delta2Ns = pacer.NsFromQpc(gen2Qpc - base1Qpc);
-        // Spacing between Gen 2 and Base 2
-        int64_t delta3Ns = pacer.NsFromQpc(base2Qpc - gen2Qpc);
-
-        const int64_t expectedIntervalNs = framePeriodNs / 2; // 18.2 ms
-
-        assert(delta1Ns == expectedIntervalNs && "Gen1 to Base1 must be exactly 18.2 ms");
-        assert(delta2Ns == expectedIntervalNs && "Base1 to Gen2 must be exactly 18.2 ms");
-        assert(delta3Ns == expectedIntervalNs && "Gen2 to Base2 must be exactly 18.2 ms");
-        assert(pacer.clumpCount == 0 && "Zero saw-tooth dumps across 2X presentations");
-
-        printf("  [PASS] Test 4: 2X Full-burst presentation spacing delivers uniform 18.2 ms cadence (0 clumps).\n");
+        printf("  [PASS] Test 4: Base application frame presents with 0 wait and returns immediately.\n");
     }
 
-    // Test 5: 3X Full-burst presentation pacing (Gen 1 at 33%, Gen 2 at 67%, Base at 100%)
+    // Test 5: Zero recursive feedback loop in frame time period measurement
     {
         XeMfgPacingTest::SimulatedXeFGPacer pacer;
-        const int64_t framePeriodNs = 36300000LL; // 36.3 ms
-        pacer.PushPeriod(framePeriodNs);
+        const int64_t trueRenderNs = 33333333LL;   // Game engine renders at steady 30 FPS (33.3 ms)
+        const int64_t presentDelayNs = 45000000LL; // 45 ms spent in GPU swapchain operations
 
-        const int64_t burstStart = 200000000LL;
+        int64_t currentQpc = 100000000LL;
+        pacer.NoteBasePresent(currentQpc);
 
-        // Gen 1 (index 1, count 2)
-        int64_t gen1Qpc = pacer.PaceGeneratedFrame(1, 2, burstStart);
-        // Gen 2 (index 2, count 2)
-        int64_t gen2Qpc = pacer.PaceGeneratedFrame(2, 2, burstStart + pacer.QpcFromNs(5000000LL));
-        // Base Frame (multiplier 3)
-        int64_t baseQpc = pacer.PaceBaseFrame(burstStart + pacer.QpcFromNs(8000000LL));
-
-        int64_t step1Ns = pacer.NsFromQpc(gen2Qpc - gen1Qpc);
-        int64_t step2Ns = pacer.NsFromQpc(baseQpc - gen2Qpc);
-
-        const int64_t expectedIntervalNs = framePeriodNs / 3; // 12.1 ms
-
-        assert(step1Ns == expectedIntervalNs && "Gen1 to Gen2 step must be exactly 12.1 ms");
-        assert(step2Ns == expectedIntervalNs && "Gen2 to Base step must be exactly 12.1 ms");
-        assert(pacer.clumpCount == 0 && "Zero clumps across 3X presentation");
-
-        printf("  [PASS] Test 5: 3X Full-burst presentation delivers uniform 12.1 ms cadence across all 3 frames.\n");
-    }
-
-    // Test 6: 4X and 6X Full-burst presentation cadence uniformity
-    {
-        // 4X test (count 3, multiplier 4)
+        // Simulate 20 consecutive frames where swapchain experienced internal delays
+        for (int i = 0; i < 20; ++i)
         {
-            XeMfgPacingTest::SimulatedXeFGPacer pacer;
-            const int64_t framePeriodNs = 36400000LL;
-            pacer.PushPeriod(framePeriodNs);
-            const int64_t burstStart = 300000000LL;
+            // Advance by engine render time
+            currentQpc += pacer.QpcFromNs(trueRenderNs);
 
-            int64_t g1 = pacer.PaceGeneratedFrame(1, 3, burstStart);
-            int64_t g2 = pacer.PaceGeneratedFrame(2, 3, burstStart + pacer.QpcFromNs(3000000LL));
-            int64_t g3 = pacer.PaceGeneratedFrame(3, 3, burstStart + pacer.QpcFromNs(6000000LL));
-            int64_t base = pacer.PaceBaseFrame(burstStart + pacer.QpcFromNs(9000000LL));
+            // Record burst block (present delay)
+            pacer.burstBlockQpc = pacer.QpcFromNs(presentDelayNs);
+            currentQpc += pacer.burstBlockQpc;
 
-            const int64_t intervalNs = framePeriodNs / 4; // 9.1 ms
-            assert(pacer.NsFromQpc(g2 - g1) == intervalNs);
-            assert(pacer.NsFromQpc(g3 - g2) == intervalNs);
-            assert(pacer.NsFromQpc(base - g3) == intervalNs);
-            assert(pacer.clumpCount == 0);
+            // NoteBasePresent must subtract burstBlockQpc and push ONLY trueRenderNs
+            pacer.NoteBasePresent(currentQpc);
         }
 
-        // 6X test (count 5, multiplier 6)
-        {
-            XeMfgPacingTest::SimulatedXeFGPacer pacer;
-            const int64_t framePeriodNs = 36600000LL;
-            pacer.PushPeriod(framePeriodNs);
-            const int64_t burstStart = 400000000LL;
+        // Period must remain locked at true engine render time (~33.3 ms), NEVER ballooning to 108 ms!
+        const double measuredMs = pacer.periodNs / 1000000.0;
+        assert(measuredMs >= 33.0 && measuredMs <= 34.0 &&
+               "Measured period must isolate true engine render time (33.3 ms)");
+        assert(measuredMs < 50.0 && "Period must NEVER balloon into positive feedback loop!");
 
-            std::vector<int64_t> frames;
-            frames.push_back(pacer.PaceGeneratedFrame(1, 5, burstStart));
-            for (uint64_t i = 2; i <= 5; ++i)
-                frames.push_back(pacer.PaceGeneratedFrame(i, 5, burstStart + pacer.QpcFromNs(i * 1000000LL)));
-            frames.push_back(pacer.PaceBaseFrame(burstStart + pacer.QpcFromNs(7000000LL)));
-
-            const int64_t intervalNs = framePeriodNs / 6; // 6.1 ms
-            for (size_t i = 1; i < frames.size(); ++i)
-            {
-                int64_t stepNs = pacer.NsFromQpc(frames[i] - frames[i - 1]);
-                assert(stepNs == intervalNs && "Every step in 6X burst must equal interval");
-            }
-            assert(pacer.clumpCount == 0);
-        }
-
-        printf("  [PASS] Test 6: 4X and 6X Full-burst pacing partitions all generated and base frames uniformly.\n");
+        printf("  [PASS] Test 5: Recursive feedback loop eliminated: frame time stays locked at 33.3 ms (never 108 "
+               "ms).\n");
     }
 
-    // Test 7: Direct comparison: Legacy 2 ms dump vs Overhauled Burst Pacing
-    {
-        // Legacy behavior: generated frame at 18.2 ms, base frame dumped 2.187 ms later (34.3 ms stall)
-        XeMfgPacingTest::SimulatedXeFGPacer legacyPacer;
-        const int64_t framePeriodNs = 36400000LL;
-        legacyPacer.PushPeriod(framePeriodNs);
-        const int64_t t0 = 500000000LL;
-
-        // Legacy paced generated frame
-        int64_t legGen = legacyPacer.PaceGeneratedFrame(1, 1, t0);
-        // Legacy base frame was unpaced: dumped immediately when caller 0x220A52 called present
-        int64_t legBase = legGen + legacyPacer.QpcFromNs(2187000LL); // 2.187 ms dump from log!
-        legacyPacer.CommitPresentation(legBase);
-
-        assert(legacyPacer.clumpCount == 1 && "Legacy pacing resulted in detected 2.187 ms saw-tooth clump!");
-
-        // Overhauled behavior: base frame is paced to anchor + 1 * interval
-        XeMfgPacingTest::SimulatedXeFGPacer overhauledPacer;
-        overhauledPacer.PushPeriod(framePeriodNs);
-        int64_t newGen = overhauledPacer.PaceGeneratedFrame(1, 1, t0);
-        int64_t newBase = overhauledPacer.PaceBaseFrame(t0 + overhauledPacer.QpcFromNs(2187000LL));
-
-        assert(overhauledPacer.clumpCount == 0 && "Overhauled burst pacing completely eliminated the 2.187 ms clump!");
-        int64_t newGapNs = overhauledPacer.NsFromQpc(newBase - newGen);
-        assert(newGapNs == 18200000LL && "Overhauled gap is uniform 18.2 ms instead of 2.187 ms!");
-
-        printf("  [PASS] Test 7: Cadence comparison proves elimination of 2.187 ms dump and 34.3 ms stall.\n");
-    }
-
-    // Test 8: Dynamic anti-clump floor protects against late render arrivals
+    // Test 6: TsDetour partitions deadlines uniformly across generated frames 1..5
     {
         XeMfgPacingTest::SimulatedXeFGPacer pacer;
-        const int64_t framePeriodNs = 36400000LL;
-        pacer.PushPeriod(framePeriodNs);
+        const int64_t medianNs = 36000000LL; // 36 ms median cycle
+        const int64_t baseDeadlineNs = 5000000000LL;
 
-        const int64_t t0 = 600000000LL;
-        int64_t gen = pacer.PaceGeneratedFrame(1, 1, t0);
+        // 6X FG (countPlus1 = 6, multiplier 6X)
+        const int64_t unitNs = medianNs / 6; // 6 ms per generated frame
+        std::vector<int64_t> deadlines;
 
-        // Simulate severe engine delay where base frame arrives late, past the target deadline
-        const int64_t interval = pacer.QpcFromNs(18200000LL);
-        const int64_t lateArrivalQpc = gen + pacer.QpcFromNs(1000000LL); // Only 1 ms after gen!
+        for (uint32_t i = 1; i <= 5; ++i)
+        {
+            int64_t nativeDummy = baseDeadlineNs; // Intel stock sets identical deadline for i > 1
+            int64_t d = pacer.CalculateDeadline(nativeDummy, medianNs, i, 6);
+            deadlines.push_back(d);
+        }
 
-        // Pacer must enforce anti-clump floor = gen + interval / 2 (9.1 ms)
-        int64_t basePacedQpc = pacer.PaceBaseFrame(lateArrivalQpc);
-        int64_t gapNs = pacer.NsFromQpc(basePacedQpc - gen);
+        assert(deadlines[0] == baseDeadlineNs && "Frame 1 deadline matches base");
+        for (size_t i = 1; i < deadlines.size(); ++i)
+        {
+            int64_t step = deadlines[i] - deadlines[i - 1];
+            assert(step == unitNs && "Each generated frame deadline step must equal exactly unitNs (6 ms)");
+        }
 
-        assert(gapNs >= 9100000LL && "Anti-clump floor must enforce at least interval / 2 spacing");
-        assert(pacer.clumpCount == 0);
+        // Test drift immunity on next burst
+        const int64_t nextBaseDeadlineNs = baseDeadlineNs + 36000000LL;
+        int64_t nextD1 = pacer.CalculateDeadline(nextBaseDeadlineNs, medianNs, 1, 6);
+        int64_t nextD2 = pacer.CalculateDeadline(nextBaseDeadlineNs, medianNs, 2, 6);
+        assert(nextD1 == nextBaseDeadlineNs);
+        assert(nextD2 == nextBaseDeadlineNs + unitNs);
 
-        printf("  [PASS] Test 8: Anti-clump protection floor prevents presentation collision on late arrivals.\n");
+        printf("  [PASS] Test 6: TsDetour partitions deadlines uniformly (6 ms steps) with zero inter-cycle drift.\n");
     }
 
-    // Test 9: Frame render time measurement feeds valid delta time to Intel provider
+    // Test 7: ApplyAntiClumpProtection prevents sub-millisecond frame dumps (<1 ms)
+    {
+        XeMfgPacingTest::SimulatedXeFGPacer pacer;
+        pacer.PushPeriod(36000000LL); // 36 ms (6X FG -> 6 ms interval)
+
+        const int64_t t0 = 200000000LL;
+        pacer.lastPresentedQpc = t0;
+
+        // Simulate frame arriving only 0.3 ms (300 us) after preceding present (sub-millisecond dump)
+        const int64_t clumpArrival = t0 + pacer.QpcFromNs(300000LL);
+        int64_t presentedQpc = pacer.ApplyAntiClumpProtection(2, 5, clumpArrival);
+
+        int64_t gapNs = pacer.NsFromQpc(presentedQpc - t0);
+        // Minimum gap floor is cappedMinGapNs (at least 1.5 - 2.0 ms)
+        assert(gapNs >= 1500000LL && "Anti-clump floor must enforce at least 1.5 ms spacing to prevent dumps");
+        assert(presentedQpc > clumpArrival && "Sub-millisecond arrival must be paced forward");
+
+        // Simulate frame arriving 8.0 ms after preceding present (already spaced)
+        pacer.lastPresentedQpc = presentedQpc;
+        const int64_t wellSpacedArrival = presentedQpc + pacer.QpcFromNs(8000000LL);
+        int64_t normalPresented = pacer.ApplyAntiClumpProtection(3, 5, wellSpacedArrival);
+        assert(normalPresented == wellSpacedArrival && "Already spaced frames must incur 0 ms added delay");
+
+        printf(
+            "  [PASS] Test 7: ApplyAntiClumpProtection eliminates 0.3 ms dumps while adding 0 ms to spaced frames.\n");
+    }
+
+    // Test 8: Decoupled frame render time measurement feeds valid non-zero delta time
     {
         XeMfgPacingTest::SimulatedXeFGPacer pacer;
         const int64_t framePeriodNs = 33333333LL; // 33.3 ms
-        const int64_t t0 = 700000000LL;
+        const int64_t t0 = 300000000LL;
 
         // Cycle 1
-        pacer.PaceGeneratedFrame(1, 1, t0);
-        pacer.PaceBaseFrame(t0 + pacer.QpcFromNs(16666666LL));
+        pacer.NoteBasePresent(t0);
 
         // Cycle 2 (33.3 ms later)
         const int64_t t1 = t0 + pacer.QpcFromNs(framePeriodNs);
-        pacer.PaceGeneratedFrame(1, 1, t1);
-        pacer.PaceBaseFrame(t1 + pacer.QpcFromNs(16666666LL));
+        pacer.NoteBasePresent(t1);
 
         assert(pacer.RenderTimeMs() >= 33.0 && pacer.RenderTimeMs() <= 34.0);
         assert(pacer.renderTimeNs > 0 && "Render time must never collapse to 0.0 ms");
 
-        printf("  [PASS] Test 9: Decoupled frame render time measurement verified (non-zero delta time feed).\n");
+        printf("  [PASS] Test 8: Decoupled frame render time measurement verified (non-zero delta time feed).\n");
     }
 
-    printf("[+] All XeMFG Multiplier Unlock & Burst Pacing Unit Tests PASSED successfully!\n");
+    printf("[+] All XeMFG Multiplier Unlock & Non-Blocking Pacing Unit Tests PASSED successfully!\n");
     return 0;
 }
