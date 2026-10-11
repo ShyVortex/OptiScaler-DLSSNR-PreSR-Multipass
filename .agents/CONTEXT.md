@@ -149,6 +149,13 @@ Every implementation plan created for the project must document:
 - **Fullscreen Incompatibility & Borderless Quirk/Toggle**: Intel XeSS-FG unconditionally disables interpolation in DXGI exclusive fullscreen. Added `QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)` in `Quirks.h` and user-controlled toggle `ForceBorderless = auto` under `[XeMFG-SR]` (`OptiScaler.ini`, `Config.cpp`, and GUI).
 - **Live Multiplier Adaptation & Pacing Stability**: Initialized `_framesToInterpolate` on swapchain creation, guarded `WAR_xefgRequestFGToggle` in `XeFG_Dx12::Dispatch`, and removed `state.fgChanged = true;` from the slider callback, eliminating destructive deactivations and 10-frame freezes. Added a sanity floor fallback for `frameRenderTime` in `XeFG_Dx12::Dispatch` to prevent motion vector collapse and eliminate micro-stutters.
 - **OptiFG Menu Auto-Management**: In `menu_common.cpp`, `Frame Generation (OptiFG)` automatically displays the managed notice and hides manual controls and `Advanced OptiFG Settings` when XeMFG-SR is active.
+- **End-to-End Presentation Burst Pacing & Multiplier Ceiling Uncap**:
+  - **Multiplier Ceiling Uncap in `XeFG_Dx12.cpp`**: `_maxInterpolationCount` initialized to 5 on swapchain creation when XeMFG is active; `SetInterpolatedFrameCount` and `Dispatch` calculate `effectiveMax = std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(...))` up to 5, dynamically raising `_maxInterpolationCount` and eliminating clamping warnings.
+  - **Complete Presentation Burst Pacing for Base Frames in `XeFGPacing.h`**:
+    - Disassembly of `libxess_fg.dll` confirmed that within each `xefgSwapChainPresent` call, both generated frames (`0x2202ED` / `0x220467`) and base frames (`0x220A52` / `0x220DAD`) present via thunk `0x25C0`.
+    - `PaceBaseFrame()` paces the base frame to $T_{\text{anchor}} + (M - 1) \times T_{\text{interval}}$, eliminating the 2.187 ms dump and 34.3 ms stall and delivering uniform $18.2\text{ ms}$ cadence at 2X, $12.1\text{ ms}$ at 3X, $9.1\text{ ms}$ at 4X, and $6.1\text{ ms}$ at 6X.
+    - Anti-clump protection floor dynamically scaled to half of presentation interval (`intervalQpc / 2`).
+    - Base frame intervals feed median filtering (`PushPeriod(burstDeltaNs)`), maintaining valid, non-zero `RenderTimeMs()` feeds to `XeFG_Dx12::Dispatch()`.
 - **Wall-Clock Native Thunk Pacing Overhaul & Anti-Clump Protection**:
   - Overhauled `OptiScaler/framegen/xefg/XeFGPacing.h` with wall-clock QPC timing and anchored interval scheduling:
     - Supported 2X Frame Generation (`multiplier < 2` guard), pacing the single generated frame to the exact 50% halfway point ($T_{\text{base}} + T_{\text{interval}}$).
@@ -157,5 +164,5 @@ Every implementation plan created for the project must document:
     - Enforced an anti-clump floor ($\ge g\_lastPresentedQpc + \min(T_{\text{interval}} \times 0.4,\, 2.0\text{ ms})$) preventing consecutive presents from firing closer than the floor threshold.
     - Neutralized cumulative deadline drift in `TsDetour` (RVA `0x3430`) by eliminating mutating global deadline accumulation.
     - Added render time sanity floor in `NoteFrame` so `RenderTimeMs()` falls back to `g_periodNs` instead of underflowing to 0.0 ms.
-- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), `tests/xemfg_sr_unit.cpp` (11/11 passing), and `tests/xefg_pacing_engine_unit.cpp` (7/7 passing).
+- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), `tests/xemfg_sr_unit.cpp` (11/11 passing), `tests/xefg_pacing_engine_unit.cpp` (7/7 passing), and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (9/9 passing).
 
