@@ -5476,10 +5476,16 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
     {
         SeparatorWithHelpMarker("Frame Generation (OptiFG)", "Using upscaler data for FG");
 
-        if (currentFeature != nullptr && !currentFeature->IsFrozen() &&
-            ((state.activeFgOutput == FGOutput::FSRFG && FfxApiProxy::IsFGReady()) ||
-             (state.activeFgOutput == FGOutput::XeFG && XeFGProxy::Module() != nullptr) ||
-             (state.activeFgOutput == FGOutput::DLSSG && StreamlineProxy::Module() != nullptr)))
+        if (xeMfgSrActive)
+        {
+            ImGui::TextColored(
+                toneMapColor(ImVec4(0.4f, 0.8f, 1.0f, 1.0f)),
+                "Managed exclusively by the Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) section above.");
+        }
+        else if (currentFeature != nullptr && !currentFeature->IsFrozen() &&
+                 ((state.activeFgOutput == FGOutput::FSRFG && FfxApiProxy::IsFGReady()) ||
+                  (state.activeFgOutput == FGOutput::XeFG && XeFGProxy::Module() != nullptr) ||
+                  (state.activeFgOutput == FGOutput::DLSSG && StreamlineProxy::Module() != nullptr)))
         {
             if (!Config::Instance()->FGDisableHUDFix.value_or_default() &&
                 state.swapchainInteropApi == SwapchainInteropApi::None)
