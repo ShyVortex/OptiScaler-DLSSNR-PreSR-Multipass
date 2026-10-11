@@ -138,7 +138,7 @@ const char* XeFG_Dx12::Name()
 {
     static std::string nameBuffer;
 
-    if (_maxInterpolationCount == 1 || _framesToInterpolate < 0)
+    if (_framesToInterpolate <= 1)
     {
         nameBuffer = "XeFG";
     }
@@ -298,7 +298,9 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
         if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS)
         {
             _maxInterpolationCount = props.maxSupportedInterpolations;
-            LOG_INFO("Max supported interpolations: {}", props.maxSupportedInterpolations);
+            if (XeMfgLoader::AnyEnabledForSession())
+                _maxInterpolationCount = std::max(_maxInterpolationCount, 5);
+            LOG_INFO("Max supported interpolations: {}", _maxInterpolationCount);
         }
         else
         {
@@ -361,15 +363,19 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
 
     xefg_swapchain_d3d12_init_params_t params {};
 
-    int intTarget = _maxInterpolationCount;
+    int effectiveMax = _maxInterpolationCount;
+    if (XeMfgLoader::AnyEnabledForSession())
+        effectiveMax = std::max(effectiveMax, 5);
+
+    int intTarget = effectiveMax;
 
     // For old libxess_fg versions we use max to control interpolation count
     if (XeFGProxy::SetNumInterpolatedFrames() == nullptr)
         intTarget = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
 
-    if (intTarget < 1 || intTarget > _maxInterpolationCount)
+    if (intTarget < 1 || intTarget > effectiveMax)
     {
-        LOG_WARN("Invalid XeFG interpolation count: {}, max count: {}", intTarget, _maxInterpolationCount);
+        LOG_WARN("Invalid XeFG interpolation count: {}, max count: {}", intTarget, effectiveMax);
 
         intTarget = 1;
     }
@@ -506,7 +512,9 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
         if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS)
         {
             _maxInterpolationCount = props.maxSupportedInterpolations;
-            LOG_INFO("Max supported interpolations: {}", props.maxSupportedInterpolations);
+            if (XeMfgLoader::AnyEnabledForSession())
+                _maxInterpolationCount = std::max(_maxInterpolationCount, 5);
+            LOG_INFO("Max supported interpolations: {}", _maxInterpolationCount);
         }
         else
         {
@@ -531,15 +539,19 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
 
     xefg_swapchain_d3d12_init_params_t params {};
 
-    int intTarget = _maxInterpolationCount;
+    int effectiveMax = _maxInterpolationCount;
+    if (XeMfgLoader::AnyEnabledForSession())
+        effectiveMax = std::max(effectiveMax, 5);
+
+    int intTarget = effectiveMax;
 
     // For old libxess_fg versions we use max to control interpolation count
     if (XeFGProxy::SetNumInterpolatedFrames() == nullptr)
         intTarget = Config::Instance()->FGXeFGInterpolationCount.value_or_default();
 
-    if (intTarget < 1 || intTarget > _maxInterpolationCount)
+    if (intTarget < 1 || intTarget > effectiveMax)
     {
-        LOG_WARN("Invalid XeFG interpolation count: {}, max count: {}", intTarget, _maxInterpolationCount);
+        LOG_WARN("Invalid XeFG interpolation count: {}, max count: {}", intTarget, effectiveMax);
 
         intTarget = 1;
     }
@@ -800,11 +812,14 @@ bool XeFG_Dx12::Dispatch()
 
     if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
     {
-        if (Config::Instance()->FGXeFGInterpolationCount.value_or_default() > _maxInterpolationCount)
+        int effectiveMax = _maxInterpolationCount;
+        if (XeMfgLoader::AnyEnabledForSession())
+            effectiveMax = std::max(effectiveMax, 5);
+
+        if (Config::Instance()->FGXeFGInterpolationCount.value_or_default() > effectiveMax)
         {
-            Config::Instance()->FGXeFGInterpolationCount = _maxInterpolationCount;
-            LOG_WARN("Requested interpolation count is higher than max supported, setting to max: {}",
-                     _maxInterpolationCount);
+            Config::Instance()->FGXeFGInterpolationCount = effectiveMax;
+            LOG_WARN("Requested interpolation count is higher than max supported, setting to max: {}", effectiveMax);
         }
 
         if (State::Instance().activeFgInput != FGInput::DLSSG &&
@@ -1116,12 +1131,20 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
 
     _passthrough = false;
 
-    if (_maxInterpolationCount > 0 && interpolatedFrameCount > _maxInterpolationCount)
+    int effectiveMax = _maxInterpolationCount;
+    if (XeMfgLoader::AnyEnabledForSession())
+        effectiveMax = std::max(effectiveMax, 5);
+
+    if (effectiveMax > 0 && interpolatedFrameCount > static_cast<unsigned int>(effectiveMax))
     {
         LOG_WARN("Requested interpolation count {} exceeds max supported {}, clamping", interpolatedFrameCount,
-                 _maxInterpolationCount);
-        interpolatedFrameCount = _maxInterpolationCount;
+                 effectiveMax);
+        interpolatedFrameCount = effectiveMax;
     }
+
+    _maxInterpolationCount = std::max(_maxInterpolationCount, static_cast<int>(interpolatedFrameCount));
+    if (XeMfgLoader::AnyEnabledForSession())
+        XeMfgLoader::SetMaxGeneratedFrames(interpolatedFrameCount);
 
     Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(interpolatedFrameCount);
 
