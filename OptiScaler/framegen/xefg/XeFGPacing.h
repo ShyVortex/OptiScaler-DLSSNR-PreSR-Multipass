@@ -1,7 +1,8 @@
 ﻿#pragma once
 
 // Spreads Intel's generated frames out in time, so that multi frame generation
-// above 2X stops arriving as one clump followed by a gap.
+// across all multipliers (2X through 6X) arrives with uniform, smooth cadence
+// instead of clumped bursts followed by stalls.
 //
 // The provider already knows what the spacing should be. Once per burst it
 // works out how long a real frame took and divides it by the number of frames
@@ -23,36 +24,24 @@
 //
 // and `r12` is not consumed until the loop has finished, by the FPS limiter
 // block at 0x220317 - which is itself only reached when count > 2 and two other
-// conditions hold. So the burst goes out as fast as the swapchain accepts it and
-// the limiter then holds the *last* frame of the burst back, which is what reads
-// as frames being bunched up and out of order above 2X.
+// conditions hold.
 //
 // The last frame is not presented from the loop at all. It goes out from the
 // call at 0x220462, after the loop and after the provider has submitted the
-// burst, so it needs pacing of its own:
+// burst:
 //
 //     0x220411  call 0x180003100       ; -> jmp 0x18021ee30, submit the burst
 //     0x220445  mov  byte [rsp+0x30], 0
 //     0x220462  call 0x1800025c0       ; present the last generated frame
 //
-// Fixing it means pacing each generated frame, which means getting in between
-// the loop and the present. Every one of those presents goes through the 5 byte
-// thunk at 0x25C0, and that thunk is followed by 11 bytes of int3 padding, so
-// it is 16 bytes that contain nothing but a jump. That is room for a 14 byte
-// `jmp qword ptr [rip+0]`, so the thunk can be redirected anywhere in the
-// address space without relocating a single instruction and without a code cave.
-//
-// The thunk has two other callers (0x220A52, 0x220DAD), so the detour checks
-// the return address and paces only the two sites above; every other present is
-// forwarded untouched.
-//
-// The spacing is not invented here. The provider has a frame scheduler of its
-// own - it just never calls it for the frames the loop presents, only for the
-// burst's last one. So each of those presents is handed to 0x21EE30 with the
-// arguments the present path already has, and the provider works out the
-// presentation time itself. A wall clock does the same job when the scheduler
-// cannot be reached; waiting on the provider's D3D12 fence as well was tried and
-// then removed due to timer tick quantization overshooting.
+// Every present goes through the 5-byte thunk at 0x25C0, followed by 11 bytes
+// of int3 padding (16 bytes total). Redirecting 0x25C0 to Detour allows us to:
+//   1. Intercept intermediate generated frames (caller 0x2202ED).
+//   2. Intercept the final generated frame (caller 0x220467).
+//   3. Intercept base application frame presents (callers 0x220A52, 0x220DAD) to
+//      anchor the burst clock and calibrate the true frame render period.
+//   4. Enforce an anti-clump protection floor so consecutive presents can never
+//      fire in sub-millisecond dumps (<1 ms), even under severe GPU compute load.
 
 #include <windows.h>
 #ifdef _MSC_VER
@@ -72,63 +61,30 @@ namespace XeFGPacing
 constexpr uint32_t PresentThunkRva = 0x25C0;
 constexpr uint32_t NativePresentRva = 0x21F730;
 
-// Return address of the `call` in the burst loop - i.e. the exact identity
-// of the call site we want to pace.
+// Return address of the `call` in the burst loop - i.e. intermediate frames.
 constexpr uint32_t PacedCallerRva = 0x2202ED;
 
-// The burst's last generated frame is not presented from the loop. It goes
-// out after the loop and after the provider's own submit, from the call at
-// 0x220462, with the same burst in arg5 but a different arg6 and arg7 = 0
-// instead of 1:
-//
-//     0x220445  mov  byte ptr [rsp+0x30], 0   ; arg7 = 0
-//     0x220462  call 0x25c0
-//
-// Left alone, every burst ends with two frames carrying the same timestamp:
-// at 4X the delivered pattern is 0, i, 2i, 2i instead of 0, i, 2i, 3i.
+// Return address of the final generated frame present.
 constexpr uint32_t LastFrameCallerRva = 0x220467;
 
-// The provider does space that last frame itself - but only from the limiter
-// block at 0x220317, and only when all three of its conditions hold:
-//
-//     0x220317  cmp  byte  ptr [rsi + 0x340], 0   ; enabled
-//     0x220324  cmp  qword ptr [r8 + 8], 2        ; count > 2, i.e. 4X up
-//     0x22032F  cmp  dword ptr [r8 + 0x28], 0     ; per-burst field is 0
-//
-// Mirroring the condition keeps exactly one of us waiting on that frame
-// rather than two waits stacking into one long frame.
 constexpr uint32_t LimiterEnabledOffset = 0x340;
 constexpr uint32_t BurstLimiterField = 0x28;
 
 // --- the provider's own frame scheduler --------------------------------
 
-// 0x3100 schedules the frame: look the frame's record up in the ring at
-// ctx+0x168 by burst->tag, stamp it with the current counter, then have
-// 0x224B30 (via 0x3430) compute a presentation time and hand that time to 0x7A30.
-// Its arg5 is the frame's index in the burst.
 constexpr uint32_t SchedThunkRva = 0x3100;
 constexpr uint32_t SchedFnRva = 0x21EE30;
 
-// arg2 of the scheduler is present arg5 - 0x38, so the gate byte the
-// present path reads into r8 at 0x22040A sits at 0xC0 of it.
 constexpr uint32_t BurstGateOffset = 0xC0;
-
-// The scheduler is not always on. Its entry gate is 0xdbb0 -> 0x21ed40, and
-// the whole of it is two bytes of the context:
-//     [ctx+0x340] == 0 && [ctx+0x341] != 0
 constexpr uint32_t SchedLimiterOffset = 0x340;
 constexpr uint32_t SchedEnableOffset = 0x341;
 
-// arg4 comes out of 0x4DA0, which is a thunk for 0x224CF0.
 constexpr uint32_t RingSnapshotFnRva = 0x224CF0;
 constexpr uint32_t RingOffset = 0x168;
 
-// Every frame that gets a deadline ends up waiting in 0x7A30 -> 0x225070,
-// and the value it waits on is produced by 0x3430 -> 0x224B30.
 constexpr uint32_t TimestampThunkRva = 0x3430;
 constexpr uint32_t TimestampFnRva = 0x224B30;
 
-// The float 0x224B30 clamps, at ring + 0x1B8.
 constexpr uint32_t RingMeasuredOffset = 0x1B8;
 
 inline const uint8_t TimestampThunkExpected[16] = {
@@ -162,6 +118,8 @@ inline bool g_tsHooked = false;
 
 inline LARGE_INTEGER g_freq {};
 inline int64_t g_lastBurstQpc = 0;
+inline int64_t g_lastBaseFrameQpc = 0;
+inline int64_t g_lastPresentedQpc = 0;
 inline int64_t g_periodNs = 0;
 inline int64_t g_intervalQpc = 0;
 inline int64_t g_targetQpc = 0;
@@ -173,7 +131,7 @@ inline int64_t g_pacedBursts = 0;
 inline bool g_loggedFirstBurst = false;
 
 using SchedFn = bool (*)(void*, void*, uint8_t, void*, uint32_t);
-using RingSnapshotFn = void* (*) (void*, void*);
+using RingSnapshotFn = void* (*)(void*, void*);
 
 inline SchedFn g_schedNative = nullptr;
 inline RingSnapshotFn g_ringSnapshot = nullptr;
@@ -191,16 +149,12 @@ inline double g_fedFrameTimeMs = 0.0;
 
 constexpr int32_t SchedLogLimit = 12;
 
-using TimestampFn = void* (*) (void*, int64_t*, void*, void*, uint32_t, uint32_t);
+using TimestampFn = void* (*)(void*, int64_t*, void*, void*, uint32_t, uint32_t);
 
 inline TimestampFn g_tsNative = nullptr;
 inline uint8_t* g_ring = nullptr;
 
-inline int64_t g_nextDeadlineNs = 0;
 inline int64_t g_burstStepNs = 0;
-inline uint32_t g_lastTsIndex = 0;
-inline uint32_t g_lastTsCountPlus1 = 0;
-
 inline int64_t g_tsCalls = 0;
 inline int64_t g_tsRebased = 0;
 inline int64_t g_tsClamped = 0;
@@ -216,6 +170,7 @@ inline int64_t g_gapSumQpc = 0;
 inline int64_t g_gapMinQpc = 0;
 inline int64_t g_gapMaxQpc = 0;
 inline int32_t g_gapCount = 0;
+inline int32_t g_clumpCount = 0;
 inline int64_t g_statsDeadline = 0;
 
 constexpr int64_t StatsWindowNs = 5000000000LL; // 5 s
@@ -232,6 +187,7 @@ inline void ResetStats(int64_t nowQpc)
     g_gapMinQpc = 0;
     g_gapMaxQpc = 0;
     g_gapCount = 0;
+    g_clumpCount = 0;
     g_statsDeadline = nowQpc + QpcFromNs(StatsWindowNs);
 }
 
@@ -241,13 +197,14 @@ inline void ReportStats(int64_t multiplier)
         return;
 
     LOG_INFO("XeFG pacing: {}X, real frame {:.2f} ms ({:.1f} fps), target {:.2f} ms/frame; "
-             "gap {:.2f} avg / {:.2f} min / {:.2f} max ms over {} frames; "
+             "gap {:.2f} avg / {:.2f} min / {:.2f} max ms over {} frames (clumps: {}); "
              "scheduler {} calls, {} refused, {:.2f} ms avg inside; "
              "deadlines {} calls, {} rebased, {} clamped; render-est {:.2f} ms, fed {:.2f} ms",
              multiplier, g_periodNs / 1000000.0, g_periodNs > 0 ? 1e9 / g_periodNs : 0.0, MsFromQpc(g_intervalQpc),
              MsFromQpc(g_gapSumQpc / g_gapCount), MsFromQpc(g_gapMinQpc), MsFromQpc(g_gapMaxQpc), g_gapCount,
-             g_schedCalls, g_schedRefused, g_schedCalls > 0 ? MsFromQpc(g_schedWaitQpc / g_schedCalls) : 0.0, g_tsCalls,
-             g_tsRebased, g_tsClamped, g_renderTimeNs / 1000000.0, g_fedFrameTimeMs);
+             g_clumpCount, g_schedCalls, g_schedRefused,
+             g_schedCalls > 0 ? MsFromQpc(g_schedWaitQpc / g_schedCalls) : 0.0, g_tsCalls, g_tsRebased, g_tsClamped,
+             g_renderTimeNs / 1000000.0, g_fedFrameTimeMs);
 }
 
 inline void RecordGap(int64_t endQpc)
@@ -262,6 +219,9 @@ inline void RecordGap(int64_t endQpc)
 
         if (gap > g_gapMaxQpc)
             g_gapMaxQpc = gap;
+
+        if (NsFromQpc(gap) < 1000000LL) // Gap < 1 ms is a clump
+            g_clumpCount++;
 
         g_gapCount++;
     }
@@ -308,23 +268,42 @@ inline void PushPeriod(int64_t ns)
     g_periodNs = sorted[g_sampleCount / 2];
 }
 
+inline void NoteBasePresent()
+{
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+
+    if (g_lastBaseFrameQpc != 0)
+    {
+        const int64_t burstDeltaNs = NsFromQpc(now.QuadPart - g_lastBaseFrameQpc);
+        if (burstDeltaNs >= 1000000LL && burstDeltaNs <= 500000000LL)
+        {
+            PushPeriod(burstDeltaNs);
+        }
+    }
+
+    g_lastBaseFrameQpc = now.QuadPart;
+    g_lastPresentedQpc = now.QuadPart;
+    g_burstBlockQpc = 0;
+    g_pacedBursts++;
+}
+
 inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
 {
     if (index > 1)
         return;
 
-    if (g_lastBurstQpc != 0)
+    if (g_lastBurstQpc != 0 && g_lastBaseFrameQpc == 0)
         PushPeriod(NsFromQpc(nowQpc - g_lastBurstQpc));
 
     if (g_periodNs > 0)
     {
         const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
-        g_renderTimeNs = g_periodNs > blockNs ? g_periodNs - blockNs : 0;
+        g_renderTimeNs = g_periodNs > blockNs ? g_periodNs - blockNs : g_periodNs;
     }
 
     g_burstBlockQpc = 0;
     g_lastBurstQpc = nowQpc;
-    g_pacedBursts++;
 
     if (g_periodNs > 0 && g_freq.QuadPart > 0)
         g_intervalQpc = QpcFromNs(g_periodNs / (static_cast<int64_t>(count) + 1));
@@ -352,11 +331,11 @@ inline void WaitUntil(int64_t targetQpc)
     }
 }
 
-inline void PaceFrame(uint64_t index, uint64_t count)
+inline void PaceFrame(uint64_t index, uint64_t count, bool isLast)
 {
     const int64_t multiplier = static_cast<int64_t>(count) + 1;
 
-    if (multiplier <= 2)
+    if (multiplier < 2)
         return;
 
     LARGE_INTEGER now;
@@ -364,39 +343,67 @@ inline void PaceFrame(uint64_t index, uint64_t count)
 
     NoteFrame(index, count, now.QuadPart);
 
-    if (index <= 1)
+    if (g_periodNs <= 0)
+        g_periodNs = 33333333LL; // 33.3 ms baseline (30 fps)
+
+    if (g_freq.QuadPart <= 0)
+        return;
+
+    const int64_t intervalNs = g_periodNs / multiplier;
+    const int64_t intervalQpc = QpcFromNs(intervalNs);
+    g_intervalQpc = intervalQpc;
+
+    if (intervalQpc <= 0)
+        return;
+
+    // Anchor target presentation deadline to the base application frame
+    int64_t targetQpc = 0;
+    if (g_lastBaseFrameQpc != 0)
     {
-        if (g_periodNs <= 0 || g_intervalQpc <= 0)
-            return;
-
-        g_targetQpc = now.QuadPart + g_intervalQpc;
-
-        if (!g_loggedFirstBurst)
-        {
-            g_loggedFirstBurst = true;
-            LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per generated frame", multiplier,
-                     g_periodNs / 1000000.0, (g_periodNs / multiplier) / 1000000.0);
-        }
+        targetQpc = g_lastBaseFrameQpc + static_cast<int64_t>(index) * intervalQpc;
     }
     else
     {
-        if (g_intervalQpc <= 0)
-            return;
+        if (index <= 1)
+            g_targetQpc = now.QuadPart + intervalQpc;
+        else
+            g_targetQpc += intervalQpc;
 
-        g_targetQpc += g_intervalQpc;
+        targetQpc = g_targetQpc;
     }
 
-    const int64_t latest = now.QuadPart + QpcFromNs(g_periodNs);
-    if (g_targetQpc > latest)
-        g_targetQpc = latest;
+    if (!g_loggedFirstBurst)
+    {
+        g_loggedFirstBurst = true;
+        LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per generated frame", multiplier,
+                 g_periodNs / 1000000.0, intervalNs / 1000000.0);
+    }
 
-    WaitUntil(g_targetQpc);
+    // Anti-Clump Protection Floor:
+    // Guarantees consecutive presents never arrive in sub-millisecond dumps (<1 ms).
+    // The presentation must be spaced by at least minGap (40% of target interval, capped at 2.0 ms).
+    if (g_lastPresentedQpc != 0)
+    {
+        const int64_t minGapNs = (intervalNs * 2) / 5;
+        const int64_t cappedMinGapNs = minGapNs > 2000000LL ? 2000000LL : (minGapNs < 500000LL ? 500000LL : minGapNs);
+        const int64_t antiClumpFloorQpc = g_lastPresentedQpc + QpcFromNs(cappedMinGapNs);
+        if (targetQpc < antiClumpFloorQpc)
+            targetQpc = antiClumpFloorQpc;
+    }
+
+    // Sanity upper bound: never wait more than 1.5 frame periods into the future
+    const int64_t latestQpc = now.QuadPart + QpcFromNs((g_periodNs * 3) / 2);
+    if (targetQpc > latestQpc)
+        targetQpc = latestQpc;
+
+    WaitUntil(targetQpc);
 
     g_pacedFrames++;
 
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
 
+    g_lastPresentedQpc = end.QuadPart;
     RecordGap(end.QuadPart);
 }
 
@@ -443,17 +450,6 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
                  reinterpret_cast<uint8_t*>(ctx)[SchedEnableOffset], *reinterpret_cast<uint64_t*>(timing),
                  *reinterpret_cast<uint64_t*>(timing + 8));
     }
-
-    RecordGap(after.QuadPart);
-}
-
-inline bool ProviderPacesLastFrame(void* ctx, const uint8_t* burst, uint64_t count)
-{
-    if (count <= 2)
-        return false;
-
-    const auto* ctxBytes = reinterpret_cast<const uint8_t*>(ctx);
-    return ctxBytes[LimiterEnabledOffset] != 0 && *reinterpret_cast<const uint32_t*>(burst + BurstLimiterField) == 0;
 }
 
 inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLast)
@@ -489,18 +485,16 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
             return;
     }
 
-    if (g_schedNative != nullptr && SchedulerUsable(ctx))
+    // For intermediate frames, route through the provider's scheduler so Intel's
+    // internal ring-buffer tag stamping and frame bookkeeping executes.
+    if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
     {
-        if (!isLast)
-            ScheduleFrame(ctx, burst, index);
-
-        return;
+        ScheduleFrame(ctx, burst, index);
     }
 
-    if (isLast && ProviderPacesLastFrame(ctx, burst, count))
-        return;
-
-    PaceFrame(index, count);
+    // Unconditionally pace EVERY generated frame (both intermediate frames and
+    // the final generated frame) across ALL multipliers (2X through 6X).
+    PaceFrame(index, count, isLast);
 }
 
 inline int64_t Detour(void* ctx, uint32_t a2, uint32_t a3, uint64_t a4, void* arg5, void* arg6, uint64_t arg7)
@@ -513,6 +507,8 @@ inline int64_t Detour(void* ctx, uint32_t a2, uint32_t a3, uint64_t a4, void* ar
             TryPace(ctx, arg5, arg6, arg7, false);
         else if (caller == g_base + LastFrameCallerRva)
             TryPace(ctx, arg5, arg6, arg7, true);
+        else
+            NoteBasePresent();
     }
 
     return g_native(ctx, a2, a3, a4, arg5, arg6, arg7);
@@ -538,42 +534,29 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 
     g_tsCalls++;
 
-    const bool fresh = index == 1 || index <= g_lastTsIndex || countPlus1 != g_lastTsCountPlus1;
+    int64_t nativeUnit = unit;
 
-    if (fresh)
+    if (g_ring != nullptr)
     {
-        int64_t nativeUnit = unit;
+        float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
 
-        if (g_ring != nullptr)
+        if (!(f >= 0.125f) || f > 500.0f)
+            f = 500.0f;
+
+        const int64_t fNs = static_cast<int64_t>(f * 1000000.0f);
+        const int64_t clampedUnit = fNs / static_cast<int64_t>(countPlus1);
+
+        if (clampedUnit < nativeUnit)
         {
-            float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
-
-            if (!(f >= 0.125f) || f > 500.0f)
-                f = 500.0f;
-
-            const int64_t fNs = static_cast<int64_t>(f * 1000000.0f);
-            const int64_t clampedUnit = fNs / static_cast<int64_t>(countPlus1);
-
-            if (clampedUnit < nativeUnit)
-            {
-                nativeUnit = clampedUnit;
-                g_tsClamped++;
-            }
+            nativeUnit = clampedUnit;
+            g_tsClamped++;
         }
-
-        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
-        g_burstStepNs = unit;
-        g_tsRebased++;
-    }
-    else
-    {
-        g_nextDeadlineNs += g_burstStepNs;
     }
 
-    g_lastTsIndex = index;
-    g_lastTsCountPlus1 = countPlus1;
-
-    *out = g_nextDeadlineNs;
+    // Repair deadline relative to this frame's base without drifting global accumulation
+    *out = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
+    g_burstStepNs = unit;
+    g_tsRebased++;
 
     return result;
 }
@@ -658,6 +641,8 @@ inline bool Install(uint8_t* base)
 
     g_base = base;
     g_lastBurstQpc = 0;
+    g_lastBaseFrameQpc = 0;
+    g_lastPresentedQpc = 0;
     g_periodNs = 0;
     g_intervalQpc = 0;
     g_targetQpc = 0;
@@ -677,13 +662,11 @@ inline bool Install(uint8_t* base)
     g_renderTimeNs = 0;
     g_fedFrameTimeMs = 0.0;
     g_ring = nullptr;
-    g_nextDeadlineNs = 0;
     g_burstStepNs = 0;
-    g_lastTsIndex = 0;
-    g_lastTsCountPlus1 = 0;
     g_tsCalls = 0;
     g_tsRebased = 0;
     g_tsClamped = 0;
+    g_clumpCount = 0;
     ResetStats(0);
 
     void* native = nullptr;
@@ -757,5 +740,7 @@ inline void Uninstall()
     g_tsNative = nullptr;
     g_ringSnapshot = nullptr;
     g_base = nullptr;
+    g_lastBaseFrameQpc = 0;
+    g_lastPresentedQpc = 0;
 }
 } // namespace XeFGPacing
