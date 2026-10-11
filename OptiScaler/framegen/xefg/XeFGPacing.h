@@ -123,6 +123,7 @@ inline int64_t g_lastPresentedQpc = 0;
 inline int64_t g_periodNs = 0;
 inline int64_t g_intervalQpc = 0;
 inline int64_t g_targetQpc = 0;
+inline int64_t g_burstAnchorQpc = 0;
 inline int64_t g_samples[SampleCount] {};
 inline int32_t g_sampleCount = 0;
 inline int32_t g_samplePos = 0;
@@ -268,33 +269,10 @@ inline void PushPeriod(int64_t ns)
     g_periodNs = sorted[g_sampleCount / 2];
 }
 
-inline void NoteBasePresent()
-{
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-
-    if (g_lastBaseFrameQpc != 0)
-    {
-        const int64_t burstDeltaNs = NsFromQpc(now.QuadPart - g_lastBaseFrameQpc);
-        if (burstDeltaNs >= 1000000LL && burstDeltaNs <= 500000000LL)
-        {
-            PushPeriod(burstDeltaNs);
-        }
-    }
-
-    g_lastBaseFrameQpc = now.QuadPart;
-    g_lastPresentedQpc = now.QuadPart;
-    g_burstBlockQpc = 0;
-    g_pacedBursts++;
-}
-
 inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
 {
     if (index > 1)
         return;
-
-    if (g_lastBurstQpc != 0 && g_lastBaseFrameQpc == 0)
-        PushPeriod(NsFromQpc(nowQpc - g_lastBurstQpc));
 
     if (g_periodNs > 0)
     {
@@ -338,6 +316,8 @@ inline void PaceFrame(uint64_t index, uint64_t count, bool isLast)
     if (multiplier < 2)
         return;
 
+    g_lastMultiplier = multiplier;
+
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
 
@@ -356,56 +336,127 @@ inline void PaceFrame(uint64_t index, uint64_t count, bool isLast)
     if (intervalQpc <= 0)
         return;
 
-    // Anchor target presentation deadline to the base application frame
-    int64_t targetQpc = 0;
-    if (g_lastBaseFrameQpc != 0)
-    {
-        targetQpc = g_lastBaseFrameQpc + static_cast<int64_t>(index) * intervalQpc;
-    }
-    else
-    {
-        if (index <= 1)
-            g_targetQpc = now.QuadPart + intervalQpc;
-        else
-            g_targetQpc += intervalQpc;
-
-        targetQpc = g_targetQpc;
-    }
-
     if (!g_loggedFirstBurst)
     {
         g_loggedFirstBurst = true;
-        LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per generated frame", multiplier,
-                 g_periodNs / 1000000.0, intervalNs / 1000000.0);
+        LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per frame", multiplier, g_periodNs / 1000000.0,
+                 intervalNs / 1000000.0);
     }
 
-    // Anti-Clump Protection Floor:
-    // Guarantees consecutive presents never arrive in sub-millisecond dumps (<1 ms).
-    // The presentation must be spaced by at least minGap (40% of target interval, capped at 2.0 ms).
+    if (index == 1)
+    {
+        // First generated frame of the burst: anchor the burst start timeline
+        g_burstAnchorQpc = now.QuadPart;
+
+        // Anti-clump protection relative to previous cycle's final present
+        if (g_lastPresentedQpc != 0)
+        {
+            const int64_t minGapQpc = intervalQpc / 2;
+            const int64_t antiClumpFloor = g_lastPresentedQpc + minGapQpc;
+            if (now.QuadPart < antiClumpFloor)
+                WaitUntil(antiClumpFloor);
+        }
+
+        LARGE_INTEGER end;
+        QueryPerformanceCounter(&end);
+
+        g_lastPresentedQpc = end.QuadPart;
+        g_burstAnchorQpc = end.QuadPart;
+        RecordGap(end.QuadPart);
+        g_pacedFrames++;
+        return;
+    }
+
+    // Subsequent generated frames (index 2..count for 3X-6X FG):
+    // Uniform pacing deadline relative to burst anchor
+    int64_t targetQpc = g_burstAnchorQpc + static_cast<int64_t>(index - 1) * intervalQpc;
+
+    // Anti-clump protection: must never follow preceding frame closer than half an interval
     if (g_lastPresentedQpc != 0)
     {
-        const int64_t minGapNs = (intervalNs * 2) / 5;
-        const int64_t cappedMinGapNs = minGapNs > 2000000LL ? 2000000LL : (minGapNs < 500000LL ? 500000LL : minGapNs);
-        const int64_t antiClumpFloorQpc = g_lastPresentedQpc + QpcFromNs(cappedMinGapNs);
-        if (targetQpc < antiClumpFloorQpc)
-            targetQpc = antiClumpFloorQpc;
+        const int64_t minGapQpc = intervalQpc / 2;
+        const int64_t antiClumpFloor = g_lastPresentedQpc + minGapQpc;
+        if (targetQpc < antiClumpFloor)
+            targetQpc = antiClumpFloor;
     }
 
-    // Sanity upper bound: never wait more than 1.5 frame periods into the future
+    // Upper bound sanity: never wait more than 1.5 frame periods into the future
     const int64_t latestQpc = now.QuadPart + QpcFromNs((g_periodNs * 3) / 2);
     if (targetQpc > latestQpc)
         targetQpc = latestQpc;
 
     WaitUntil(targetQpc);
 
-    g_pacedFrames++;
-
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
 
     g_lastPresentedQpc = end.QuadPart;
     RecordGap(end.QuadPart);
+    g_pacedFrames++;
 }
+
+inline void PaceBaseFrame()
+{
+    int64_t multiplier = g_lastMultiplier;
+    if (multiplier < 2)
+        multiplier = 2;
+
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+
+    if (g_periodNs <= 0)
+        g_periodNs = 33333333LL;
+
+    if (g_freq.QuadPart <= 0)
+        return;
+
+    const int64_t intervalNs = g_periodNs / multiplier;
+    const int64_t intervalQpc = QpcFromNs(intervalNs);
+    g_intervalQpc = intervalQpc;
+
+    if (g_burstAnchorQpc != 0 && intervalQpc > 0)
+    {
+        // The base frame is frame M in the burst: target is anchor + (multiplier - 1) * intervalQpc
+        int64_t targetQpc = g_burstAnchorQpc + static_cast<int64_t>(multiplier - 1) * intervalQpc;
+
+        // Anti-clump floor: must be at least half an interval after preceding generated frame
+        if (g_lastPresentedQpc != 0)
+        {
+            const int64_t minGapQpc = intervalQpc / 2;
+            const int64_t antiClumpFloor = g_lastPresentedQpc + minGapQpc;
+            if (targetQpc < antiClumpFloor)
+                targetQpc = antiClumpFloor;
+        }
+
+        // Upper bound sanity
+        const int64_t latestQpc = now.QuadPart + QpcFromNs((g_periodNs * 3) / 2);
+        if (targetQpc > latestQpc)
+            targetQpc = latestQpc;
+
+        WaitUntil(targetQpc);
+    }
+
+    LARGE_INTEGER end;
+    QueryPerformanceCounter(&end);
+
+    if (g_lastBaseFrameQpc != 0)
+    {
+        const int64_t burstDeltaNs = NsFromQpc(end.QuadPart - g_lastBaseFrameQpc);
+        if (burstDeltaNs >= 5000000LL && burstDeltaNs <= 200000000LL)
+        {
+            PushPeriod(burstDeltaNs);
+            g_renderTimeNs = g_periodNs;
+        }
+    }
+
+    g_lastPresentedQpc = end.QuadPart;
+    g_lastBaseFrameQpc = end.QuadPart;
+    RecordGap(end.QuadPart);
+    g_pacedBursts++;
+    g_burstBlockQpc = 0;
+}
+
+inline void NoteBasePresent() { PaceBaseFrame(); }
 
 inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
 {
@@ -508,7 +559,7 @@ inline int64_t Detour(void* ctx, uint32_t a2, uint32_t a3, uint64_t a4, void* ar
         else if (caller == g_base + LastFrameCallerRva)
             TryPace(ctx, arg5, arg6, arg7, true);
         else
-            NoteBasePresent();
+            PaceBaseFrame();
     }
 
     return g_native(ctx, a2, a3, a4, arg5, arg6, arg7);
@@ -643,6 +694,7 @@ inline bool Install(uint8_t* base)
     g_lastBurstQpc = 0;
     g_lastBaseFrameQpc = 0;
     g_lastPresentedQpc = 0;
+    g_burstAnchorQpc = 0;
     g_periodNs = 0;
     g_intervalQpc = 0;
     g_targetQpc = 0;
@@ -742,5 +794,7 @@ inline void Uninstall()
     g_base = nullptr;
     g_lastBaseFrameQpc = 0;
     g_lastPresentedQpc = 0;
+    g_burstAnchorQpc = 0;
+    g_lastMultiplier = 0;
 }
 } // namespace XeFGPacing
