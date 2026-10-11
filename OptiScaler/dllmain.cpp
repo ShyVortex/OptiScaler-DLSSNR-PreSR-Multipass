@@ -1519,8 +1519,6 @@ static void CheckQuirks(bool isNvidia)
     {
         Config::Instance()->FGXeFGForceBorderless.set_volatile_value(true);
     }
-    else
-        quirks.reset(GameQuirk::ForceBorderlessWhenUsingXeFG);
 
     if (quirks & GameQuirk::OverrideVsyncWhenUsingXeFG && !Config::Instance()->OverrideVsync.has_value() &&
         State::Instance().activeFgOutput == FGOutput::XeFG && State::Instance().activeFgInput != FGInput::NoFG &&
@@ -1528,8 +1526,6 @@ static void CheckQuirks(bool isNvidia)
     {
         Config::Instance()->OverrideVsync.set_volatile_value(true);
     }
-    else
-        quirks.reset(GameQuirk::OverrideVsyncWhenUsingXeFG);
 
     if (quirks & GameQuirk::DisableResizeSkip && !Config::Instance()->FGSkipResizeBuffers.has_value())
     {
@@ -1970,6 +1966,24 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         if (State::Instance().activeFgInput == FGInput::NvngxFG)
             State::Instance().activeFgOutput = FGOutput::NoFG;
+
+        if (State::Instance().activeFgOutput == FGOutput::XeFG && State::Instance().activeFgInput != FGInput::NoFG &&
+            State::Instance().activeFgInput != FGInput::NvngxFG)
+        {
+            auto exeQuirks = getQuirksForExe(State::Instance().gameExe);
+            if ((exeQuirks & GameQuirk::ForceBorderlessWhenUsingXeFG) &&
+                !Config::Instance()->FGXeFGForceBorderless.has_value())
+            {
+                Config::Instance()->FGXeFGForceBorderless.set_volatile_value(true);
+                LOG_INFO("Applied ForceBorderlessWhenUsingXeFG quirk for XeFG output");
+            }
+
+            if ((exeQuirks & GameQuirk::OverrideVsyncWhenUsingXeFG) && !Config::Instance()->OverrideVsync.has_value())
+            {
+                Config::Instance()->OverrideVsync.set_volatile_value(true);
+                LOG_INFO("Applied OverrideVsyncWhenUsingXeFG quirk for XeFG output");
+            }
+        }
 
         // Not foolproof
         // calls LoadLibraryExW inside DllMain but seems mostly fine if we only call NvAPI_GetInterfaceVersionString
