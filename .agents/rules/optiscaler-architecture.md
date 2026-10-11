@@ -209,8 +209,18 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - In `CreateSwapChainForHwnd` and `DLSSGCreateSwapChainForHwnd`, `ResolveWindowSizedSwapchain(localDesc, hWnd)` must execute on a local descriptor copy *before* the `< 100` overlay check.
        - Window-sized swapchains (e.g. *Helldivers 2* passing 0x0) must wrap normally via `FGHooks::CreateSwapChainForHwnd` and log resolution at `INFO` level, never being rejected as overlays.
        - The caller's `pDesc` must remain unmutated (preserving the 0x0 contract).
+     - **Helldivers 2 Quirk & User Borderless Toggle (`Quirks.h`, `Config.cpp`, `OptiScaler.ini`, `menu_common.cpp`)**:
+       - `QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)` in `Quirks.h` ensures *Helldivers 2* creates flip-model borderless swapchains under Linux and Windows without globally forcing borderless on other games.
+       - `[XeMFG-SR] ForceBorderless = auto` in `OptiScaler.ini` and `Config.cpp` syncs with `FGXeFGForceBorderless`, and `"Force Borderless Window (Exclusive Fullscreen Workaround; restart)##xemfg_sr"` provides interactive user control in the GUI.
+     - **Live Multiplier Adaptation Without Destructive Deactivations (`XeFG_Dx12.cpp`, `menu_common.cpp`)**:
+       - `_framesToInterpolate` must be initialized from `Config::Instance()->FGXeFGInterpolationCount.value_or_default()` in `CreateSwapchain` and `CreateSwapchain1`, ensuring immediate multiplier alignment.
+       - `state.WAR_xefgRequestFGToggle` must be guarded with `!XeMfgLoader::AnyEnabledForSession()`, and `state.fgChanged = true;` must never be set in the `Generated Frames##xemfg_sr` slider callback. Live adjustments via `SetNumInterpolatedFrames` must never call `Deactivate()`, `SetEnabled: false`, or pause presentation for 10 frames.
+     - **FrameRenderTime Sanity Floor Fallback (`XeFG_Dx12.cpp`)**:
+       - In `XeFG_Dx12::Dispatch`, if `frameRenderTime < 1.0` or `frameRenderTime < 0.25 * _ftDelta[fIndex]` when `_ftDelta[fIndex] > 0.0`, fallback to `_ftDelta[fIndex]`. This prevents feeding collapsed sub-millisecond deltas (from scheduler blocking subtraction in `XeFGPacing.h`) to Intel XeSS-FG, stabilizing optical flow motion vectors and eliminating judder.
+     - **OptiFG Menu Auto-Management & Advanced Settings Suppression (`menu_common.cpp`)**:
+       - When `xeMfgSrActive` is true, `Frame Generation (OptiFG)` must display the matching informational message `"Managed exclusively by the Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) section above."` and completely hide manual OptiFG parameters and `Advanced OptiFG Settings`.
      - **Associated Automated Unit Tests**:
-       - `tests/xemfg_sr_unit.cpp`
+       - `tests/xemfg_sr_unit.cpp` (Tests 1–11)
        - `tests/xemfg_menu_exclusion_unit.cpp`
        - `tests/xemfg_sr_crash_fix_unit.cpp`
        - `tests/dxgi_swapchain_sizing_unit.cpp`
