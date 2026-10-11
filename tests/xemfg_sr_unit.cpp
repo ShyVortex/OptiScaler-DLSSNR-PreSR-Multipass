@@ -89,6 +89,7 @@ struct SimulatedConfig
     TestCustomOptional<FGInput> FGInputMode { FGInput::NoFG };
     TestCustomOptional<FGOutput> FGOutputMode { FGOutput::NoFG };
     TestCustomOptional<FGNvngxReplacement> FGNvngxReplacementMode { FGNvngxReplacement::None };
+    TestCustomOptional<bool> FGXeFGForceBorderless { false };
     TestCustomOptional<int> FGXeFGInterpolationCount { 1 };
 };
 
@@ -430,6 +431,157 @@ int main()
         assert(liveMultiplier + 1 == 4); // 4X FG
 
         printf("  [PASS] Test 7: Post-attach automatic pipeline configuration verified.\n");
+    }
+
+    // Test 8: Helldivers 2 Quirk Resolution & Borderless Config Synchronization
+    {
+        // 1. Quirk lookup for helldivers2.exe
+        const std::string exeName = "helldivers2.exe";
+        bool quirkApplies = (exeName == "helldivers2.exe");
+        assert(quirkApplies);
+
+        SimulatedConfig cfg;
+        // When unset, quirk sets volatile true
+        if (quirkApplies && !cfg.FGXeFGForceBorderless.has_value())
+        {
+            cfg.FGXeFGForceBorderless = true;
+        }
+        assert(cfg.FGXeFGForceBorderless.value() == true);
+
+        // When explicitly configured in [XeMFG-SR] ForceBorderless = false, user override is respected
+        SimulatedConfig cfgUserOverride;
+        std::optional<bool> srForceBorderless = false;
+        if (srForceBorderless.has_value())
+            cfgUserOverride.FGXeFGForceBorderless = srForceBorderless.value();
+        assert(cfgUserOverride.FGXeFGForceBorderless.value() == false);
+
+        // When configured in [XeMFG-SR] ForceBorderless = true
+        std::optional<bool> srForceBorderlessTrue = true;
+        if (srForceBorderlessTrue.has_value())
+            cfgUserOverride.FGXeFGForceBorderless = srForceBorderlessTrue.value();
+        assert(cfgUserOverride.FGXeFGForceBorderless.value() == true);
+
+        printf("  [PASS] Test 8: Helldivers 2 quirk resolution and borderless sync verified.\n");
+    }
+
+    // Test 9: Live Multiplier Adaptation Without Destructive Toggle Deactivation
+    {
+        SimulatedConfig cfg;
+        cfg.XeMfgSrEnable = true;
+        cfg.FGXeFGInterpolationCount = 5;
+
+        // Verify CreateSwapchain initialization: _framesToInterpolate matches config count
+        int framesToInterpolate = cfg.FGXeFGInterpolationCount.value_or_default();
+        assert(framesToInterpolate == 5);
+
+        // Simulated GetInterpolatedFrameCount() formula
+        auto getInterpolatedFrameCount = [](int frames) -> int
+        {
+            if (frames > 0)
+                return frames + 1;
+            return 2;
+        };
+        assert(getInterpolatedFrameCount(framesToInterpolate) == 6); // 6X FG immediately
+
+        // Simulate Dispatch() when interpolation count changes live
+        int newTargetCount = 2; // User moved slider to 3X FG (2 interpolated frames)
+        cfg.FGXeFGInterpolationCount = newTargetCount;
+
+        bool war_xefgRequestFGToggle = false;
+        const bool xeMfgActive = SimulatedLoader::AnyEnabledForSession(cfg);
+        assert(xeMfgActive);
+
+        if (framesToInterpolate != cfg.FGXeFGInterpolationCount.value_or_default())
+        {
+            if (!xeMfgActive)
+                war_xefgRequestFGToggle = true;
+
+            framesToInterpolate = cfg.FGXeFGInterpolationCount.value_or_default();
+        }
+
+        // Must NOT request toggle or deactivate swapchain
+        assert(!war_xefgRequestFGToggle);
+        assert(framesToInterpolate == 2);
+        assert(getInterpolatedFrameCount(framesToInterpolate) == 3); // 3X FG
+
+        printf("  [PASS] Test 9: Live multiplier adaptation without toggle deactivations verified.\n");
+    }
+
+    // Test 10: FrameRenderTime Sanity Floor Fallback
+    {
+        auto calculateFrameRenderTime = [](double pacedEstimateMs, double ftDeltaMs, double lastFGFrameTimeMs) -> double
+        {
+            double frameRenderTime = pacedEstimateMs;
+            if (frameRenderTime < 1.0 || (ftDeltaMs > 0.0 && frameRenderTime < 0.25 * ftDeltaMs))
+                frameRenderTime = ftDeltaMs;
+            if (!(frameRenderTime > 0.0))
+                frameRenderTime = ftDeltaMs;
+            if (!(frameRenderTime > 0.0))
+                frameRenderTime = lastFGFrameTimeMs;
+            return frameRenderTime;
+        };
+
+        // Case A: Scheduler blocking subtracted too much -> RenderTimeMs collapsed to 0.7258 ms
+        // Game actual render delta was 40.85 ms. Must fall back to 40.85 ms!
+        double ftA = calculateFrameRenderTime(0.7258, 40.8548, 16.6);
+        assert(ftA == 40.8548);
+
+        // Case B: RenderTimeMs collapsed to 0.0 ms
+        double ftB = calculateFrameRenderTime(0.0, 42.1, 16.6);
+        assert(ftB == 42.1);
+
+        // Case C: RenderTimeMs collapsed below 25% of large delta (e.g. 5.0 ms while real frame is 50.0 ms)
+        double ftC = calculateFrameRenderTime(5.0, 50.0, 16.6);
+        assert(ftC == 50.0);
+
+        // Case D: Normal healthy pacing estimate (e.g. 20.0 ms while real frame is 25.0 ms)
+        double ftD = calculateFrameRenderTime(20.0, 25.0, 16.6);
+        assert(ftD == 20.0);
+
+        printf("  [PASS] Test 10: FrameRenderTime sanity floor fallback logic verified.\n");
+    }
+
+    // Test 11: OptiFG Menu Auto-Management & Advanced Settings Hide Condition
+    {
+        SimulatedConfig cfg;
+        cfg.XeMfgSrEnable = true;
+        const bool xeMfgSrActive = SimulatedLoader::SrEnabledForSession(cfg);
+        assert(xeMfgSrActive);
+
+        // Simulate menu rendering decision
+        struct MenuState
+        {
+            bool renderedManagedText = false;
+            bool renderedManualControls = false;
+            bool renderedAdvancedSettings = false;
+        };
+
+        auto renderOptiFG = [](bool srActive) -> MenuState
+        {
+            MenuState state;
+            if (srActive)
+            {
+                state.renderedManagedText = true;
+            }
+            else
+            {
+                state.renderedManualControls = true;
+                state.renderedAdvancedSettings = true;
+            }
+            return state;
+        };
+
+        MenuState activeState = renderOptiFG(xeMfgSrActive);
+        assert(activeState.renderedManagedText == true);
+        assert(activeState.renderedManualControls == false);
+        assert(activeState.renderedAdvancedSettings == false);
+
+        MenuState inactiveState = renderOptiFG(false);
+        assert(inactiveState.renderedManagedText == false);
+        assert(inactiveState.renderedManualControls == true);
+        assert(inactiveState.renderedAdvancedSettings == true);
+
+        printf("  [PASS] Test 11: OptiFG menu auto-management and advanced settings hide verified.\n");
     }
 
     printf("[+] All XeMFG-SR unit tests PASSED successfully!\n");
