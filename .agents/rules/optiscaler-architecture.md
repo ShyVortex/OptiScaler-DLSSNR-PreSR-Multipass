@@ -151,6 +151,13 @@ description: Architecture, frame generation, and safety rules for OptiScaler
          - `XeFGPacing::Install` must run unconditionally whenever XeMFG is patched (`outStatus.Patched == true`).
          - Never gate native thunk pacing behind optional DXGI `ExtraPacing` or config switches; without `XeFGPacing`, `libxess_fg.dll` dumps intermediate generated frames in < 1 ms unmetered bursts and collapses `frameRenderTime` to 0.0f, ruining visual smoothness.
          - Decoupled frame render time (`XeFGPacing::RenderTimeMs()`) must feed valid delta time to Intel in `XeFG_Dx12::Dispatch()`.
+         - **Wall-Clock Pacing & Anti-Clump Protection**:
+           - Support 2X Frame Generation (`multiplier < 2` guard), pacing the single generated frame to the exact 50% halfway point ($T_{\text{base}} + T_{\text{interval}}$).
+           - Unconditionally pace the final generated frame (`isLast == true`, caller `LastFrameCallerRva = 0x220467`), eliminating sub-millisecond frame dumps (0.28–0.47 ms).
+           - Intercept base application frame presents (`0x220A52` and `0x220DAD`) via `NoteBasePresent()` in `Detour` (`0x25C0`) to anchor subsequent generated frame deadlines ($T_{\text{base}} + \text{index} \times T_{\text{interval}}$) and update cycle periods.
+           - Enforce an anti-clump floor ($\ge g\_lastPresentedQpc + \min(T_{\text{interval}} \times 0.4,\, 2.0\text{ ms})$) preventing consecutive presents from firing closer than the floor threshold.
+           - Neutralize cumulative deadline drift in `TsDetour` (RVA `0x3430`) by eliminating mutating global deadline accumulation.
+           - Fall back to `g_periodNs` in `NoteFrame` when inter-frame intervals collapse under 1 ms to prevent zeroed frame render time reporting.
        - **Dynamic In-Memory Ceiling Adaptation**:
          - `XeMfgLoader::SetMaxGeneratedFrames` must support live in-memory byte rewriting of `U3`, `U4`, and `U5` with `VirtualProtect` and `FlushInstructionCache`. Never make the ceiling immutable for the session or lock out the menu slider.
          - `EnabledForSession()` must evaluate dynamically; never latch it with `static const bool`.
@@ -173,6 +180,7 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - **Associated Automated Unit Tests**:
        - `tests/xemfg_loader_unit.cpp`
        - `tests/xefg_mfg_streamline_unit.cpp`
+       - `tests/xefg_pacing_engine_unit.cpp`
 
 9. **Preservation of Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) Injector Across Upstream Merges**:
    - Upstream author (`wilsjo2`) does not maintain the XeMFG-SR injector pipeline for games with DLSS Super Resolution lacking native DLSS-FG or Streamline.
@@ -225,4 +233,5 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/xemfg_sr_crash_fix_unit.cpp`
        - `tests/dxgi_swapchain_sizing_unit.cpp`
        - `tests/dxgi_window_size_smoke.cpp`
+       - `tests/xefg_pacing_engine_unit.cpp`
 

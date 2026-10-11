@@ -149,5 +149,13 @@ Every implementation plan created for the project must document:
 - **Fullscreen Incompatibility & Borderless Quirk/Toggle**: Intel XeSS-FG unconditionally disables interpolation in DXGI exclusive fullscreen. Added `QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)` in `Quirks.h` and user-controlled toggle `ForceBorderless = auto` under `[XeMFG-SR]` (`OptiScaler.ini`, `Config.cpp`, and GUI).
 - **Live Multiplier Adaptation & Pacing Stability**: Initialized `_framesToInterpolate` on swapchain creation, guarded `WAR_xefgRequestFGToggle` in `XeFG_Dx12::Dispatch`, and removed `state.fgChanged = true;` from the slider callback, eliminating destructive deactivations and 10-frame freezes. Added a sanity floor fallback for `frameRenderTime` in `XeFG_Dx12::Dispatch` to prevent motion vector collapse and eliminate micro-stutters.
 - **OptiFG Menu Auto-Management**: In `menu_common.cpp`, `Frame Generation (OptiFG)` automatically displays the managed notice and hides manual controls and `Advanced OptiFG Settings` when XeMFG-SR is active.
-- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), and `tests/xemfg_sr_unit.cpp` (11/11 passing).
+- **Wall-Clock Native Thunk Pacing Overhaul & Anti-Clump Protection**:
+  - Overhauled `OptiScaler/framegen/xefg/XeFGPacing.h` with wall-clock QPC timing and anchored interval scheduling:
+    - Supported 2X Frame Generation (`multiplier < 2` guard), pacing the single generated frame to the exact 50% halfway point ($T_{\text{base}} + T_{\text{interval}}$).
+    - Unconditionally paced the final generated frame (`isLast == true`, caller `LastFrameCallerRva = 0x220467`), eliminating sub-millisecond dumps (0.28–0.47 ms).
+    - Intercepted base application frame presents (`0x220A52` and `0x220DAD`) via `NoteBasePresent()` in `Detour` (`0x25C0`) to anchor subsequent generated frame deadlines ($T_{\text{base}} + \text{index} \times T_{\text{interval}}$) and update cycle periods via `PushPeriod()`.
+    - Enforced an anti-clump floor ($\ge g\_lastPresentedQpc + \min(T_{\text{interval}} \times 0.4,\, 2.0\text{ ms})$) preventing consecutive presents from firing closer than the floor threshold.
+    - Neutralized cumulative deadline drift in `TsDetour` (RVA `0x3430`) by eliminating mutating global deadline accumulation.
+    - Added render time sanity floor in `NoteFrame` so `RenderTimeMs()` falls back to `g_periodNs` instead of underflowing to 0.0 ms.
+- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), `tests/xemfg_sr_unit.cpp` (11/11 passing), and `tests/xefg_pacing_engine_unit.cpp` (7/7 passing).
 
