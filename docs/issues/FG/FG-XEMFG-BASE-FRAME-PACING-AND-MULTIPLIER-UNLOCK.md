@@ -2,7 +2,7 @@
 
 ## 1. Overview & Environment
 
-- **Operating System**: Linux (CachyOS x86_64, Kernel 6.13, Proton Experimental / Wine / VKD3D-Proton) / Windows 11 build 26100
+- **Operating System**: Linux (CachyOS x86_64, Kernel 7.2.9-2-cachyos, NVIDIA Driver 580.178.04, Proton Experimental / Wine / VKD3D-Proton) / Windows 11
 - **Target Game**: *Helldivers 2* (Arrowhead Game Studios / Sony Interactive Entertainment)
 - **GPU Hardware**: NVIDIA GeForce RTX 3080 Ti Laptop GPU (16GB VRAM, GA103 / Ampere SM86, architecture `0x170`)
 - **Display Resolution & Upscaler**: 2560x1440, DLSS Super Resolution (DLSS SDK 3.7.20)
