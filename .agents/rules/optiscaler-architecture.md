@@ -204,8 +204,15 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - Status badge (`DLL: found | Patches: 5/5 | Pacing: active`), presentation telemetry from `xefgSwapChainGetLastPresentStatus`, and live multiplier indicator (`In-Game Multiplier: %dX (Active)`).
        - Diagnostic prompt when swapchain is unbound (`state.currentFGSwapchain == nullptr`): `"Note: Save Settings and restart the game to initialize the XeFG SwapChain."`.
        - Diagnostic checkboxes: `Debug Markers (Corners)`, `Only Interpolated Frames`, and `Display VBlank Sync (Extra Pacing)`.
+     - **DXGI 1.2+ Window-Sized SwapChain Resolution (`DxgiSwapchainSizing.h`, `DxgiFactory_Hooks.cpp`, `DxgiFactory_WrappedCalls.cpp`)**:
+       - `ResolveWindowSizedSwapchain(DXGI_SWAP_CHAIN_DESC1& desc, HWND window)` must query `GetClientRect(window, &rect)` when `Width == 0 && Height == 0` and size the descriptor to the window client rect.
+       - In `CreateSwapChainForHwnd` and `DLSSGCreateSwapChainForHwnd`, `ResolveWindowSizedSwapchain(localDesc, hWnd)` must execute on a local descriptor copy *before* the `< 100` overlay check.
+       - Window-sized swapchains (e.g. *Helldivers 2* passing 0x0) must wrap normally via `FGHooks::CreateSwapChainForHwnd` and log resolution at `INFO` level, never being rejected as overlays.
+       - The caller's `pDesc` must remain unmutated (preserving the 0x0 contract).
      - **Associated Automated Unit Tests**:
        - `tests/xemfg_sr_unit.cpp`
        - `tests/xemfg_menu_exclusion_unit.cpp`
        - `tests/xemfg_sr_crash_fix_unit.cpp`
+       - `tests/dxgi_swapchain_sizing_unit.cpp`
+       - `tests/dxgi_window_size_smoke.cpp`
 
