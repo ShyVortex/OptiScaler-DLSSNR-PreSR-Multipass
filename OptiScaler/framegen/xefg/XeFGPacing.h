@@ -399,14 +399,17 @@ inline void PaceFrame(uint64_t index, uint64_t count, bool isLast)
     if (!g_loggedFirstBurst)
     {
         g_loggedFirstBurst = true;
-        LOG_INFO("XeFG pacing: {}X fallback, real frame {:.3f} ms -> {:.3f} ms per frame", multiplier,
-                 g_periodNs / 1000000.0, intervalNs / 1000000.0);
+        LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per frame", multiplier, g_periodNs / 1000000.0,
+                 intervalNs / 1000000.0);
     }
 
     if (index == 1)
     {
         // First generated frame of the burst: anchor the burst start timeline
         g_burstAnchorQpc = now.QuadPart;
+
+        LARGE_INTEGER beforeWait;
+        QueryPerformanceCounter(&beforeWait);
 
         // Anti-clump protection relative to previous cycle's final present
         if (g_lastPresentedQpc != 0)
@@ -420,6 +423,7 @@ inline void PaceFrame(uint64_t index, uint64_t count, bool isLast)
         LARGE_INTEGER end;
         QueryPerformanceCounter(&end);
 
+        g_burstBlockQpc += end.QuadPart - beforeWait.QuadPart;
         g_lastPresentedQpc = end.QuadPart;
         g_burstAnchorQpc = end.QuadPart;
         RecordGap(end.QuadPart);
@@ -539,18 +543,13 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
 
     // For intermediate frames, route through the provider's scheduler so Intel's
     // internal ring-buffer tag stamping and frame bookkeeping executes.
-    if (g_schedNative != nullptr && SchedulerUsable(ctx))
+    if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
     {
-        if (!isLast)
-            ScheduleFrame(ctx, burst, index);
-
-        // Anti-clump protection only: ensure consecutive generated frames never arrive
-        // in sub-millisecond dumps (<1 ms), without stalling the engine thread for full intervals.
-        ApplyAntiClumpProtection(index, count);
-        return;
+        ScheduleFrame(ctx, burst, index);
     }
 
-    // Fallback wall-clock pacing when provider scheduler is not usable
+    // Unconditionally pace EVERY generated frame (both intermediate frames and
+    // the final generated frame) across ALL multipliers (2X through 6X).
     PaceFrame(index, count, isLast);
 }
 
@@ -584,31 +583,17 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
         return result;
 
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-    const int64_t unit = median / static_cast<int64_t>(countPlus1);
+    int64_t unit = median / static_cast<int64_t>(countPlus1);
+
+    if (unit <= 0 && g_periodNs > 0)
+        unit = g_periodNs / static_cast<int64_t>(countPlus1);
 
     if (unit <= 0)
         return result;
 
     g_tsCalls++;
 
-    int64_t nativeUnit = unit;
-
-    if (g_ring != nullptr)
-    {
-        float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
-
-        if (!(f >= 0.125f) || f > 500.0f)
-            f = 500.0f;
-
-        const int64_t fNs = static_cast<int64_t>(f * 1000000.0f);
-        const int64_t clampedUnit = fNs / static_cast<int64_t>(countPlus1);
-
-        if (clampedUnit < nativeUnit)
-        {
-            nativeUnit = clampedUnit;
-            g_tsClamped++;
-        }
-    }
+    const int64_t nativeUnit = unit;
 
     if (index == 1)
     {
