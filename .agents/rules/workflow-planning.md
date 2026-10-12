@@ -37,7 +37,8 @@ description: Implementation planning, task progression, testing, and explicit ap
    - **Pre-execution Approval**: The agent MUST NOT proceed to execution without explicit user approval of the implementation plan.
    - **Inter-task Approval**: The agent MUST pause and obtain explicit user approval between tasks before proceeding to subsequent tasks.
 
-7. **Mandatory `.agents` Context & Architecture Updates for Core Features**:
-   - Whenever new core architectural features, unlockers, or pipeline capabilities are implemented (e.g. XeMFG, XeMFG-SR, Smooth Motion, DLSS-NR Pre-SR, etc.):
-     - The workspace architecture guidelines in `.agents/rules/optiscaler-architecture.md` MUST be updated with preservation invariants, configuration backends, mutual exclusions, lifecycle hooks, and regression safety rules for the new feature.
-     - The workspace context overview in `.agents/CONTEXT.md` MUST be updated to record the new feature architecture, touched components, configuration keys, and active runtime pipelines.
+7. **Mandatory User Confirmation Gate Before Updating `.agents` Architecture & Context**:
+   - `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` represent verified institutional memory and permanent architectural invariants.
+   - **Strict Prohibition on Premature Updates**: The agent MUST NEVER update `.agents/rules/optiscaler-architecture.md` or `.agents/CONTEXT.md` during development, triage, or unverified task completion.
+   - **Explicit User Confirmation Required**: These files MUST ONLY be updated **after** the user explicitly tests and confirms in real gameplay/execution that the solution or feature is working as intended.
+   - **Active Investigation Artifacts**: During implementation and testing, all triage, findings, root cause analysis, and test results belong strictly in `docs/issues/`, unit tests (`tests/`), and the implementation plan.

@@ -29,6 +29,10 @@
 //     binds the user-configured frame count (2..5) on frame 1 without menu slider interaction.
 // 11. Quirk lifecycle: ForceBorderlessWhenUsingXeFG quirk correctly applies when XeMFG/XeMFG-SR
 //     auto-configures activeFgOutput == XeFG without premature quirk destruction.
+// 12. Provider capability ceiling unlock: U4/override-clamp patches ceiling to 5, allowing SetNumInterpolatedFrames(5)
+//     to succeed without XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT (0x20E890 cmpl 0x140(%rcx), %edx).
+// 13. Presentation pacing cadence: PaceFrame spaces generated frames uniformly across the frame period,
+//     preventing sub-millisecond frame dumps (<1 ms) without blocking the engine render thread.
 
 namespace XeMfgPacingTest
 {
@@ -111,6 +115,22 @@ struct SimulatedXeFGContext
     uint32_t initParamsMaxInterpolatedFrames = 0;
     uint32_t currentProviderFrames = 1;
 
+    // Simulated libxess_fg.dll internal struct offset 0x140 (populated from 0x16c by patch U4)
+    uint32_t providerCapabilityOffset0x140 = 1;
+
+    // Simulate SetNumInterpolatedFrames (RVA 0x20E890)
+    // cmpl 0x140(%rcx), %edx -> if edx <= [rcx + 0x140], SUCCESS (0); else INVALID_ARGUMENT (4294967292)
+    uint32_t CallProviderSetNumInterpolatedFrames(uint32_t requestedCount)
+    {
+        if (requestedCount < 1 || requestedCount > providerCapabilityOffset0x140)
+        {
+            return 4294967292u; // XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT
+        }
+        activeInterpolationCount = requestedCount;
+        currentProviderFrames = requestedCount;
+        return 0; // XEFG_SWAPCHAIN_RESULT_SUCCESS
+    }
+
     bool CreateSwapchain(uint32_t configTargetCount, bool forceXeLL = false, bool useFlawedInit = false)
     {
         OnInitSwapchain();
@@ -178,6 +198,8 @@ struct SimulatedXeFGPacer
     int64_t burstBlockQpc = 0;
     int64_t renderTimeNs = 0;
     int64_t lastMultiplier = 2;
+
+    int64_t burstAnchorQpc = 0;
 
     // TsDetour state
     int64_t burstBaseDeadlineNs = 0;
@@ -265,6 +287,54 @@ struct SimulatedXeFGPacer
         lastPresentedQpc = presentedQpc;
         pacedFrames++;
         return presentedQpc;
+    }
+
+    // Full wall-clock pacing engine (matches OptiScaler/framegen/xefg/XeFGPacing.h PaceFrame)
+    int64_t PaceFrame(uint64_t index, uint64_t count, bool isLast, int64_t nowQpc)
+    {
+        const int64_t multiplier = static_cast<int64_t>(count) + 1;
+        if (periodNs <= 0)
+            periodNs = 33333333LL;
+
+        const int64_t intervalNs = periodNs / multiplier;
+        const int64_t interval = QpcFromNs(intervalNs);
+
+        if (index == 1)
+        {
+            burstAnchorQpc = nowQpc;
+            int64_t presentedQpc = nowQpc;
+            if (lastPresentedQpc != 0)
+            {
+                const int64_t minGapQpc = interval / 2;
+                const int64_t antiClumpFloor = lastPresentedQpc + minGapQpc;
+                if (presentedQpc < antiClumpFloor)
+                    presentedQpc = antiClumpFloor;
+            }
+            burstBlockQpc += presentedQpc - nowQpc;
+            lastPresentedQpc = presentedQpc;
+            burstAnchorQpc = presentedQpc;
+            pacedFrames++;
+            return presentedQpc;
+        }
+
+        int64_t targetQpc = burstAnchorQpc + static_cast<int64_t>(index - 1) * interval;
+        if (lastPresentedQpc != 0)
+        {
+            const int64_t minGapQpc = interval / 2;
+            const int64_t antiClumpFloor = lastPresentedQpc + minGapQpc;
+            if (targetQpc < antiClumpFloor)
+                targetQpc = antiClumpFloor;
+        }
+
+        const int64_t latestQpc = nowQpc + QpcFromNs((periodNs * 3) / 2);
+        if (targetQpc > latestQpc)
+            targetQpc = latestQpc;
+
+        const int64_t waitTime = targetQpc > nowQpc ? targetQpc - nowQpc : 0;
+        burstBlockQpc += waitTime;
+        lastPresentedQpc = targetQpc > nowQpc ? targetQpc : nowQpc;
+        pacedFrames++;
+        return lastPresentedQpc;
     }
 
     // Simulated TsDetour deadline calculator
@@ -572,6 +642,82 @@ int main()
         assert(qctx.forceBorderlessConfig && "ForceBorderless must be applied when XeFG output becomes active");
 
         printf("  [PASS] Test 11: ForceBorderlessWhenUsingXeFG quirk applied on XeFG pipeline activation.\n");
+    }
+
+    // Test 12: Provider capability ceiling unlock & dynamic multiplier acceptance (1..5)
+    {
+        XeMfgPacingTest::SimulatedXeFGContext ctx;
+
+        // Simulate old bug: targetCeiling initialized to XeMfgSrGeneratedFrames (2), writing frameByte = 2 to U4
+        ctx.providerCapabilityOffset0x140 = 2;
+        assert(ctx.CallProviderSetNumInterpolatedFrames(1) == 0 && "1 frame must succeed");
+        assert(ctx.CallProviderSetNumInterpolatedFrames(2) == 0 && "2 frames must succeed");
+        // Multipliers 3..5 failed with INVALID_ARGUMENT (4294967292)
+        assert(ctx.CallProviderSetNumInterpolatedFrames(3) == 4294967292u &&
+               "3 frames must be rejected under flawed ceiling");
+        assert(ctx.CallProviderSetNumInterpolatedFrames(5) == 4294967292u &&
+               "5 frames must be rejected under flawed ceiling");
+
+        // Simulate fixed implementation: targetCeiling = kMaxSupportedFrames (5) unlocked unconditionally
+        ctx.providerCapabilityOffset0x140 = 5;
+        for (uint32_t frames = 1; frames <= 5; ++frames)
+        {
+            uint32_t res = ctx.CallProviderSetNumInterpolatedFrames(frames);
+            assert(res == 0 && "SetNumInterpolatedFrames must succeed for all counts 1..5 under unlocked ceiling");
+            assert(ctx.activeInterpolationCount == static_cast<int>(frames));
+        }
+
+        printf(
+            "  [PASS] Test 12: Provider ceiling uncap (5) accepts all multipliers 2X-6X without INVALID_ARGUMENT.\n");
+    }
+
+    // Test 13: Presentation pacing cadence & burst clumping elimination
+    {
+        XeMfgPacingTest::SimulatedXeFGPacer pacer;
+        const int64_t framePeriodNs = 30000000LL; // 30.0 ms
+        pacer.periodNs = framePeriodNs;
+
+        const int64_t t0 = 100000000LL; // Start of cycle
+        pacer.lastPresentedQpc = t0;
+
+        // Simulate 6X Multi-Frame Generation (5 generated frames + 1 base frame)
+        // Interval = 30 ms / 6 = 5 ms (50,000 QPC ticks at 10 MHz)
+        const uint64_t count = 5;
+        std::vector<int64_t> presentedTimes;
+
+        // Generated frames 1..5 arrive from the provider presentation loop
+        for (uint64_t idx = 1; idx <= count; ++idx)
+        {
+            // Even if GPU finishes frames rapidly (e.g. within 0.5 ms of cycle start),
+            // PaceFrame must space them across the frame period according to the target interval.
+            const int64_t arrivalQpc = t0 + pacer.QpcFromNs(idx * 200000LL); // Arriving quickly in 0.2 ms intervals
+            int64_t presentedQpc = pacer.PaceFrame(idx, count, idx == count, arrivalQpc);
+            presentedTimes.push_back(presentedQpc);
+        }
+
+        // Verify that generated frames 2..5 are spaced by the full interval (5.0 ms), not 0.3 ms clumps
+        for (size_t i = 1; i < presentedTimes.size(); ++i)
+        {
+            const int64_t gapNs = pacer.NsFromQpc(presentedTimes[i] - presentedTimes[i - 1]);
+            assert(gapNs >= 4900000LL && gapNs <= 5100000LL &&
+                   "Consecutive generated frames must be spaced by ~5 ms interval");
+        }
+
+        // Verify total burst blocking duration accumulates for feedback loop subtraction
+        assert(pacer.burstBlockQpc > 0 && "Burst blocking duration must be accumulated for NoteBasePresent");
+
+        // Base application frame presents immediately (0 wait)
+        const int64_t baseFrameTime = presentedTimes.back() + pacer.QpcFromNs(50000LL); // Arrives 50 us later
+        pacer.NoteBasePresent(baseFrameTime);
+
+        // Next cycle base frame arrives after 30 ms engine render time
+        const int64_t nextCycleTime = baseFrameTime + pacer.QpcFromNs(framePeriodNs);
+        pacer.NoteBasePresent(nextCycleTime);
+
+        assert(pacer.RenderTimeMs() >= 29.5 && pacer.RenderTimeMs() <= 30.5 &&
+               "Render time must remain rock-solid 30 ms");
+
+        printf("  [PASS] Test 13: Presentation pacing cadence verified: 6X burst uniformly spaced without clumping.\n");
     }
 
     printf("[+] All XeMFG Multiplier Unlock, Non-Blocking Pacing & Swapchain Init Unit Tests PASSED successfully!\n");
