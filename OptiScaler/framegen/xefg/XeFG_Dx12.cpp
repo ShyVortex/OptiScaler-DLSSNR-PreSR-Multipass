@@ -7,6 +7,7 @@
 #include <resource_tracking/ResTrack_dx12.h>
 
 #include <nvapi/fakenvapi.h>
+#include <hooks/Reflex_Hooks.h>
 
 #include <magic_enum.hpp>
 
@@ -1069,7 +1070,7 @@ bool XeFG_Dx12::Dispatch()
     }
 
     // When using Hudfix, we always copy hudless as swapchain size
-    if (state.activeFgInput != FGInput::Upscaler)
+    if (!Config::Instance()->FGHUDFix.value_or_default())
     {
         uint32_t left = 0;
         uint32_t top = 0;
@@ -1160,6 +1161,10 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
         _isActive = false;
         ClearAllResourceReady();
 
+        State::Instance().dlssgDetectedInterpolationCount = 0;
+        State::Instance().dlssgLastSetMode = sl::DLSSGMode::eOff;
+        ReflexHooks::setDlssgFrameCount(0);
+
         LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0, enabled=false)");
         return true;
     }
@@ -1182,6 +1187,10 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
         XeMfgLoader::SetMaxGeneratedFrames(interpolatedFrameCount);
 
     Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(interpolatedFrameCount);
+
+    State::Instance().dlssgDetectedInterpolationCount = static_cast<int>(interpolatedFrameCount);
+    State::Instance().dlssgLastSetMode = interpolatedFrameCount > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
+    ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(interpolatedFrameCount));
 
     if (_framesToInterpolate != interpolatedFrameCount)
     {

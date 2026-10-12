@@ -9,6 +9,7 @@
 #include "config.h"
 #include <hooks/Reflex_Hooks.h>
 #include <framegen/nvngx/Nvngx_FG.h>
+#include <framegen/xefg/XeMfgLoader.h>
 
 // private
 bool LowLatency::update_low_latency_tech(IUnknown* pDevice)
@@ -19,9 +20,15 @@ bool LowLatency::update_low_latency_tech(IUnknown* pDevice)
         return false;
     }
 
+    const bool isMultiFrame =
+        (State::Instance().dlssgDetectedInterpolationCount > 1 ||
+         State::Instance().dlssgLastSetMode == sl::DLSSGMode::eDynamic ||
+         (XeMfgLoader::AnyEnabledForSession() && (Config::Instance()->FGXeFGInterpolationCount.value_or_default() > 1 ||
+                                                  State::Instance().dlssgDetectedInterpolationCount > 1)));
+
     if (!currently_active_tech.load())
     {
-        if (forced_low_latency_tech == LowLatencyMode::XeLL)
+        if (forced_low_latency_tech == LowLatencyMode::XeLL && !isMultiFrame)
         {
             auto new_tech_xell = std::make_shared<XeLL>();
             if (new_tech_xell->init(pDevice))
@@ -42,7 +49,9 @@ bool LowLatency::update_low_latency_tech(IUnknown* pDevice)
         // Don't use AL2 and XeLL when using DMFG or MFG
         if (!Config::Instance()->FN_ForceLatencyFlex.value_or_default() &&
             State::Instance().dlssgDetectedInterpolationCount <= 1 &&
-            State::Instance().dlssgLastSetMode != sl::DLSSGMode::eDynamic)
+            State::Instance().dlssgLastSetMode != sl::DLSSGMode::eDynamic &&
+            !(XeMfgLoader::AnyEnabledForSession() &&
+              Config::Instance()->FGXeFGInterpolationCount.value_or_default() > 1))
         {
             auto new_tech_al2 = std::make_shared<AntiLag2>();
             if (new_tech_al2->init(pDevice))
@@ -78,8 +87,8 @@ bool LowLatency::update_low_latency_tech(IUnknown* pDevice)
     bool change_detected = last_force_latencyflex != force_latencyflex;
     last_force_latencyflex = force_latencyflex;
 
-    // Don't allow for deinit with forced mode
-    if (forced_low_latency_tech != LowLatencyMode::None)
+    // Don't allow for deinit with forced mode unless multi-frame is active
+    if (forced_low_latency_tech != LowLatencyMode::None && !isMultiFrame)
         return true;
 
     if (State::Instance().fakenvapiReloadLowLatency)
