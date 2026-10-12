@@ -992,9 +992,6 @@ bool XeFG_Dx12::Dispatch()
 
     auto frameRenderTime = XeFGPacing::RenderTimeMs();
 
-    if (frameRenderTime < 1.0 || (_ftDelta[fIndex] > 0.0 && frameRenderTime < 0.25 * _ftDelta[fIndex]))
-        frameRenderTime = _ftDelta[fIndex];
-
     if (!(frameRenderTime > 0.0))
         frameRenderTime = _ftDelta[fIndex];
 
