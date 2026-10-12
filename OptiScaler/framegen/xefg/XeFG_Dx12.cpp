@@ -993,30 +993,27 @@ bool XeFG_Dx12::Dispatch()
 
     double frameRenderTime = 0.0;
 
-    if (state.activeFgInput == FGInput::Upscaler)
-    {
-        // For OptiFG / XeMFG-SR, prioritize the measured engine frame delta
-        // from swapchain / DLSS-SR upscaler passes over QPC burst intervals
-        if (_ftDelta[fIndex] > 0.0)
-            frameRenderTime = _ftDelta[fIndex];
-        else if (state.lastFGFrameTime > 0.0)
-            frameRenderTime = state.lastFGFrameTime;
-        else
-            frameRenderTime = XeFGPacing::RenderTimeMs();
+    // Prioritize XeFGPacing's decoupled render time across all FG inputs (DLSSG & Upscaler/XeMFG-SR).
+    // XeFGPacing measures pure engine submission time by subtracting presentation block duration,
+    // preventing the recursive render-thread starvation loop that locks framerate at 7.3 FPS.
+    frameRenderTime = XeFGPacing::RenderTimeMs();
 
-        if (frameRenderTime < 1.0 && state.lastFGFrameTime >= 1.0)
-            frameRenderTime = state.lastFGFrameTime;
+    if (!(frameRenderTime > 0.0))
+        frameRenderTime = _ftDelta[fIndex];
+
+    if (!(frameRenderTime > 0.0))
+        frameRenderTime = state.lastFGFrameTime;
+
+    // Apply anti-starvation boundary clamping [4.0 ms (250 FPS ceiling), 50.0 ms (20 FPS floor)].
+    // Clamping fallback/render times prevents runaway feedback loops where large presentation
+    // delays inflate fed frame times, causing Intel's scheduler to block even longer.
+    if (frameRenderTime > 0.0)
+    {
+        frameRenderTime = std::clamp(frameRenderTime, 4.0, 50.0);
     }
-    else
+    else if (state.lastFGFrameTime >= 1.0)
     {
-        // For native DLSSG input, prioritize XeFGPacing's decoupled render time
-        frameRenderTime = XeFGPacing::RenderTimeMs();
-
-        if (!(frameRenderTime > 0.0))
-            frameRenderTime = _ftDelta[fIndex];
-
-        if (!(frameRenderTime > 0.0))
-            frameRenderTime = state.lastFGFrameTime;
+        frameRenderTime = std::clamp(state.lastFGFrameTime, 4.0, 50.0);
     }
 
     switch (Config::Instance()->FTInput.value_or_default())

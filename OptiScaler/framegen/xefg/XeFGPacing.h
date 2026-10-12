@@ -319,7 +319,10 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
     if (g_periodNs > 0)
     {
         const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
-        g_renderTimeNs = g_periodNs > blockNs ? g_periodNs - blockNs : 0;
+        if (g_periodNs > blockNs && (g_periodNs - blockNs) >= 1000000LL)
+            g_renderTimeNs = g_periodNs - blockNs;
+        else
+            g_renderTimeNs = g_periodNs;
     }
 
     g_burstBlockQpc = 0;
