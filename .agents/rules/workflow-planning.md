@@ -5,18 +5,26 @@ description: Implementation planning, task progression, testing, and explicit ap
 
 # Implementation Planning & Task Progression Rules
 
-1. **Mandatory Prior Issue Documentation Audit (`docs/issues/`) Before Planning**:
-   - Before formulating any implementation plan, triage analysis, or proposed fix, the agent MUST FIRST search, inspect, and analyze existing issue documentation in `docs/issues/` corresponding to the domain of the user request:
-     - `docs/issues/FG/` — Frame Generation (DLSS-G, FSR-FG, XeFG, Smooth Motion, external proxies, presentation pacing detours)
-     - `docs/issues/NR/` — Neural Rendering (DLSS-NR, Pre-SR/Post-SR pipelines, multi-mip textures, format bouncing)
-     - `docs/issues/SR/` — Super Resolution (DLSS, FSR, XeSS)
-     - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
-   - **Prevent Repeating Past Mistakes & Documented Regressions**:
-     - The agent MUST actively cross-reference previous investigations to identify:
-       - Known pitfalls, hardware quirks, and engine-specific quirks (e.g. base-frame thread-blocking in XeFG causing frame rate collapse, format-bouncing in FF7 Rebirth causing stutter, swapchain 0x0 size resolution in Helldivers 2).
-       - Approaches, detours, or workarounds that were previously tried and resulted in documented failures or regressions.
-     - Only after thoroughly analyzing past issue documents may the agent formulate a new solution that avoids repeating documented failures and preserves verified contracts.
-     - This rule is critical across new agent chat sessions where transcript history from prior conversations is not directly available.
+1. **Mandatory Prior Issue Documentation Audit (`docs/issues/`) Before Proposing Any Solution (Pre-Proposal Gate)**:
+   - **Audit Prior to Proposing Solutions (Not Just at Implementation Planning)**:
+     - The agent MUST NOT wait until creating an implementation plan to check previous issues and historical investigations.
+     - BEFORE **proposing, pitching, suggesting, or discussing ANY solution, fix, detour, or workaround** to the user in chat, and before formulating any triage hypothesis or implementation plan, the agent MUST FIRST search, inspect, and cross-reference:
+       - Existing issue documentation in `docs/issues/` corresponding to the domain of the user request:
+         - `docs/issues/FG/` — Frame Generation (DLSS-G, FSR-FG, XeFG, Smooth Motion, external proxies, presentation pacing detours)
+         - `docs/issues/NR/` — Neural Rendering (DLSS-NR, Pre-SR/Post-SR pipelines, multi-mip textures, format bouncing)
+         - `docs/issues/SR/` — Super Resolution (DLSS, FSR, XeSS)
+         - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
+       - Historical git commit logs, commit messages, and previous triage investigations in the repository (`git log -S`, `git log -G`, `git log --grep`).
+   - **Strict Prohibition on Repeating Previously Attempted or Failed Solutions**:
+     - The primary objective of this pre-proposal audit is to **avoid repeating an already previously attempted solution**.
+     - The agent MUST actively verify whether a candidate fix, formula, clamp, detour, or approach was already attempted previously.
+     - If an approach was already tried and resulted in documented failures, regressions, or user rejection (e.g. capping `g_burstStepNs` in `TsDetour`, passing raw fluctuating swapchain deltas, or blocking the engine render thread):
+       - The agent is **STRICTLY PROHIBITED** from proposing, recommending, or re-implementing that same solution again.
+       - The agent must explicitly acknowledge the prior failure, explain why it failed based on the documented evidence, and formulate a fundamentally sound solution that respects verified invariants.
+   - **Applies to Every Conversational Turn**:
+     - This audit gate applies to **every conversational suggestion, triage idea, and diagnostic discussion**, NOT just formal implementation plans.
+     - Checking previous issues when creating an implementation plan is too late—the audit MUST occur before any solution is proposed to the user in conversation.
+     - This rule is critical across new agent chat sessions and context compactions where conversational transcript history is not directly visible in context.
 
 2. **Task Division**:
    - Every implementation plan MUST divide work into clear, discrete, sequential tasks (e.g. Task 1, Task 2, etc.).
