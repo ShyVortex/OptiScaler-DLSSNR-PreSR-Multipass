@@ -1,12 +1,12 @@
-﻿#include <algorithm>
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 // Unit test validating:
-// 1. OptiFG Frame Time Delta feeding in XeFG_Dx12::Dispatch (prioritizing true engine delta,
-//    filtering < 1.0 ms micro-burst spikes, and preserving native DLSSG behavior).
+// 1. Unified Frame Time feeding in XeFG_Dx12::Dispatch (prioritizing decoupled XeFGPacing::RenderTimeMs()
+//    across all inputs, with anti-starvation boundary clamping [4.0 ms, 50.0 ms]).
 // 2. ExtraPacing VSync lock gating in FG_Hooks.cpp (exempting Linux, VKD3D-Proton, and DXVK).
 
 namespace OptiFgXeFgTest
@@ -39,27 +39,24 @@ struct SimulatedDispatchContext
     {
         double frameRenderTime = 0.0;
 
-        if (activeFgInput == FGInput::Upscaler)
-        {
-            if (ftDelta > 0.0)
-                frameRenderTime = ftDelta;
-            else if (lastFGFrameTime > 0.0)
-                frameRenderTime = lastFGFrameTime;
-            else
-                frameRenderTime = decoupledRenderTime;
+        // Decoupled frame render time: prioritize XeFGPacing::RenderTimeMs() across all FG inputs
+        // to measure pure engine submission time and subtract presentation delays
+        frameRenderTime = decoupledRenderTime;
 
-            if (frameRenderTime < 1.0 && lastFGFrameTime >= 1.0)
-                frameRenderTime = lastFGFrameTime;
+        if (!(frameRenderTime > 0.0))
+            frameRenderTime = ftDelta;
+
+        if (!(frameRenderTime > 0.0))
+            frameRenderTime = lastFGFrameTime;
+
+        // Anti-starvation boundary clamping [4.0 ms (250 FPS ceiling), 50.0 ms (20 FPS floor)]
+        if (frameRenderTime > 0.0)
+        {
+            frameRenderTime = std::clamp(frameRenderTime, 4.0, 50.0);
         }
-        else
+        else if (lastFGFrameTime >= 1.0)
         {
-            frameRenderTime = decoupledRenderTime;
-
-            if (!(frameRenderTime > 0.0))
-                frameRenderTime = ftDelta;
-
-            if (!(frameRenderTime > 0.0))
-                frameRenderTime = lastFGFrameTime;
+            frameRenderTime = std::clamp(lastFGFrameTime, 4.0, 50.0);
         }
 
         return frameRenderTime;
@@ -98,47 +95,47 @@ int main()
 {
     printf("[+] Starting OptiFG XeFG Frame Time & ExtraPacing Unit Tests...\n");
 
-    // Test 1: OptiFG mode prioritizes measured engine frame delta over decoupled burst QPC
+    // Test 1: Prioritize decoupled XeFGPacing render time over raw swapchain present delta
     {
         OptiFgXeFgTest::SimulatedDispatchContext ctx;
         ctx.activeFgInput = OptiFgXeFgTest::FGInput::Upscaler;
-        ctx.ftDelta = 35.6;             // Real native engine delta (35.6 ms)
-        ctx.lastFGFrameTime = 35.0;     // Swapchain delta
-        ctx.decoupledRenderTime = 0.48; // Corrupted micro-burst QPC (0.48 ms)
+        ctx.ftDelta = 138.0;             // Inflated swapchain present delta (124 ms present stall)
+        ctx.lastFGFrameTime = 138.0;     // Inflated previous interval
+        ctx.decoupledRenderTime = 25.55; // True engine render work (138 ms - 112.45 ms burst block)
 
         double fed = ctx.ResolveFrameRenderTime();
-        assert(fed == 35.6 && "OptiFG must prioritize ftDelta (35.6 ms) over decoupled 0.48 ms!");
+        assert(fed == 25.55 && "XeMFG-SR must prioritize decoupled XeFGPacing render time (25.55 ms)!");
 
-        printf("  [PASS] Test 1: OptiFG prioritizes true engine frame delta over micro-burst QPC.\n");
+        printf("  [PASS] Test 1: Prioritizes decoupled render time over inflated swapchain delta.\n");
     }
 
-    // Test 2: OptiFG filters sub-millisecond micro-burst spikes and falls back to lastFGFrameTime
+    // Test 2: Fallback frame render time anti-starvation clamping caps spikes to 50.0 ms
     {
         OptiFgXeFgTest::SimulatedDispatchContext ctx;
         ctx.activeFgInput = OptiFgXeFgTest::FGInput::Upscaler;
-        ctx.ftDelta = 0.52;         // Corrupted sub-millisecond spike
-        ctx.lastFGFrameTime = 46.7; // Valid previous swapchain interval
-        ctx.decoupledRenderTime = 0.0;
+        ctx.ftDelta = 138.0;           // Massive swapchain stall
+        ctx.lastFGFrameTime = 138.0;   // Massive swapchain stall
+        ctx.decoupledRenderTime = 0.0; // Unwarmed decoupled pacer (frame 0)
 
         double fed = ctx.ResolveFrameRenderTime();
-        assert(fed == 46.7 &&
-               "Sub-millisecond micro-burst spike (< 1 ms) must fall back to lastFGFrameTime (46.7 ms)!");
+        assert(fed == 50.0 &&
+               "Fallback during unwarmed pacer must clamp to 50.0 ms, breaking 7.3 FPS starvation loop!");
 
-        printf("  [PASS] Test 2: OptiFG filters sub-millisecond micro-bursts and uses lastFGFrameTime.\n");
+        printf("  [PASS] Test 2: Anti-starvation clamping caps fallback spikes to 50.0 ms.\n");
     }
 
-    // Test 3: Native DLSS-G mode continues to prioritize decoupled XeFGPacing render time
+    // Test 3: Minimum clamping prevents micro-spikes below 4.0 ms
     {
         OptiFgXeFgTest::SimulatedDispatchContext ctx;
-        ctx.activeFgInput = OptiFgXeFgTest::FGInput::DLSSG;
-        ctx.ftDelta = 30.0;
-        ctx.lastFGFrameTime = 30.0;
-        ctx.decoupledRenderTime = 25.0; // Paced decoupled render time in native games
+        ctx.activeFgInput = OptiFgXeFgTest::FGInput::Upscaler;
+        ctx.ftDelta = 0.5;
+        ctx.lastFGFrameTime = 0.5;
+        ctx.decoupledRenderTime = 0.5; // Micro-spike below 4.0 ms
 
         double fed = ctx.ResolveFrameRenderTime();
-        assert(fed == 25.0 && "Native DLSSG mode must prioritize decoupled XeFGPacing render time!");
+        assert(fed == 4.0 && "Clamping floor must enforce minimum 4.0 ms ceiling!");
 
-        printf("  [PASS] Test 3: Native DLSSG mode preserves decoupled XeFGPacing priority.\n");
+        printf("  [PASS] Test 3: Minimum clamping prevents sub-millisecond collapse under 4.0 ms.\n");
     }
 
     // Test 4: ExtraPacing on native Windows DXGI applies VSync lock when enabled
