@@ -990,13 +990,33 @@ bool XeFG_Dx12::Dispatch()
 
     _needResetHistory = false;
 
-    auto frameRenderTime = XeFGPacing::RenderTimeMs();
+    double frameRenderTime = 0.0;
 
-    if (!(frameRenderTime > 0.0))
-        frameRenderTime = _ftDelta[fIndex];
+    if (state.activeFgInput == FGInput::Upscaler)
+    {
+        // For OptiFG / XeMFG-SR, prioritize the measured engine frame delta
+        // from swapchain / DLSS-SR upscaler passes over QPC burst intervals
+        if (_ftDelta[fIndex] > 0.0)
+            frameRenderTime = _ftDelta[fIndex];
+        else if (state.lastFGFrameTime > 0.0)
+            frameRenderTime = state.lastFGFrameTime;
+        else
+            frameRenderTime = XeFGPacing::RenderTimeMs();
 
-    if (!(frameRenderTime > 0.0))
-        frameRenderTime = state.lastFGFrameTime;
+        if (frameRenderTime < 1.0 && state.lastFGFrameTime >= 1.0)
+            frameRenderTime = state.lastFGFrameTime;
+    }
+    else
+    {
+        // For native DLSSG input, prioritize XeFGPacing's decoupled render time
+        frameRenderTime = XeFGPacing::RenderTimeMs();
+
+        if (!(frameRenderTime > 0.0))
+            frameRenderTime = _ftDelta[fIndex];
+
+        if (!(frameRenderTime > 0.0))
+            frameRenderTime = state.lastFGFrameTime;
+    }
 
     switch (Config::Instance()->FTInput.value_or_default())
     {
