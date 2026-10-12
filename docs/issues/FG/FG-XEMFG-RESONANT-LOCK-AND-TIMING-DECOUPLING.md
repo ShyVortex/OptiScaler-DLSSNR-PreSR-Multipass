@@ -262,58 +262,11 @@ g++ -std=c++20 -O2 tests/xemfg_multiplier_and_burst_pacing_unit.cpp -o tests/xem
 
 ---
 
-## 8. Option A Resolution: Targeted 5X/6X Step Ceiling in `TsDetour` (v0.9.59-pre11)
+## 7. Compliance & Standards Verification
 
-### 8.1 Problem Statement & Field Verification
-1. **Verified Stability of Lower Multipliers**:
-   - In `v0.9.59-pre10` (`64ac0938`), 3X Multi-Frame Generation (with a 60 FPS cap or uncapped) demonstrated exceptional presentation stability and smooth frame delivery (`helldivers2_stable3x_60FPScap.mp4`).
-   - 4X Multi-Frame Generation was similarly smooth and stable.
-   - At 6X Multi-Frame Generation, however, the game engine's main render thread stalled inside `xefgSwapChainPresent` on the 4 intermediate frames, causing a drop to 71 FPS / 11 native FPS and glitching character animations (`helldivers2_anim_glitch_6x.mp4`).
-2. **Failure of Global Pacing / Final Frame Blocking in `fd8f6741`**:
-   - Attempting to force wall-clock pacing on the final frame (`isLast`) and using `renderTimeNs` instead of `periodNs` for interval calculations caused `renderTimeNs` to collapse to 10 ms (and eventually to the 4.0 ms anti-starvation floor).
-   - This compressed intervals to 2.5 ms, crowding generated frames at the beginning of the frame and freezing for 20+ ms until the base frame, regressing all multipliers.
-   - Reverting to `64ac0938` completely restored 3X and 4X stability.
-
-### 8.2 Architectural Solution: Targeted 5X/6X Step Ceiling
-1. **Zero-Touch Isolation for 2X, 3X, and 4X**:
-   - `NoteFrame`, `PaceFrame`, `TryPace`, and `isLast` return logic remain 100% bit-for-bit identical to `64ac0938`.
-   - `isLast` presents immediately with 0 wait, ensuring the base application frame is never blocked.
-   - `g_intervalQpc` continues to reference full frame period `g_periodNs`.
-2. **Targeted Step Ceiling for 5X and 6X in `TsDetour`**:
-   - In `XeFGPacing.h:TsDetour`:
-     ```cpp
-     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-     int64_t unit = median / static_cast<int64_t>(countPlus1);
-
-     if (unit <= 0)
-         return result;
-
-     // For 5X and 6X multipliers (countPlus1 >= 5), multiple intermediate frames (3 or 4)
-     // wait sequentially inside Intel's scheduler (0x225070) on the game's main render thread.
-     // Clamping unit to at most 6.0 ms caps the total thread stall to <= 18 ms, preventing the
-     // resonant feedback loop that collapsed base framerate to ~11 FPS (and caused animation glitches
-     // in Helldivers 2), while leaving 2X, 3X, and 4X 100% untouched.
-     if (countPlus1 >= 5 && unit > 6000000LL)
-         unit = 6000000LL;
-
-     g_tsCalls++;
-
-     const bool fresh = index == 1 || index <= g_lastTsIndex || countPlus1 != g_lastTsCountPlus1;
-
-     if (fresh)
-     {
-         int64_t nativeUnit = median / static_cast<int64_t>(countPlus1);
-     ...
-     ```
-   - Total synchronous thread wait across all 3 waiting intermediate frames in 6X is bounded to:
-     $$T_{\text{wait}} \le 3 \times 6.0\text{ ms} = \mathbf{18.0\text{ ms}}$$
-   - Prevents the 42–56 ms scheduler stall, ensuring native engine framerate stays above 22–25+ FPS.
-   - Preserves silky-smooth 3X and 4X presentation without any risk of regression.
-
-### 8.3 Automated Verification
-- `tests/xefg_pacing_engine_unit.cpp` (8/8 PASS):
-  - **Test 8**: Verifies 2X, 3X, and 4X step sizes are completely unconstrained, while 5X and 6X step sizes are bounded to $\le 6.0\text{ ms}$ under 84.0 ms median, capping total thread stall to $\le 18\text{ ms}$.
-- 12 targeted XeFG test suites compile and pass with 100% success rate.
-- UTF-8 BOM (`\xef\xbb\xbf`) preserved on `XeFGPacing.h`.
-- `clang-format --dry-run --Werror` verified clean with 0 violations.
-
+1. **Clang-Format Standards**:
+   `clang-format --dry-run --Werror` executed across all modified files (`OptiScaler/framegen/xefg/XeFGPacing.h`, `tests/xemfg_multiplier_and_burst_pacing_unit.cpp`) with 0 warnings or violations.
+2. **UTF-8 BOM Preservation**:
+   Verified that both `OptiScaler/framegen/xefg/XeFGPacing.h` and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` preserve the `\xef\xbb\xbf` byte sequence for seamless MSVC parsing.
+3. **Architecture Gate & Context Preservation**:
+   In strict accordance with Rule 8 in `workflow-planning.md`, `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` remain untouched until real gameplay testing and confirmation by the user.
