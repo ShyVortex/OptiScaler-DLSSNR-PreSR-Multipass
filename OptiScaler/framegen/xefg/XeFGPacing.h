@@ -329,8 +329,9 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
     g_lastBurstQpc = nowQpc;
     g_pacedBursts++;
 
-    if (g_periodNs > 0 && g_freq.QuadPart > 0)
-        g_intervalQpc = QpcFromNs(g_periodNs / (static_cast<int64_t>(count) + 1));
+    const int64_t refNs = g_renderTimeNs > 0 ? g_renderTimeNs : g_periodNs;
+    if (refNs > 0 && g_freq.QuadPart > 0)
+        g_intervalQpc = QpcFromNs(refNs / (static_cast<int64_t>(count) + 1));
 }
 
 inline double RenderTimeMs() { return g_renderTimeNs > 0 ? g_renderTimeNs / 1000000.0 : 0.0; }
@@ -359,7 +360,7 @@ inline void PaceFrame(uint64_t index, uint64_t count)
 {
     const int64_t multiplier = static_cast<int64_t>(count) + 1;
 
-    if (multiplier <= 2)
+    if (multiplier < 2)
         return;
 
     LARGE_INTEGER now;
@@ -367,38 +368,57 @@ inline void PaceFrame(uint64_t index, uint64_t count)
 
     NoteFrame(index, count, now.QuadPart);
 
-    if (index <= 1)
+    if (g_periodNs <= 0 || g_intervalQpc <= 0)
+        return;
+
+    if (!g_loggedFirstBurst)
     {
-        if (g_periodNs <= 0 || g_intervalQpc <= 0)
-            return;
+        g_loggedFirstBurst = true;
+        LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per generated frame", multiplier,
+                 g_periodNs / 1000000.0, (g_periodNs / multiplier) / 1000000.0);
+    }
 
-        g_targetQpc = now.QuadPart + g_intervalQpc;
-
-        if (!g_loggedFirstBurst)
-        {
-            g_loggedFirstBurst = true;
-            LOG_INFO("XeFG pacing: {}X, real frame {:.3f} ms -> {:.3f} ms per generated frame", multiplier,
-                     g_periodNs / 1000000.0, (g_periodNs / multiplier) / 1000000.0);
-        }
+    int64_t targetQpc = 0;
+    if (g_lastBurstQpc != 0)
+    {
+        targetQpc = g_lastBurstQpc + static_cast<int64_t>(index) * g_intervalQpc;
     }
     else
     {
-        if (g_intervalQpc <= 0)
-            return;
+        targetQpc = now.QuadPart + g_intervalQpc;
+    }
 
-        g_targetQpc += g_intervalQpc;
+    // Anti-clump protection floor: guarantee consecutive presents never dump in <1 ms bursts
+    if (g_lastPacedQpc != 0)
+    {
+        const int64_t minGapQpc = (g_intervalQpc * 2) / 5;
+        const int64_t minFloorQpc = QpcFromNs(1000000LL); // at least 1.0 ms
+        const int64_t maxFloorQpc = QpcFromNs(2000000LL); // at most 2.0 ms
+        int64_t clampedGapQpc = minGapQpc;
+        if (clampedGapQpc < minFloorQpc)
+            clampedGapQpc = minFloorQpc;
+        else if (clampedGapQpc > maxFloorQpc)
+            clampedGapQpc = maxFloorQpc;
+
+        const int64_t antiClumpFloorQpc = g_lastPacedQpc + clampedGapQpc;
+        if (targetQpc < antiClumpFloorQpc)
+            targetQpc = antiClumpFloorQpc;
     }
 
     const int64_t latest = now.QuadPart + QpcFromNs(g_periodNs);
-    if (g_targetQpc > latest)
-        g_targetQpc = latest;
+    if (targetQpc > latest)
+        targetQpc = latest;
 
-    WaitUntil(g_targetQpc);
+    LARGE_INTEGER beforeWait;
+    QueryPerformanceCounter(&beforeWait);
 
-    g_pacedFrames++;
+    WaitUntil(targetQpc);
 
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
+
+    g_burstBlockQpc += end.QuadPart - beforeWait.QuadPart;
+    g_pacedFrames++;
 
     RecordGap(end.QuadPart);
 }
@@ -492,11 +512,9 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
             return;
     }
 
-    if (g_schedNative != nullptr && SchedulerUsable(ctx))
+    if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
     {
-        if (!isLast)
-            ScheduleFrame(ctx, burst, index);
-
+        ScheduleFrame(ctx, burst, index);
         return;
     }
 
@@ -534,10 +552,13 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
         return result;
 
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-    const int64_t unit = median / static_cast<int64_t>(countPlus1);
+    const int64_t referencePeriodNs = (g_renderTimeNs > 0) ? g_renderTimeNs : (g_periodNs > 0 ? g_periodNs : median);
+    int64_t unit = referencePeriodNs / static_cast<int64_t>(countPlus1);
 
-    if (unit <= 0)
-        return result;
+    if (unit < 1000000LL)
+        unit = 1000000LL;
+    else if (unit > 50000000LL)
+        unit = 50000000LL;
 
     g_tsCalls++;
 
@@ -545,7 +566,7 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 
     if (fresh)
     {
-        int64_t nativeUnit = unit;
+        int64_t nativeUnit = median > 0 ? (median / static_cast<int64_t>(countPlus1)) : unit;
 
         if (g_ring != nullptr)
         {

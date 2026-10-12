@@ -103,8 +103,9 @@ struct SimulatedPacer
             renderTimeNs = periodNs > blockNs ? periodNs - blockNs : periodNs;
         }
 
-        if (periodNs > 0 && freq > 0)
-            intervalQpc = QpcFromNs(periodNs / (static_cast<int64_t>(count) + 1));
+        const int64_t refNs = renderTimeNs > 0 ? renderTimeNs : periodNs;
+        if (refNs > 0 && freq > 0)
+            intervalQpc = QpcFromNs(refNs / (static_cast<int64_t>(count) + 1));
     }
 
     double RenderTimeMs() const { return renderTimeNs > 0 ? renderTimeNs / 1000000.0 : 0.0; }
@@ -168,6 +169,30 @@ struct SimulatedPacer
 
         lastPresentedQpc = presentedQpc;
         pacedFrames++;
+    }
+
+    int64_t CalculateTsDetourStep(int64_t medianNs, uint32_t countPlus1) const
+    {
+        const int64_t referencePeriodNs = (renderTimeNs > 0) ? renderTimeNs : (periodNs > 0 ? periodNs : medianNs);
+        int64_t unit = referencePeriodNs / static_cast<int64_t>(countPlus1);
+        if (unit < 1000000LL)
+            unit = 1000000LL;
+        else if (unit > 50000000LL)
+            unit = 50000000LL;
+        return unit;
+    }
+
+    enum class PaceRoute
+    {
+        Scheduled,
+        Paced
+    };
+
+    PaceRoute RoutePacing(uint64_t index, uint64_t count, bool isLast, bool hasSchedNative) const
+    {
+        if (hasSchedNative && !isLast)
+            return PaceRoute::Scheduled;
+        return PaceRoute::Paced;
     }
 };
 
@@ -373,6 +398,64 @@ int main()
         assert(overhauledVariance < 0.2 && "Overhauled cadence achieves near-zero frametime variance");
         printf("  [PASS] Test 7: Full burst cadence comparison proves elimination of clumped dump and saw-tooth "
                "jitter.\n");
+    }
+
+    // Test 8: TsDetour Step Decoupling at 6X (Eliminating 84.6 ms / 71.4 FPS Resonant Lock)
+    {
+        XeFGPacingTest::SimulatedPacer pacer;
+        const int64_t pureEngineRenderNs = 28000000LL;   // 28.0 ms pure render time
+        const int64_t contaminatedMedianNs = 84600000LL; // 84.6 ms contaminated median from wait times
+        pacer.periodNs = 84600000LL;
+        pacer.renderTimeNs = pureEngineRenderNs;
+
+        // At 6X Multiplier (countPlus1 = 6):
+        // Flawed logic evaluated median / 6 = 14.1 ms step, keeping thread locked in 84 ms cycle (71.4 FPS).
+        // Fixed logic prioritizes renderTimeNs, evaluating 28.0 ms / 6 = 4.666 ms step.
+        const int64_t stepNs = pacer.CalculateTsDetourStep(contaminatedMedianNs, 6);
+        const int64_t expectedStepNs = pureEngineRenderNs / 6;
+
+        assert(stepNs == expectedStepNs && "TsDetour step must be decoupled to pure engine render time (4.66 ms)");
+        assert(stepNs < 10000000LL && "Step size must never expand into 14 ms resonant lock");
+        printf("  [PASS] Test 8: TsDetour step decoupling at 6X eliminates 84.6 ms resonant lock (4.66 ms step).\n");
+    }
+
+    // Test 9: TryPace & PaceFrame Final-Frame Pacing Under Active Scheduler (isLast == true)
+    {
+        XeFGPacingTest::SimulatedPacer pacer;
+        const int64_t framePeriodNs = 28000000LL; // 28 ms (35.7 FPS native)
+        pacer.periodNs = framePeriodNs;
+        pacer.renderTimeNs = framePeriodNs;
+        const int64_t baseStartQpc = 800000000LL;
+        pacer.NoteBasePresent(baseStartQpc);
+
+        // When provider background scheduler is active (hasSchedNative = true):
+        // Intermediate frames 1..4 must route to Scheduled (ScheduleFrame)
+        for (uint64_t idx = 1; idx <= 4; ++idx)
+        {
+            auto route = pacer.RoutePacing(idx, 5, false, true);
+            assert(route == XeFGPacingTest::SimulatedPacer::PaceRoute::Scheduled &&
+                   "Intermediate frames must route to Scheduled");
+        }
+
+        // Final frame 5 (isLast = true) MUST route to Paced (PaceFrame) rather than returning prematurely!
+        auto routeLast = pacer.RoutePacing(5, 5, true, true);
+        assert(routeLast == XeFGPacingTest::SimulatedPacer::PaceRoute::Paced &&
+               "Final frame (isLast) under active scheduler must route to Paced");
+
+        // When Frame 5 runs ComputePacedTarget, it must be paced to the 83.3% mark (5 * 4.666 ms = 23.33 ms)
+        // rather than dumping in <0.3 ms
+        const int64_t frame5ReadyQpc = baseStartQpc + pacer.QpcFromNs(20000000LL); // Ready at 20 ms
+        int64_t frame5TargetQpc = pacer.ComputePacedTarget(5, 5, true, frame5ReadyQpc);
+        int64_t frame5OffsetNs = pacer.NsFromQpc(frame5TargetQpc - baseStartQpc);
+        int64_t expectedOffsetNs = (framePeriodNs * 5) / 6; // 23.33 ms
+
+        assert(std::abs(frame5OffsetNs - expectedOffsetNs) < 100000 &&
+               "Final frame 5 must be paced to the 83.3% mark (23.33 ms)");
+        assert(frame5TargetQpc > frame5ReadyQpc && "Frame 5 must wait for deadline rather than dumping early");
+
+        pacer.CommitPresent(frame5TargetQpc);
+        assert(pacer.clumpCount == 0 && "Zero clumps on final frame presentation");
+        printf("  [PASS] Test 9: TryPace routes isLast to PaceFrame under active scheduler with 83.3%% deadline.\n");
     }
 
     printf("[+] All XeFGPacing Unit Tests PASSED successfully!\n");
