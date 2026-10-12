@@ -87,13 +87,12 @@ The recorded telemetry in *Helldivers 2* measured **137.90 ms** per frame (**7.2
   - Calls `XeMfgLoader::SetMaxGeneratedFrames(count)` live.
 - Applied identical synchronization at post-attach auto-configuration in `dllmain.cpp:1951` and in-game slider adjustment in `menu_common.cpp:3903, 4013`.
 
-### 4.3 Low-Latency Tech Gating under Multi-Frame Generation (`low_latency_d3d.cpp:24, 44, 82`)
-- Added `isMultiFrame` condition evaluating whether interpolation count > 1 or dynamic MFG is active.
-- When `isMultiFrame` is true:
-  - `forced_low_latency_tech == LowLatencyMode::XeLL` is strictly bypassed.
-  - Auto `AntiLag2` and auto `XeLL` are bypassed.
-  - Execution falls through to `LatencyFlex`, which does not inject driver sleep calls into multi-frame presentation bursts.
-  - Allowed clean deinitialization of forced mode upon transitioning to Multi-Frame Generation (`!isMultiFrame` guard).
+### 4.3 Mandatory XeLL Context Establishment & Multi-Frame Sleep Protection (`low_latency_d3d.cpp`, `Reflex_Hooks.cpp`)
+- **XeLL SwapChain Context Prerequisite**: Intel's `libxess_fg.dll` mandates that `xefgSwapChainSetLatencyReduction` must be invoked with a valid `xell_context_handle_t` on `_swapChainContext` prior to proxy swapchain initialization (`D3D12InitFromSwapChainDesc`). If `forced_low_latency_tech == LowLatencyMode::XeLL` is blocked or gated, Intel immediately aborts swapchain creation with `XEFG_SWAPCHAIN_RESULT_ERROR_LATENCY_REDUCTION_UNSUPPORTED (4294967281)`.
+- **Restored XeLL Creation**: `forced_low_latency_tech == LowLatencyMode::XeLL` unconditionally initializes the required XeLL context during `XeFG_Dx12::CreateSwapchainContext`, matching native XeMFG behavior exactly.
+- **Multi-Frame Sleep Protection in `ReflexHooks::hkNvAPI_D3D_Sleep`**:
+  - When XeFG is active under Multi-Frame Generation (`_FgNumFramesToGenerate > 1 || dlssgDetectedInterpolationCount > 1`), driver sleep calls in `hkNvAPI_D3D_Sleep` return `NVAPI_OK` immediately with 0 sleep duration.
+  - This preserves the required XeLL context for Intel's internal pipeline while completely eliminating the conflicting thread sleeps that caused the 572 ms and 1101 ms presentation freezes.
 
 ### 4.4 Decoupled Frame Render Time with Anti-Starvation Clamping (`XeFG_Dx12.cpp:994-1015`)
 - Unified `frameRenderTime` calculation across all FG inputs (`DLSSG` & `Upscaler`) to prioritize `XeFGPacing::RenderTimeMs()`.
