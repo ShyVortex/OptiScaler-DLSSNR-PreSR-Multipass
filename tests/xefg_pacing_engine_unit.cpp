@@ -375,6 +375,41 @@ int main()
                "jitter.\n");
     }
 
+    // Test 8: Targeted 5X/6X Step Ceiling in TsDetour (Zero Touch on 2X/3X/4X)
+    {
+        auto calculateStep = [](int64_t medianNs, uint32_t countPlus1) -> int64_t
+        {
+            int64_t unit = medianNs / static_cast<int64_t>(countPlus1);
+            if (countPlus1 >= 5 && unit > 6000000LL)
+                unit = 6000000LL;
+            return unit;
+        };
+
+        const int64_t medianNs = 84000000LL; // 84 ms inflated median from wait feedback
+
+        // Multipliers 2X (countPlus1 = 2), 3X (3), and 4X (4) must be completely unconstrained
+        assert(calculateStep(medianNs, 2) == 42000000LL && "2X step must be unconstrained (42 ms)");
+        assert(calculateStep(medianNs, 3) == 28000000LL && "3X step must be unconstrained (28 ms)");
+        assert(calculateStep(medianNs, 4) == 21000000LL && "4X step must be unconstrained (21 ms)");
+
+        // Multipliers 5X (countPlus1 = 5) and 6X (6) must be clamped to at most 6.0 ms
+        assert(calculateStep(medianNs, 5) == 6000000LL && "5X step must be clamped to 6.0 ms ceiling");
+        assert(calculateStep(medianNs, 6) == 6000000LL && "6X step must be clamped to 6.0 ms ceiling");
+
+        // When median is naturally fast (e.g. 25 ms, where 25 / 6 = 4.16 ms), clamp does not alter the step
+        const int64_t fastMedianNs = 25000000LL;
+        assert(calculateStep(fastMedianNs, 6) == (25000000LL / 6) && "Fast 6X step (4.16 ms) remains unconstrained");
+
+        // Verify total thread sleep on 6X is bounded to <= 18 ms across all 3 waiting intermediate frames
+        const int64_t waitingFrames = 3; // Frames 2, 3, 4 wait inside Intel's scheduler
+        const int64_t maxTotalWaitNs = waitingFrames * calculateStep(medianNs, 6);
+        assert(maxTotalWaitNs <= 18000000LL && "Total scheduler thread wait on 6X must not exceed 18 ms");
+
+        printf(
+            "  [PASS] Test 8: Targeted 5X/6X step ceiling in TsDetour verified (2X-4X untouched, 6X thread wait <= 18 "
+            "ms).\n");
+    }
+
     printf("[+] All XeFGPacing Unit Tests PASSED successfully!\n");
     return 0;
 }

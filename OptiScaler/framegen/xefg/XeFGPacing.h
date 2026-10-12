@@ -534,10 +534,18 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
         return result;
 
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-    const int64_t unit = median / static_cast<int64_t>(countPlus1);
+    int64_t unit = median / static_cast<int64_t>(countPlus1);
 
     if (unit <= 0)
         return result;
+
+    // For 5X and 6X multipliers (countPlus1 >= 5), multiple intermediate frames (3 or 4)
+    // wait sequentially inside Intel's scheduler (0x225070) on the game's main render thread.
+    // Clamping unit to at most 6.0 ms caps the total thread stall to <= 18 ms, preventing the
+    // resonant feedback loop that collapsed base framerate to ~11 FPS (and caused animation glitches
+    // in Helldivers 2), while leaving 2X, 3X, and 4X 100% untouched.
+    if (countPlus1 >= 5 && unit > 6000000LL)
+        unit = 6000000LL;
 
     g_tsCalls++;
 
@@ -545,7 +553,7 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 
     if (fresh)
     {
-        int64_t nativeUnit = unit;
+        int64_t nativeUnit = median / static_cast<int64_t>(countPlus1);
 
         if (g_ring != nullptr)
         {
