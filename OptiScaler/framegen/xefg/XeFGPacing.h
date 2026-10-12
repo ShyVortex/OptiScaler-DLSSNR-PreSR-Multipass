@@ -325,6 +325,7 @@ inline void ApplyAntiClumpProtection(uint64_t index, uint64_t count)
     const int64_t intervalNs = g_periodNs / multiplier;
     const int64_t intervalQpc = QpcFromNs(intervalNs);
 
+    LARGE_INTEGER beforeWait = now;
     if (g_lastPresentedQpc != 0 && intervalQpc > 0)
     {
         const int64_t minGapNs = (intervalNs * 2) / 5;
@@ -337,6 +338,7 @@ inline void ApplyAntiClumpProtection(uint64_t index, uint64_t count)
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
 
+    g_burstBlockQpc += end.QuadPart - beforeWait.QuadPart;
     g_lastPresentedQpc = end.QuadPart;
     RecordGap(end.QuadPart);
     g_pacedFrames++;
@@ -347,13 +349,37 @@ inline void NoteBasePresent()
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
 
+    const int64_t multiplier = g_lastMultiplier > 1 ? g_lastMultiplier : 2;
+    if (g_periodNs <= 0)
+        g_periodNs = 33333333LL;
+
+    const int64_t intervalNs = g_periodNs / multiplier;
+    const int64_t intervalQpc = QpcFromNs(intervalNs);
+
+    // Anti-clump protection on the base application frame:
+    // Guarantees the base frame never dumps into the swapchain in sub-millisecond
+    // bursts (<1 ms) right behind the final generated frame.
+    LARGE_INTEGER beforeWait = now;
+    if (g_lastPresentedQpc != 0 && intervalQpc > 0)
+    {
+        const int64_t minGapNs = (intervalNs * 2) / 5;
+        const int64_t cappedMinGapNs = minGapNs > 2000000LL ? 2000000LL : (minGapNs < 1000000LL ? 1000000LL : minGapNs);
+        const int64_t antiClumpFloorQpc = g_lastPresentedQpc + QpcFromNs(cappedMinGapNs);
+        if (now.QuadPart < antiClumpFloorQpc)
+            WaitUntil(antiClumpFloorQpc);
+    }
+
+    LARGE_INTEGER afterWait;
+    QueryPerformanceCounter(&afterWait);
+    g_burstBlockQpc += afterWait.QuadPart - beforeWait.QuadPart;
+
     if (g_lastBaseFrameQpc != 0)
     {
-        const int64_t deltaNs = NsFromQpc(now.QuadPart - g_lastBaseFrameQpc);
+        const int64_t deltaNs = NsFromQpc(afterWait.QuadPart - g_lastBaseFrameQpc);
         if (deltaNs >= 5000000LL && deltaNs <= 200000000LL)
         {
             // Subtract burst blocking duration so PushPeriod measures pure engine render time,
-            // completely eliminating the self-referential feedback loop that caused the 9.2 FPS collapse.
+            // completely eliminating the self-referential feedback loop.
             const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
             const int64_t pureRenderNs = deltaNs > blockNs ? deltaNs - blockNs : deltaNs;
 
@@ -362,9 +388,9 @@ inline void NoteBasePresent()
         }
     }
 
-    g_lastPresentedQpc = now.QuadPart;
-    g_lastBaseFrameQpc = now.QuadPart;
-    RecordGap(now.QuadPart);
+    g_lastPresentedQpc = afterWait.QuadPart;
+    g_lastBaseFrameQpc = afterWait.QuadPart;
+    RecordGap(afterWait.QuadPart);
     g_pacedBursts++;
     g_burstBlockQpc = 0;
 }
@@ -546,10 +572,14 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
     if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
     {
         ScheduleFrame(ctx, burst, index);
+        // Intel's scheduler already spins until the rebased TsDetour deadline in 0x225070.
+        // Apply anti-clump protection floor and record pacing telemetry without redundant WaitUntil.
+        ApplyAntiClumpProtection(index, count);
+        return;
     }
 
-    // Unconditionally pace EVERY generated frame (both intermediate frames and
-    // the final generated frame) across ALL multipliers (2X through 6X).
+    // For the final generated frame (isLast) or when provider scheduler is inactive,
+    // unconditionally pace using OptiScaler's wall-clock pacing engine.
     PaceFrame(index, count, isLast);
 }
 
