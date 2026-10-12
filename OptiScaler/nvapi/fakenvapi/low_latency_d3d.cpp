@@ -28,7 +28,7 @@ bool LowLatency::update_low_latency_tech(IUnknown* pDevice)
 
     if (!currently_active_tech.load())
     {
-        if (forced_low_latency_tech == LowLatencyMode::XeLL && !isMultiFrame)
+        if (forced_low_latency_tech == LowLatencyMode::XeLL)
         {
             auto new_tech_xell = std::make_shared<XeLL>();
             if (new_tech_xell->init(pDevice))
@@ -87,8 +87,8 @@ bool LowLatency::update_low_latency_tech(IUnknown* pDevice)
     bool change_detected = last_force_latencyflex != force_latencyflex;
     last_force_latencyflex = force_latencyflex;
 
-    // Don't allow for deinit with forced mode unless multi-frame is active
-    if (forced_low_latency_tech != LowLatencyMode::None && !isMultiFrame)
+    // Don't allow for deinit with forced mode
+    if (forced_low_latency_tech != LowLatencyMode::None)
         return true;
 
     if (State::Instance().fakenvapiReloadLowLatency)

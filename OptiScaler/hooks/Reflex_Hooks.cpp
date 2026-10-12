@@ -88,7 +88,14 @@ NvAPI_Status ReflexHooks::hkNvAPI_D3D_Sleep(IUnknown* pDev)
     }
 
     if (IsXeFGActive())
+    {
+        // Under Multi-Frame Generation, bypass driver sleep calls to prevent stalling the render thread
+        // during presentation bursts
+        if (_FgNumFramesToGenerate > 1 || State::Instance().dlssgDetectedInterpolationCount > 1)
+            return NVAPI_OK;
+
         return nvapi_calls::NvAPI_D3D_Sleep(pDev);
+    }
 
     _lastSleepDev = pDev;
     return o_NvAPI_D3D_Sleep(pDev);

@@ -127,14 +127,13 @@ struct LowLatencyState
     int fgXeFGInterpolationCount = 2;
     LowLatencyMode forced_low_latency_tech = LowLatencyMode::None;
     LowLatencyMode active_tech = LowLatencyMode::None;
+    bool isXeFGActive = true;
+    bool driverSleepInvoked = false;
 
     bool UpdateLowLatencyTech()
     {
-        const bool isMultiFrame =
-            (dlssgDetectedInterpolationCount > 1 || dlssgLastSetMode == DLSSGMode::eDynamic ||
-             (xeMfgAnyEnabled && (fgXeFGInterpolationCount > 1 || dlssgDetectedInterpolationCount > 1)));
-
-        if (forced_low_latency_tech == LowLatencyMode::XeLL && !isMultiFrame)
+        // XeFG requires forced XeLL to establish the latency reduction context
+        if (forced_low_latency_tech == LowLatencyMode::XeLL)
         {
             active_tech = LowLatencyMode::XeLL;
             return true;
@@ -147,8 +146,25 @@ struct LowLatencyState
             return true;
         }
 
-        // Falls through to LatencyFlex under Multi-Frame Generation
+        // Falls through to LatencyFlex under Multi-Frame Generation when unforced
         active_tech = LowLatencyMode::LatencyFlex;
+        return true;
+    }
+
+    bool HandleSleep(int fgNumFramesToGenerate)
+    {
+        driverSleepInvoked = false;
+        if (isXeFGActive)
+        {
+            if (fgNumFramesToGenerate > 1 || dlssgDetectedInterpolationCount > 1)
+            {
+                // Multi-frame generation bypasses driver sleep to avoid thread stalls
+                return true; // NVAPI_OK
+            }
+            driverSleepInvoked = true;
+            return true;
+        }
+        driverSleepInvoked = true;
         return true;
     }
 };
@@ -293,33 +309,37 @@ int main()
         printf("  [PASS] Test 2: Subsystem Multiplier & Latency Synchronization verified for 0..5.\n");
     }
 
-    // Test 3: Low-Latency Tech Gating under Multi-Frame Generation
+    // Test 3: Low-Latency Tech Gating & Context Establishment
     {
         XeMfgSrParityTest::LowLatencyState ll;
         ll.xeMfgAnyEnabled = true;
         ll.forced_low_latency_tech = XeMfgSrParityTest::LowLatencyMode::XeLL;
 
-        // Case A: 2X FG (count = 1) -> XeLL forced is permitted for 1 generated frame
-        ll.dlssgDetectedInterpolationCount = 1;
-        ll.fgXeFGInterpolationCount = 1;
-        ll.UpdateLowLatencyTech();
-        assert(ll.active_tech == XeMfgSrParityTest::LowLatencyMode::XeLL &&
-               "Single frame interpolation allows forced XeLL.");
-
-        // Case B: Multi-Frame Generation (count = 5, 6X MFG) -> XeLL forced is strictly bypassed!
+        // Case A: XeFG establishes XeLL context unconditionally so SetLatencyReduction succeeds
         ll.dlssgDetectedInterpolationCount = 5;
         ll.fgXeFGInterpolationCount = 5;
         ll.UpdateLowLatencyTech();
-        assert(ll.active_tech == XeMfgSrParityTest::LowLatencyMode::LatencyFlex &&
-               "Multi-Frame Generation must bypass forced XeLL and fall through to LatencyFlex!");
+        assert(ll.active_tech == XeMfgSrParityTest::LowLatencyMode::XeLL &&
+               "XeFG forced mode must always establish XeLL context for Intel swapchain init!");
 
-        // Case C: Unforced mode under Multi-Frame Generation -> auto AL2/XeLL bypassed, LatencyFlex active
+        // Case B: Multi-Frame Generation (count = 5, 6X MFG) bypasses driver sleep in Reflex_Hooks
+        ll.HandleSleep(5);
+        assert(!ll.driverSleepInvoked &&
+               "Multi-Frame Generation must bypass driver sleep to prevent thread stalls and 1.1s freezes!");
+
+        // Case C: Standard 2X FG allows driver sleep normally
+        ll.dlssgDetectedInterpolationCount = 1;
+        ll.HandleSleep(1);
+        assert(ll.driverSleepInvoked && "Standard 2X FG allows driver sleep normally.");
+
+        // Case D: Unforced mode under Multi-Frame Generation -> auto AL2/XeLL bypassed, LatencyFlex active
         ll.forced_low_latency_tech = XeMfgSrParityTest::LowLatencyMode::None;
+        ll.dlssgDetectedInterpolationCount = 5;
         ll.UpdateLowLatencyTech();
         assert(ll.active_tech == XeMfgSrParityTest::LowLatencyMode::LatencyFlex &&
-               "Multi-Frame Generation must bypass auto AL2/XeLL and fall through to LatencyFlex!");
+               "Multi-Frame Generation must bypass auto AL2/XeLL when unforced and use LatencyFlex!");
 
-        printf("  [PASS] Test 3: Low-Latency Tech Gating under Multi-Frame Generation verified.\n");
+        printf("  [PASS] Test 3: XeLL context establishment & Multi-Frame sleep bypass verified.\n");
     }
 
     // Test 4: Mathematical Elimination of 7.3 FPS Recursive Starvation Feedback Trap
