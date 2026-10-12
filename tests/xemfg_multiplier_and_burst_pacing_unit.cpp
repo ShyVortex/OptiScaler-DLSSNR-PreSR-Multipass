@@ -33,6 +33,12 @@
 //     to succeed without XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT (0x20E890 cmpl 0x140(%rcx), %edx).
 // 13. Presentation pacing cadence: PaceFrame spaces generated frames uniformly across the frame period,
 //     preventing sub-millisecond frame dumps (<1 ms) without blocking the engine render thread.
+// 14. TsDetour render time priority and clamping: eliminates the 71.4 FPS resonant lock when Intel median
+//     is corrupted by previous presentation wait times (84.6 ms median vs 28.0 ms pure render period).
+// 15. Base application frame anti-clump protection: eliminates sub-millisecond dumps while preserving
+//     pure engine render time measurement (subtracting anti-clump wait from deltaNs).
+// 16. Pacing deduplication under provider scheduler: avoids redundant WaitUntil while preserving
+//     full cadence on the final generated frame (0x220467).
 
 namespace XeMfgPacingTest
 {
@@ -239,12 +245,32 @@ struct SimulatedXeFGPacer
         periodNs = sorted[sampleCount / 2];
     }
 
-    // Non-blocking base frame present handler (0 ms wait, zero thread stall)
-    void NoteBasePresent(int64_t nowQpc)
+    // Base frame present handler with anti-clump protection
+    int64_t NoteBasePresent(int64_t nowQpc)
     {
+        const int64_t multiplier = lastMultiplier > 1 ? lastMultiplier : 2;
+        if (periodNs <= 0)
+            periodNs = 33333333LL;
+
+        const int64_t intervalNs = periodNs / multiplier;
+        const int64_t interval = QpcFromNs(intervalNs);
+
+        int64_t presentedQpc = nowQpc;
+        if (lastPresentedQpc != 0 && interval > 0)
+        {
+            const int64_t minGapNs = (intervalNs * 2) / 5;
+            const int64_t cappedMinGapNs =
+                minGapNs > 2000000LL ? 2000000LL : (minGapNs < 1000000LL ? 1000000LL : minGapNs);
+            const int64_t antiClumpFloorQpc = lastPresentedQpc + QpcFromNs(cappedMinGapNs);
+            if (presentedQpc < antiClumpFloorQpc)
+                presentedQpc = antiClumpFloorQpc;
+        }
+
+        burstBlockQpc += presentedQpc - nowQpc;
+
         if (lastBaseFrameQpc != 0)
         {
-            const int64_t deltaNs = NsFromQpc(nowQpc - lastBaseFrameQpc);
+            const int64_t deltaNs = NsFromQpc(presentedQpc - lastBaseFrameQpc);
             if (deltaNs >= 5000000LL && deltaNs <= 200000000LL)
             {
                 // Subtract burst blocking duration so PushPeriod isolates pure engine render time
@@ -256,10 +282,11 @@ struct SimulatedXeFGPacer
             }
         }
 
-        lastPresentedQpc = nowQpc;
-        lastBaseFrameQpc = nowQpc;
+        lastPresentedQpc = presentedQpc;
+        lastBaseFrameQpc = presentedQpc;
         pacedBursts++;
         burstBlockQpc = 0;
+        return presentedQpc;
     }
 
     // Anti-clump protection on generated frames (enforces >= 1.5 ms gap without stalling for full intervals)
@@ -340,9 +367,15 @@ struct SimulatedXeFGPacer
     // Simulated TsDetour deadline calculator
     int64_t CalculateDeadline(int64_t nativeOut, int64_t medianNs, uint32_t index, uint32_t countPlus1)
     {
-        const int64_t unit = medianNs / static_cast<int64_t>(countPlus1);
-        if (unit <= 0)
-            return nativeOut;
+        // Prioritize OptiScaler's pure, unblocked engine render period (periodNs) over provider median
+        const int64_t referencePeriodNs = periodNs > 0 ? periodNs : medianNs;
+        int64_t unit = referencePeriodNs / static_cast<int64_t>(countPlus1);
+
+        // Sanity clamp step size between 1.0 ms and 50.0 ms (20 FPS to 1000 FPS range)
+        if (unit < 1000000LL)
+            unit = 1000000LL;
+        else if (unit > 50000000LL)
+            unit = 50000000LL;
 
         if (index == 1)
         {
@@ -358,6 +391,24 @@ struct SimulatedXeFGPacer
         }
 
         return calculatedDeadline;
+    }
+
+    enum class PaceAction
+    {
+        FullPace,
+        AntiClumpOnly,
+    };
+
+    PaceAction TryPace(uint64_t index, uint64_t count, bool isLast, bool hasSchedNative, int64_t nowQpc)
+    {
+        if (hasSchedNative && !isLast)
+        {
+            ApplyAntiClumpProtection(index, count, nowQpc);
+            return PaceAction::AntiClumpOnly;
+        }
+
+        PaceFrame(index, count, isLast, nowQpc);
+        return PaceAction::FullPace;
     }
 
     double RenderTimeMs() const { return renderTimeNs > 0 ? renderTimeNs / 1000000.0 : 0.0; }
@@ -706,18 +757,134 @@ int main()
         // Verify total burst blocking duration accumulates for feedback loop subtraction
         assert(pacer.burstBlockQpc > 0 && "Burst blocking duration must be accumulated for NoteBasePresent");
 
-        // Base application frame presents immediately (0 wait)
-        const int64_t baseFrameTime = presentedTimes.back() + pacer.QpcFromNs(50000LL); // Arrives 50 us later
-        pacer.NoteBasePresent(baseFrameTime);
+        // Base application frame presents with anti-clump floor relative to final generated frame
+        const int64_t baseFrameArrival = presentedTimes.back() + pacer.QpcFromNs(50000LL); // Arrives 50 us later
+        const int64_t basePresentedTime = pacer.NoteBasePresent(baseFrameArrival);
 
         // Next cycle base frame arrives after 30 ms engine render time
-        const int64_t nextCycleTime = baseFrameTime + pacer.QpcFromNs(framePeriodNs);
-        pacer.NoteBasePresent(nextCycleTime);
+        const int64_t nextCycleArrival = basePresentedTime + pacer.QpcFromNs(framePeriodNs);
+        pacer.NoteBasePresent(nextCycleArrival);
 
         assert(pacer.RenderTimeMs() >= 29.5 && pacer.RenderTimeMs() <= 30.5 &&
                "Render time must remain rock-solid 30 ms");
 
         printf("  [PASS] Test 13: Presentation pacing cadence verified: 6X burst uniformly spaced without clumping.\n");
+    }
+
+    // Test 14: TsDetour pure render period priority and clamping eliminates 71.4 FPS resonant lock
+    {
+        XeMfgPacingTest::SimulatedXeFGPacer pacer;
+        // In the Helldivers 2 video telemetry, native engine render period was ~28.0 ms (35.7 FPS native).
+        const int64_t pureEnginePeriodNs = 28000000LL;
+        pacer.periodNs = pureEnginePeriodNs;
+
+        // Intel's ring-buffer median was contaminated with previous presentation wait times:
+        // medianNs = 84.6 ms (84,600,000 ns).
+        const int64_t contaminatedMedianNs = 84600000LL;
+        const int64_t baseDeadlineNs = 10000000000LL;
+
+        // 6X FG (5 generated frames, countPlus1 = 6)
+        // With pure render time priority: step = 28.0 ms / 6 = 4.666 ms (214 FPS generated frame cadence)
+        // Without pure render time priority (the bug): step was 84.6 ms / 6 = 14.1 ms, locking game at 71.4 FPS!
+        std::vector<int64_t> deadlines;
+        for (uint32_t i = 1; i <= 5; ++i)
+        {
+            int64_t d = pacer.CalculateDeadline(baseDeadlineNs, contaminatedMedianNs, i, 6);
+            deadlines.push_back(d);
+        }
+
+        const int64_t stepNs = deadlines[1] - deadlines[0];
+        const int64_t expectedStepNs = pureEnginePeriodNs / 6; // 4,666,666 ns
+        assert(stepNs == expectedStepNs &&
+               "TsDetour must partition deadlines using pure engine period, NOT contaminated median!");
+        assert(stepNs < 10000000LL && "Step size must never balloon to 14.1 ms (71.4 FPS resonant lock)");
+
+        // Verify clamping boundary conditions:
+        // Clamping floor: 1.0 ms minimum step
+        pacer.periodNs = 3000000LL; // 3 ms period -> 3 ms / 6 = 0.5 ms (< 1.0 ms floor)
+        int64_t clampedFloorD1 = pacer.CalculateDeadline(baseDeadlineNs, contaminatedMedianNs, 1, 6);
+        int64_t clampedFloorD2 = pacer.CalculateDeadline(baseDeadlineNs, contaminatedMedianNs, 2, 6);
+        assert((clampedFloorD2 - clampedFloorD1) == 1000000LL && "Step must be clamped to 1.0 ms minimum floor");
+
+        // Clamping ceiling: 50.0 ms maximum step
+        pacer.periodNs = 360000000LL; // 360 ms period -> 360 ms / 6 = 60 ms (> 50.0 ms ceiling)
+        int64_t clampedCeilD1 = pacer.CalculateDeadline(baseDeadlineNs, contaminatedMedianNs, 1, 6);
+        int64_t clampedCeilD2 = pacer.CalculateDeadline(baseDeadlineNs, contaminatedMedianNs, 2, 6);
+        assert((clampedCeilD2 - clampedCeilD1) == 50000000LL && "Step must be clamped to 50.0 ms maximum ceiling");
+
+        printf(
+            "  [PASS] Test 14: TsDetour pure render period priority & clamping eliminates 71.4 FPS resonant lock.\n");
+    }
+
+    // Test 15: Base application frame anti-clump protection eliminates sub-millisecond dumps while preserving pure
+    // render measurement
+    {
+        XeMfgPacingTest::SimulatedXeFGPacer pacer;
+        const int64_t purePeriodNs = 28000000LL; // 28.0 ms pure native render time
+        pacer.periodNs = purePeriodNs;
+        pacer.lastMultiplier = 6; // 6X FG
+
+        const int64_t t0 = 500000000LL;
+        // Preceding generated frame presented at t0
+        pacer.lastPresentedQpc = t0;
+
+        // Base application frame arrives only 100 us (0.1 ms) after final generated frame (sub-millisecond dump)
+        const int64_t arrivalQpc = t0 + pacer.QpcFromNs(100000LL);
+        const int64_t presentedQpc = pacer.NoteBasePresent(arrivalQpc);
+
+        const int64_t gapNs = pacer.NsFromQpc(presentedQpc - t0);
+        // Anti-clump floor for 28 ms / 6 (interval = 4.66 ms) is min(2.0 ms, 4.66 ms * 0.4) = 1.866 ms
+        assert(gapNs >= 1800000LL && "Base frame must be spaced by at least anti-clump floor (>= 1.8 ms)");
+        assert(presentedQpc > arrivalQpc && "Sub-millisecond base frame arrival must be paced forward");
+
+        // Engine starts rendering next frame after presentation finishes, taking exactly 28.0 ms
+        const int64_t nextArrivalQpc = presentedQpc + pacer.QpcFromNs(purePeriodNs);
+        pacer.NoteBasePresent(nextArrivalQpc);
+
+        // Verify that measured render time remains locked at 28.0 ms without distortion
+        assert(pacer.RenderTimeMs() >= 27.5 && pacer.RenderTimeMs() <= 28.5 &&
+               "Render time measurement must preserve true 28 ms native render time without feedback distortion");
+
+        printf("  [PASS] Test 15: Base frame anti-clump protection eliminates sub-ms dumps & preserves render time.\n");
+    }
+
+    // Test 16: Pacing deduplication under provider scheduler avoids redundant WaitUntil
+    {
+        XeMfgPacingTest::SimulatedXeFGPacer pacer;
+        pacer.PushPeriod(30000000LL); // 30 ms period, 6X FG -> 5 ms interval
+
+        const int64_t t0 = 700000000LL;
+        pacer.lastPresentedQpc = t0;
+
+        // Case A: Provider background scheduler detour is ACTIVE (g_schedNative != nullptr)
+        // Intermediate frames (1..4) must only apply lightweight anti-clump protection, NOT full PaceFrame WaitUntil
+        for (uint64_t idx = 1; idx <= 4; ++idx)
+        {
+            const int64_t arrivalQpc = t0 + pacer.QpcFromNs(idx * 5000000LL);
+            auto action = pacer.TryPace(idx, 5, false, true, arrivalQpc);
+            assert(action == XeMfgPacingTest::SimulatedXeFGPacer::PaceAction::AntiClumpOnly &&
+                   "Intermediate frames under active scheduler must use AntiClumpOnly deduplication");
+        }
+
+        // Final generated frame (idx = 5, isLast = true) must unconditionally invoke full PaceFrame
+        {
+            const int64_t arrivalQpc = t0 + pacer.QpcFromNs(25000000LL);
+            auto action = pacer.TryPace(5, 5, true, true, arrivalQpc);
+            assert(action == XeMfgPacingTest::SimulatedXeFGPacer::PaceAction::FullPace &&
+                   "Final generated frame must unconditionally invoke FullPace");
+        }
+
+        // Case B: Provider background scheduler detour is INACTIVE (g_schedNative == nullptr)
+        // All frames must fall back to full PaceFrame
+        for (uint64_t idx = 1; idx <= 5; ++idx)
+        {
+            const int64_t arrivalQpc = t0 + pacer.QpcFromNs(idx * 5000000LL);
+            auto action = pacer.TryPace(idx, 5, idx == 5, false, arrivalQpc);
+            assert(action == XeMfgPacingTest::SimulatedXeFGPacer::PaceAction::FullPace &&
+                   "All frames without active scheduler must use FullPace");
+        }
+
+        printf("  [PASS] Test 16: Pacing deduplication under provider scheduler verified (no redundant WaitUntil).\n");
     }
 
     printf("[+] All XeMFG Multiplier Unlock, Non-Blocking Pacing & Swapchain Init Unit Tests PASSED successfully!\n");
