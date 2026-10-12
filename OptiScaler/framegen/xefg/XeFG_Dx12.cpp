@@ -993,16 +993,33 @@ bool XeFG_Dx12::Dispatch()
 
     double frameRenderTime = 0.0;
 
-    // Prioritize XeFGPacing's decoupled render time across all FG inputs (DLSSG & Upscaler/XeMFG-SR).
-    // XeFGPacing measures pure engine submission time by subtracting presentation block duration,
-    // preventing the recursive render-thread starvation loop that locks framerate at 7.3 FPS.
-    frameRenderTime = XeFGPacing::RenderTimeMs();
+    if (state.activeFgInput == FGInput::Upscaler)
+    {
+        // For XeMFG-SR (FGInput::Upscaler / OptiFG), prioritize the measured engine frame delta
+        // from swapchain / DLSS-SR upscaler passes (_ftDelta / lastFGFrameTime).
+        // This ensures Intel receives the true frame delta corresponding to vertex motion vectors,
+        // eliminating the 350%-700% motion vector overshoot and preserving animation fluidity.
+        if (_ftDelta[fIndex] > 0.0)
+            frameRenderTime = _ftDelta[fIndex];
+        else if (state.lastFGFrameTime > 0.0)
+            frameRenderTime = state.lastFGFrameTime;
+        else
+            frameRenderTime = XeFGPacing::RenderTimeMs();
 
-    if (!(frameRenderTime > 0.0))
-        frameRenderTime = _ftDelta[fIndex];
+        if (frameRenderTime < 1.0 && state.lastFGFrameTime >= 1.0)
+            frameRenderTime = state.lastFGFrameTime;
+    }
+    else
+    {
+        // For native DLSSG input, prioritize XeFGPacing's decoupled render time
+        frameRenderTime = XeFGPacing::RenderTimeMs();
 
-    if (!(frameRenderTime > 0.0))
-        frameRenderTime = state.lastFGFrameTime;
+        if (!(frameRenderTime > 0.0))
+            frameRenderTime = _ftDelta[fIndex];
+
+        if (!(frameRenderTime > 0.0))
+            frameRenderTime = state.lastFGFrameTime;
+    }
 
     // Apply anti-starvation boundary clamping [4.0 ms (250 FPS ceiling), 50.0 ms (20 FPS floor)].
     // Clamping fallback/render times prevents runaway feedback loops where large presentation

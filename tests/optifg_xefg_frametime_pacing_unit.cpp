@@ -39,15 +39,31 @@ struct SimulatedDispatchContext
     {
         double frameRenderTime = 0.0;
 
-        // Decoupled frame render time: prioritize XeFGPacing::RenderTimeMs() across all FG inputs
-        // to measure pure engine submission time and subtract presentation delays
-        frameRenderTime = decoupledRenderTime;
+        if (activeFgInput == FGInput::Upscaler)
+        {
+            // For XeMFG-SR (FGInput::Upscaler / OptiFG), prioritize the measured engine frame delta
+            // from swapchain / DLSS-SR upscaler passes (ftDelta / lastFGFrameTime).
+            if (ftDelta > 0.0)
+                frameRenderTime = ftDelta;
+            else if (lastFGFrameTime > 0.0)
+                frameRenderTime = lastFGFrameTime;
+            else
+                frameRenderTime = decoupledRenderTime;
 
-        if (!(frameRenderTime > 0.0))
-            frameRenderTime = ftDelta;
+            if (frameRenderTime < 1.0 && lastFGFrameTime >= 1.0)
+                frameRenderTime = lastFGFrameTime;
+        }
+        else
+        {
+            // For native DLSSG input, prioritize XeFGPacing's decoupled render time
+            frameRenderTime = decoupledRenderTime;
 
-        if (!(frameRenderTime > 0.0))
-            frameRenderTime = lastFGFrameTime;
+            if (!(frameRenderTime > 0.0))
+                frameRenderTime = ftDelta;
+
+            if (!(frameRenderTime > 0.0))
+                frameRenderTime = lastFGFrameTime;
+        }
 
         // Anti-starvation boundary clamping [4.0 ms (250 FPS ceiling), 50.0 ms (20 FPS floor)]
         if (frameRenderTime > 0.0)
@@ -95,18 +111,32 @@ int main()
 {
     printf("[+] Starting OptiFG XeFG Frame Time & ExtraPacing Unit Tests...\n");
 
-    // Test 1: Prioritize decoupled XeFGPacing render time over raw swapchain present delta
+    // Test 1: XeMFG-SR (FGInput::Upscaler) prioritizes true engine frame delta over decoupled burst estimates
     {
         OptiFgXeFgTest::SimulatedDispatchContext ctx;
         ctx.activeFgInput = OptiFgXeFgTest::FGInput::Upscaler;
+        ctx.ftDelta = 28.5; // True engine frame time delta
+        ctx.lastFGFrameTime = 28.5;
+        ctx.decoupledRenderTime = 4.74; // Collapsed decoupled estimate (subtracted scheduler wait)
+
+        double fed = ctx.ResolveFrameRenderTime();
+        assert(fed == 28.5 && "XeMFG-SR must prioritize true engine frame delta (28.5 ms) over collapsed estimate!");
+
+        printf("  [PASS] Test 1: XeMFG-SR prioritizes true engine frame delta over collapsed burst estimates.\n");
+    }
+
+    // Test 1b: Native DLSSG input prioritizes decoupled XeFGPacing render time over swapchain delta
+    {
+        OptiFgXeFgTest::SimulatedDispatchContext ctx;
+        ctx.activeFgInput = OptiFgXeFgTest::FGInput::DLSSG;
         ctx.ftDelta = 138.0;             // Inflated swapchain present delta (124 ms present stall)
         ctx.lastFGFrameTime = 138.0;     // Inflated previous interval
         ctx.decoupledRenderTime = 25.55; // True engine render work (138 ms - 112.45 ms burst block)
 
         double fed = ctx.ResolveFrameRenderTime();
-        assert(fed == 25.55 && "XeMFG-SR must prioritize decoupled XeFGPacing render time (25.55 ms)!");
+        assert(fed == 25.55 && "Native DLSSG must prioritize decoupled XeFGPacing render time (25.55 ms)!");
 
-        printf("  [PASS] Test 1: Prioritizes decoupled render time over inflated swapchain delta.\n");
+        printf("  [PASS] Test 1b: Native DLSSG prioritizes decoupled render time over inflated swapchain delta.\n");
     }
 
     // Test 2: Fallback frame render time anti-starvation clamping caps spikes to 50.0 ms
