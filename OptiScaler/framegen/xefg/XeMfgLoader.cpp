@@ -422,11 +422,9 @@ void TryApply(HMODULE module)
         }
     }
 
-    unsigned int targetCeiling = kDefaultMaxFrames;
-    if (SrEnabledForSession())
-        targetCeiling = Config::Instance()->XeMfgSrGeneratedFrames.value_or(2);
-    else
-        targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
+    // Unlock provider DLL capability up to kMaxSupportedFrames (5 generated frames / 6X FG).
+    // The active in-game multiplier is controlled dynamically via SetNumInterpolatedFrames().
+    unsigned int targetCeiling = kMaxSupportedFrames;
 
     bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, true, g_status);
     if (result)
