@@ -565,16 +565,7 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
         }
 
         g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
-
-        // For 5X and 6X multipliers (countPlus1 >= 5), multiple intermediate frames (3 or 4)
-        // wait sequentially inside Intel's scheduler (0x225070) on the game's main render thread.
-        // Clamping g_burstStepNs to at most 6.0 ms caps the wait between intermediate frames to <= 6.0 ms,
-        // bounding total thread stall to <= 18 ms while leaving 2X, 3X, and 4X 100% untouched.
-        int64_t step = unit;
-        if (countPlus1 >= 5 && step > 6000000LL)
-            step = 6000000LL;
-
-        g_burstStepNs = step;
+        g_burstStepNs = unit;
         g_tsRebased++;
     }
     else
