@@ -1034,7 +1034,7 @@ bool XeFG_Dx12::Dispatch()
     XeFGPacing::NoteFedFrameTime(constData.frameRenderTime);
 
     LOG_DEBUG("Reset: {}, Opti FT: {}, Source FT: {}, Set FT: {}, Opti Id: {}, Reflex Id: {}", _reset[fIndex],
-              constData.frameRenderTime, _ftDelta[fIndex], constData.frameRenderTime, _frameCount,
+              state.lastFGFrameTime, _ftDelta[fIndex], constData.frameRenderTime, _frameCount,
               State::Instance().reflexFrameId);
 
     auto frameId = static_cast<uint32_t>(willDispatchFrame);

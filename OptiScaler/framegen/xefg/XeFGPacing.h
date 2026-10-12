@@ -220,11 +220,35 @@ inline int64_t g_statsDeadline = 0;
 
 constexpr int64_t StatsWindowNs = 5000000000LL; // 5 s
 
-inline int64_t NsFromQpc(int64_t delta) { return g_freq.QuadPart > 0 ? (delta * 1000000000LL) / g_freq.QuadPart : 0; }
+inline int64_t NsFromQpc(int64_t delta)
+{
+    if (g_freq.QuadPart <= 0 || delta <= 0)
+        return 0;
+
+    const int64_t sec = delta / g_freq.QuadPart;
+    const int64_t rem = delta % g_freq.QuadPart;
+    return sec * 1000000000LL + (rem * 1000000000LL) / g_freq.QuadPart;
+}
 
 inline int64_t QpcFromNs(int64_t ns) { return g_freq.QuadPart > 0 ? (ns * g_freq.QuadPart) / 1000000000LL : 0; }
 
 inline double MsFromQpc(int64_t qpc) { return g_freq.QuadPart > 0 ? (qpc * 1000.0) / g_freq.QuadPart : 0.0; }
+
+struct DiagFrameRecord
+{
+    uint32_t index = 0;
+    uint32_t countPlus1 = 0;
+    int64_t nativeOutNs = 0;
+    int64_t detouredOutNs = 0;
+    int64_t medianNs = 0;
+    float ringMeasuredMs = 0.0f;
+    int64_t schedDurationUs = 0;
+    bool scheduled = false;
+};
+
+constexpr size_t DiagRingCapacity = 32;
+inline DiagFrameRecord g_diagRing[DiagRingCapacity] {};
+inline uint64_t g_diagSeq = 0;
 
 inline void ResetStats(int64_t nowQpc)
 {
@@ -248,6 +272,40 @@ inline void ReportStats(int64_t multiplier)
              MsFromQpc(g_gapSumQpc / g_gapCount), MsFromQpc(g_gapMinQpc), MsFromQpc(g_gapMaxQpc), g_gapCount,
              g_schedCalls, g_schedRefused, g_schedCalls > 0 ? MsFromQpc(g_schedWaitQpc / g_schedCalls) : 0.0, g_tsCalls,
              g_tsRebased, g_tsClamped, g_renderTimeNs / 1000000.0, g_fedFrameTimeMs);
+
+    if (g_diagSeq > 0)
+    {
+        std::string trace;
+        const uint64_t count = (g_diagSeq < DiagRingCapacity) ? g_diagSeq : DiagRingCapacity;
+        const uint64_t start = (g_diagSeq >= count) ? (g_diagSeq - count) : 0;
+        int lastBurstStart = -1;
+        for (int i = static_cast<int>(count) - 1; i >= 0; i--)
+        {
+            const auto& r = g_diagRing[(start + i) % DiagRingCapacity];
+            if (r.index == 1)
+            {
+                lastBurstStart = i;
+                break;
+            }
+        }
+
+        if (lastBurstStart >= 0)
+        {
+            const float ringMs = g_diagRing[(start + lastBurstStart) % DiagRingCapacity].ringMeasuredMs;
+            const double medMs = g_diagRing[(start + lastBurstStart) % DiagRingCapacity].medianNs / 1000000.0;
+            for (uint64_t i = static_cast<uint64_t>(lastBurstStart); i < count; i++)
+            {
+                const auto& r = g_diagRing[(start + i) % DiagRingCapacity];
+                if (i > static_cast<uint64_t>(lastBurstStart) && r.index == 1)
+                    break;
+
+                trace +=
+                    std::format(" [f{}/{}: nat {:.2f}ms det {:.2f}ms wait {:.2f}ms]", r.index, r.countPlus1,
+                                r.nativeOutNs / 1000000.0, r.detouredOutNs / 1000000.0, r.schedDurationUs / 1000.0);
+            }
+            LOG_INFO("XeFG recent burst trace ({}X, ring {:.2f}ms, med {:.2f}ms):{}", multiplier, ringMs, medMs, trace);
+        }
+    }
 }
 
 inline void RecordGap(int64_t endQpc)
@@ -431,8 +489,19 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
     if (!scheduled)
         g_schedRefused++;
 
-    g_schedWaitQpc += after.QuadPart - before.QuadPart;
-    g_burstBlockQpc += after.QuadPart - before.QuadPart;
+    const int64_t waitQpc = after.QuadPart - before.QuadPart;
+    g_schedWaitQpc += waitQpc;
+    g_burstBlockQpc += waitQpc;
+
+    if (g_diagSeq > 0)
+    {
+        auto& d = g_diagRing[(g_diagSeq - 1) % DiagRingCapacity];
+        if (d.index == index)
+        {
+            d.schedDurationUs = g_freq.QuadPart > 0 ? (waitQpc * 1000000LL) / g_freq.QuadPart : 0;
+            d.scheduled = scheduled;
+        }
+    }
 
     if (g_schedLogged < SchedLogLimit && index != g_schedLastIndex)
     {
@@ -530,9 +599,10 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 {
     void* const result = g_tsNative(a1, out, lookup, timing, index, countPlus1);
 
-    if (out == nullptr || timing == nullptr || index == 0 || index > 5 || countPlus1 < 2)
+    if (out == nullptr || timing == nullptr || index == 0 || index > 5 || countPlus1 < 3)
         return result;
 
+    const int64_t nativeOut = *out;
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
     const int64_t unit = median / static_cast<int64_t>(countPlus1);
 
@@ -577,6 +647,17 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
     g_lastTsCountPlus1 = countPlus1;
 
     *out = g_nextDeadlineNs;
+
+    const uint64_t slot = g_diagSeq++;
+    auto& d = g_diagRing[slot % DiagRingCapacity];
+    d.index = index;
+    d.countPlus1 = countPlus1;
+    d.nativeOutNs = nativeOut;
+    d.detouredOutNs = g_nextDeadlineNs;
+    d.medianNs = median;
+    d.ringMeasuredMs = (g_ring != nullptr) ? *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset) : 0.0f;
+    d.schedDurationUs = 0;
+    d.scheduled = false;
 
     return result;
 }
@@ -687,6 +768,7 @@ inline bool Install(uint8_t* base)
     g_tsCalls = 0;
     g_tsRebased = 0;
     g_tsClamped = 0;
+    g_diagSeq = 0;
     ResetStats(0);
 
     void* native = nullptr;
@@ -754,6 +836,12 @@ inline void Uninstall()
         g_tsHooked = false;
     }
 
+    g_ring = nullptr;
+    g_nextDeadlineNs = 0;
+    g_burstStepNs = 0;
+    g_lastTsIndex = 0;
+    g_lastTsCountPlus1 = 0;
+    g_diagSeq = 0;
     g_enabled = false;
     g_native = nullptr;
     g_schedNative = nullptr;
