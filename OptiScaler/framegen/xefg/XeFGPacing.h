@@ -583,13 +583,25 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
         return result;
 
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-    int64_t unit = median / static_cast<int64_t>(countPlus1);
 
-    if (unit <= 0 && g_periodNs > 0)
-        unit = g_periodNs / static_cast<int64_t>(countPlus1);
+    // Prioritize OptiScaler's calibrated pure engine render period (g_periodNs).
+    // Intel's ring buffer median is measured from raw xefgSwapChainPresent deltas and includes
+    // any presentation waiting time inside FGPresent, which creates a positive feedback resonant
+    // lock (e.g. 84.6 ms cycle / 71.4 FPS trap) if fed back into the provider's step calculation.
+    int64_t sourcePeriod = g_periodNs > 0 ? g_periodNs : median;
+    if (sourcePeriod <= 0 && median > 0)
+        sourcePeriod = median;
 
-    if (unit <= 0)
+    if (sourcePeriod <= 0)
         return result;
+
+    int64_t unit = sourcePeriod / static_cast<int64_t>(countPlus1);
+
+    // Sanity bounds: minimum 1.0 ms (1000 FPS cap) to maximum 50.0 ms (20 FPS floor)
+    if (unit < 1000000LL)
+        unit = 1000000LL;
+    else if (unit > 50000000LL)
+        unit = 50000000LL;
 
     g_tsCalls++;
 
