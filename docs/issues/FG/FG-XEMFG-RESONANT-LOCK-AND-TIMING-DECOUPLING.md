@@ -270,3 +270,68 @@ g++ -std=c++20 -O2 tests/xemfg_multiplier_and_burst_pacing_unit.cpp -o tests/xem
    Verified that both `OptiScaler/framegen/xefg/XeFGPacing.h` and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` preserve the `\xef\xbb\xbf` byte sequence for seamless MSVC parsing.
 3. **Architecture Gate & Context Preservation**:
    In strict accordance with Rule 8 in `workflow-planning.md`, `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` remain untouched until real gameplay testing and confirmation by the user.
+
+---
+
+## 8. Root Cause Autopsy & Monotonic Anti-Inversion Resolution (v0.9.59-pre11)
+
+### 8.1 Environmental Metadata & Verification
+- **OS**: CachyOS Linux (rolling release, kernel `7.2.9-2-cachyos`)
+- **GPU**: NVIDIA GeForce RTX 3080 Ti Laptop GPU
+- **Driver**: NVIDIA Linux x86_64 Driver `580.178.04`
+- **Application Target**: *Helldivers 2* (`helldivers2.exe` via Wine 11.0 / Proton)
+
+### 8.2 Autopsy of the Multiplier Distortion & Stutter
+A comprehensive line-by-line autopsy of `OptiScaler.log` (247,031 lines) from gameplay testing across 2X, 3X, 4X, 5X, and 6X revealed three interconnected issues:
+
+1. **The Primary Culprit: 350%–710% Motion Vector Overshoot**:
+   - In `XeFG_Dx12.cpp:Dispatch()`, `frameRenderTime = XeFGPacing::RenderTimeMs()` was being prioritized across all FG inputs.
+   - `RenderTimeMs()` computes `g_periodNs - NsFromQpc(g_burstBlockQpc)`. Because the main thread spent ~18–20 ms blocked in presentation, subtracting this duration caused `RenderTimeMs()` to collapse to **4.74 ms** while the engine was actually rendering at **25.0–34.2 ms** (30–40 native FPS).
+   - Intel's neural network in `libxess_fg.dll` uses `frameRenderTime` to extrapolate vertex displacement:
+     $$\Delta \mathbf{x}_{\text{interpolated}} = \mathbf{v} \times \frac{t_{\text{sub}}}{\text{frameRenderTime}}$$
+   - Because `frameRenderTime` was fed as 4.74 ms instead of 30.8 ms, Intel scaled motion by **$6.5\times$ (650% forward overshoot)**.
+   - On the arrival of each native frame, vertices violently snapped back to their true locations, causing whole-screen judder and breaking character animations on **every multiplier (2X, 3X, 4X, 5X, 6X)**.
+
+2. **Ring Buffer Contamination Distorting 3X & 4X Deadlines**:
+   - In `XeFGPacing.h:TsDetour`, `g_ring + RingMeasuredOffset (0x1B8)` reads `constData.frameRenderTime` fed by `Dispatch()`.
+   - Reading $f = 4.74\text{ ms}$ on 3X collapsed `clampedUnit` to $1.58\text{ ms}$, triggering `clampedUnit < nativeUnit` on **5,653 out of 5,671 frames (99.7% of all calls)** and shifting presentation deadlines by $+6.75\text{ ms}$ (`deadlines 17244 calls, 5671 rebased, 5653 clamped`).
+
+3. **Deadline Inversion into the Past in `d5029767`**:
+   - In commit `d5029767`, clamping `unit` to 6.0 ms while initializing `nativeUnit` to `median / countPlus1` (14.0 ms) caused `unit - nativeUnit = -8.0 ms`.
+   - This pulled deadlines into the past, causing the scheduler to dump intermediate frames with 0 wait (`scheduled in 0.000 ms`).
+
+### 8.3 Applied Architectural Resolution
+
+1. **Input-Aware True Frame Delta Restoration (`XeFG_Dx12.cpp`)**:
+   - For `state.activeFgInput == FGInput::Upscaler` (XeMFG-SR / OptiFG), `Dispatch()` prioritizes `_ftDelta[fIndex]` and `state.lastFGFrameTime` (the true, un-subtracted 25.0–35.0 ms game frame times).
+   - Intel receives the exact physical frame delta corresponding to the motion vector buffer, eliminating the 650% motion overshoot.
+   - `g_ring + 0x1B8` holds healthy frame times ($\sim 28\text{–}34\text{ ms}$), completely eliminating the 99.7% false deadline clamping in `TsDetour`.
+
+2. **Monotonic Anti-Inversion Burst Step Capping (`XeFGPacing.h`)**:
+   - In `TsDetour`:
+     ```cpp
+     int64_t nativeUnit = unit;
+     ...
+     g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
+
+     int64_t step = unit;
+     if (countPlus1 >= 5 && step > 6000000LL)
+         step = 6000000LL;
+
+     g_burstStepNs = step;
+     ```
+   - **Guarantees**:
+     - `nativeUnit` remains initialized to `unit`, strictly guaranteeing `unit - nativeUnit >= 0` is never negative. Deadlines are never pulled into the past.
+     - Multipliers 2X, 3X, and 4X ($countPlus1 < 5$) remain 100% bit-for-bit identical to baseline `64ac0938`.
+     - Multipliers 5X and 6X ($countPlus1 \ge 5$) cap intermediate frame wait steps to $\le 6.0\text{ ms}$, bounding total scheduler thread sleep to $\le 18\text{ ms}$ and preventing the 11 FPS resonant lock.
+
+### 8.4 Automated Test Suite Verification
+- `tests/xefg_pacing_engine_unit.cpp` (8/8 PASS): Test 8 verifies 2X-4X steps are unconstrained, 5X/6X steps are capped to $\le 6.0\text{ ms}$, `unit - nativeUnit >= 0` is guaranteed non-negative, and total wait is bounded to $\le 18\text{ ms}$.
+- `tests/optifg_xefg_frametime_pacing_unit.cpp` (6/6 PASS): Test 1 verifies XeMFG-SR prioritizes true engine frame delta over collapsed burst estimates.
+- `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (16/16 PASS).
+- `tests/xemfg_loader_unit.cpp` (11/11 PASS).
+- `tests/xefg_swapchain_lifecycle_unit.cpp` (5/5 PASS).
+- `tests/xemfg_sr_unit.cpp` (11/11 PASS).
+- `clang-format --dry-run --Werror` verified clean across all modified files.
+- UTF-8 BOM (`\xef\xbb\xbf`) verified on all modified files.
+
