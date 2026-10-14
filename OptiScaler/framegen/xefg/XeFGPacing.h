@@ -417,13 +417,13 @@ inline void PaceFrame(uint64_t index, uint64_t count)
 {
     const int64_t multiplier = static_cast<int64_t>(count) + 1;
 
-    if (multiplier <= 2)
-        return;
-
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
 
     NoteFrame(index, count, now.QuadPart);
+
+    if (multiplier <= 2)
+        return;
 
     if (index <= 1)
     {
@@ -451,12 +451,19 @@ inline void PaceFrame(uint64_t index, uint64_t count)
     if (g_targetQpc > latest)
         g_targetQpc = latest;
 
-    WaitUntil(g_targetQpc);
+    LARGE_INTEGER beforeWait;
+    QueryPerformanceCounter(&beforeWait);
 
-    g_pacedFrames++;
+    WaitUntil(g_targetQpc);
 
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
+
+    const int64_t waitQpc = end.QuadPart - beforeWait.QuadPart;
+    if (waitQpc > 0)
+        g_burstBlockQpc += waitQpc;
+
+    g_pacedFrames++;
 
     RecordGap(end.QuadPart);
 }
@@ -561,11 +568,9 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
             return;
     }
 
-    if (g_schedNative != nullptr && SchedulerUsable(ctx))
+    if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
     {
-        if (!isLast)
-            ScheduleFrame(ctx, burst, index);
-
+        ScheduleFrame(ctx, burst, index);
         return;
     }
 
