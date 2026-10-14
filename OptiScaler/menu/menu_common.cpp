@@ -3893,12 +3893,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
                         fakenvapi::init(true);
                         XeFGProxy::InitXeFG();
-                        if (XeMfgLoader::IsEnabled())
-                            XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(srFrames));
-                        else if (XeFGProxy::Module() != nullptr)
-                            XeMfgLoader::TryApply(XeFGProxy::Module());
-                        else
-                            XeMfgLoader::TryApply();
+                        if (!XeMfgLoader::IsEnabled())
+                        {
+                            if (XeFGProxy::Module() != nullptr)
+                                XeMfgLoader::TryApply(XeFGProxy::Module());
+                            else
+                                XeMfgLoader::TryApply();
+                        }
 
                         state.dlssgDetectedInterpolationCount = srFrames;
                         state.dlssgLastSetMode = srFrames > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
@@ -4018,8 +4019,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     state.dlssgDetectedInterpolationCount = srFrames;
                     state.dlssgLastSetMode = srFrames > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
                     ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(srFrames));
-                    if (XeMfgLoader::IsEnabled())
-                        XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(srFrames));
                     if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
                         state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
                 }

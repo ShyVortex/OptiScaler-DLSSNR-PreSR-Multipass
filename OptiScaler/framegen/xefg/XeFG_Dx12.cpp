@@ -1185,8 +1185,6 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
     }
 
     _maxInterpolationCount = std::max(_maxInterpolationCount, static_cast<int>(interpolatedFrameCount));
-    if (XeMfgLoader::AnyEnabledForSession())
-        XeMfgLoader::SetMaxGeneratedFrames(interpolatedFrameCount);
 
     Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(interpolatedFrameCount);
 
