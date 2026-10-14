@@ -420,6 +420,7 @@ inline void PaceFrame(uint64_t index, uint64_t count)
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
 
+    // Always record burst period on index == 1 even at 2X so RenderTimeMs() stays valid.
     NoteFrame(index, count, now.QuadPart);
 
     if (multiplier <= 2)
@@ -444,26 +445,30 @@ inline void PaceFrame(uint64_t index, uint64_t count)
         if (g_intervalQpc <= 0)
             return;
 
-        g_targetQpc += g_intervalQpc;
+        // If intermediate frames were handled by Intel's scheduler and only the final
+        // generated frame reaches PaceFrame, anchor its target relative to the last paced frame.
+        if (g_lastPacedQpc != 0 && g_targetQpc <= now.QuadPart)
+            g_targetQpc = g_lastPacedQpc + g_intervalQpc;
+        else
+            g_targetQpc += g_intervalQpc;
     }
 
     const int64_t latest = now.QuadPart + QpcFromNs(g_periodNs);
     if (g_targetQpc > latest)
         g_targetQpc = latest;
 
-    LARGE_INTEGER beforeWait;
-    QueryPerformanceCounter(&beforeWait);
-
     WaitUntil(g_targetQpc);
+
+    g_pacedFrames++;
 
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
 
-    const int64_t waitQpc = end.QuadPart - beforeWait.QuadPart;
+    // Account for wall-clock wait duration in g_burstBlockQpc so pure render time
+    // estimation in NoteFrame() deducts the last frame's wait as well.
+    const int64_t waitQpc = end.QuadPart - now.QuadPart;
     if (waitQpc > 0)
         g_burstBlockQpc += waitQpc;
-
-    g_pacedFrames++;
 
     RecordGap(end.QuadPart);
 }
@@ -499,6 +504,11 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
     const int64_t waitQpc = after.QuadPart - before.QuadPart;
     g_schedWaitQpc += waitQpc;
     g_burstBlockQpc += waitQpc;
+
+    // Anchor wall-clock target to the latest scheduled frame so the final frame (isLast)
+    // can seamlessly step by one interval from the last intermediate frame.
+    if (g_intervalQpc > 0)
+        g_targetQpc = after.QuadPart;
 
     if (g_diagSeq > 0)
     {
@@ -568,6 +578,9 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
             return;
     }
 
+    // Route intermediate frames (1 .. count-1) through Intel's frame scheduler when usable.
+    // The final generated frame (isLast, caller 0x220467) is presented *after* 0x21EE30 has
+    // already executed for the burst, so it must fall through to ProviderPacesLastFrame / PaceFrame.
     if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
     {
         ScheduleFrame(ctx, burst, index);
@@ -621,10 +634,12 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
     if (fresh)
     {
         int64_t nativeUnit = unit;
+        int64_t targetUnit = unit;
 
         if (g_ring != nullptr)
         {
-            float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
+            const float rawF = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
+            float f = rawF;
 
             if (!(f >= 0.125f) || f > 500.0f)
                 f = 500.0f;
@@ -637,10 +652,21 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
                 nativeUnit = clampedUnit;
                 g_tsClamped++;
             }
+
+            // When a valid decoupled frameRenderTime (>= 1.0 ms) is fed via TagFrameConstants,
+            // Intel's native 0x224B30 already computes *out using clampedUnit (the pure render step).
+            // Do NOT overwrite it with 'unit' (which is derived from the wait-inflated ring median),
+            // as doing so re-couples presentation wait times into future deadlines and triggers the
+            // resonant lock above 60 FPS. Only rebase to 'unit' when rawF < 1.0f (e.g. FTInput=Zero
+            // where 0x224B30 clamps 0.0f to 0.125f ms).
+            if (rawF >= 1.0f && rawF <= 500.0f && clampedUnit > 0)
+            {
+                targetUnit = nativeUnit;
+            }
         }
 
-        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
-        g_burstStepNs = unit;
+        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
+        g_burstStepNs = targetUnit;
         g_tsRebased++;
     }
     else

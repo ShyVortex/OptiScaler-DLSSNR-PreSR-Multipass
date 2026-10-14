@@ -87,10 +87,12 @@ inline void TsDetourMock(int64_t* out, int64_t median, uint32_t index, uint32_t 
     if (fresh)
     {
         int64_t nativeUnit = unit;
+        int64_t targetUnit = unit;
 
         if (g_ring != nullptr)
         {
-            float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
+            const float rawF = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
+            float f = rawF;
 
             if (!(f >= 0.125f) || f > 500.0f)
                 f = 500.0f;
@@ -103,10 +105,15 @@ inline void TsDetourMock(int64_t* out, int64_t median, uint32_t index, uint32_t 
                 nativeUnit = clampedUnit;
                 g_tsClamped++;
             }
+
+            if (rawF >= 1.0f && rawF <= 500.0f && clampedUnit > 0)
+            {
+                targetUnit = nativeUnit;
+            }
         }
 
-        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
-        g_burstStepNs = unit;
+        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
+        g_burstStepNs = targetUnit;
         g_tsRebased++;
     }
     else
@@ -222,6 +229,42 @@ int main()
         assert(wrappedRec.countPlus1 == 6);
 
         printf("  [PASS] Test 4: Diagnostic circular ring wrap-around verified.\n");
+    }
+
+    // Test 5: TsDetour decoupled pure render time preservation (eliminating resonant lock)
+    // vs. sub-millisecond clamp rebasing (rawF < 1.0f)
+    {
+        XeFGDiagTest::ResetState();
+        alignas(16) uint8_t ringData[0x200] {};
+        float* pMeasured = reinterpret_cast<float*>(ringData + XeFGDiagTest::RingMeasuredOffset);
+        XeFGDiagTest::g_ring = ringData;
+
+        // Part A: Decoupled render time (rawF = 28.0 ms in a 6X burst, median = 84 ms due to display pacing)
+        // countPlus1 = 6. Median unit = 84 / 6 = 14 ms.
+        // Pure render step = 28 / 6 = 4.666 ms.
+        *pMeasured = 28.0f;
+        int64_t deadlineA = 1000000000LL; // 1.0 s native deadline
+        const int64_t origNativeOut = deadlineA;
+        XeFGDiagTest::TsDetourMock(&deadlineA, 84000000LL, 1, 6);
+
+        // Under rawF >= 1.0f, targetUnit = nativeUnit (4.666 ms).
+        // (targetUnit - nativeUnit) == 0, so native *out is untouched and burstStepNs == 4.666 ms!
+        assert(deadlineA == origNativeOut && "Decoupled render time must NOT pollute deadlineA with wait median!");
+        assert(XeFGDiagTest::g_burstStepNs == 4666666LL && "Burst step must match decoupled render time step!");
+
+        // Part B: Sub-millisecond clamp fallback (rawF = 0.0f from FTInput=Zero, sanity clamps to 500.0f)
+        // In this case, rawF < 1.0f, so targetUnit remains median unit (14.0 ms) to eliminate 0 ms clump!
+        XeFGDiagTest::ResetState();
+        *pMeasured = 0.0f;
+        int64_t deadlineB = 1000000000LL;
+        XeFGDiagTest::TsDetourMock(&deadlineB, 84000000LL, 1, 6);
+
+        assert(XeFGDiagTest::g_burstStepNs == 14000000LL &&
+               "Fallback rawF < 1.0f must rebase burstStepNs to median unit!");
+        assert(deadlineB == origNativeOut &&
+               "Fallback rawF < 1.0f maintains initial deadline and steps by median unit!");
+
+        printf("  [PASS] Test 5: TsDetour decoupled pure render time preservation & clamp rebasing verified.\n");
     }
 
     printf("[+] All XeFGPacing Diagnostic Ring & Edge-Case Unit Tests PASSED successfully!\n");
