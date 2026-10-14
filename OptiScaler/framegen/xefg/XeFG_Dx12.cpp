@@ -384,7 +384,11 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
     if (_framesToInterpolate > intTarget)
         Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(intTarget);
 
-    if (Config::Instance()->ForceXeLL.value_or_default() || XeFGProxy::SetNumInterpolatedFrames() != nullptr)
+    if (Config::Instance()->ForceXeLL.value_or_default())
+        params.maxInterpolatedFrames = 1;
+    else if (XeMfgLoader::AnyEnabledForSession())
+        params.maxInterpolatedFrames = effectiveMax;
+    else if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
         params.maxInterpolatedFrames = 1;
     else
         params.maxInterpolatedFrames = intTarget;
@@ -569,7 +573,11 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
     if (_framesToInterpolate > intTarget)
         Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(intTarget);
 
-    if (Config::Instance()->ForceXeLL.value_or_default() || XeFGProxy::SetNumInterpolatedFrames() != nullptr)
+    if (Config::Instance()->ForceXeLL.value_or_default())
+        params.maxInterpolatedFrames = 1;
+    else if (XeMfgLoader::AnyEnabledForSession())
+        params.maxInterpolatedFrames = effectiveMax;
+    else if (XeFGProxy::SetNumInterpolatedFrames() != nullptr)
         params.maxInterpolatedFrames = 1;
     else
         params.maxInterpolatedFrames = intTarget;
@@ -1038,9 +1046,6 @@ bool XeFG_Dx12::Dispatch()
               State::Instance().reflexFrameId);
 
     auto frameId = static_cast<uint32_t>(willDispatchFrame);
-
-    if (XeFGProxy::SetEnabled() != nullptr && _swapChainContext != nullptr)
-        XeFGProxy::SetEnabled()(_swapChainContext, true);
 
     auto result = XeFGProxy::TagFrameConstants()(_swapChainContext, frameId, &constData);
     if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS)
