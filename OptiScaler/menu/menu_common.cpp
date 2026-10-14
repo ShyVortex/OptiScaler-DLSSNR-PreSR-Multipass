@@ -3893,13 +3893,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
                         fakenvapi::init(true);
                         XeFGProxy::InitXeFG();
-                        if (!XeMfgLoader::IsEnabled())
-                        {
-                            if (XeFGProxy::Module() != nullptr)
-                                XeMfgLoader::TryApply(XeFGProxy::Module());
-                            else
-                                XeMfgLoader::TryApply();
-                        }
+                        if (XeFGProxy::Module() != nullptr)
+                            XeMfgLoader::TryApply(XeFGProxy::Module());
+                        else
+                            XeMfgLoader::TryApply();
 
                         if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
                             state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
