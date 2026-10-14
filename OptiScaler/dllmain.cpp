@@ -1950,9 +1950,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
             const int srFrames = std::clamp(cfg->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
             cfg->FGXeFGInterpolationCount.set_volatile_value(srFrames);
-            State::Instance().dlssgDetectedInterpolationCount = srFrames;
-            State::Instance().dlssgLastSetMode = sl::DLSSGMode::eOn;
-            ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(srFrames));
             fakenvapi::init(true);
             LOG_INFO("XeMfgLoader: XeMFG-SR injector active, auto-configuring pipeline (FGInput=Upscaler, "
                      "FGOutput=XeFG, InterpolationCount={}, FGEnabled=true)",

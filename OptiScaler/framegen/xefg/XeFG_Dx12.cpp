@@ -1163,9 +1163,12 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
         _isActive = false;
         ClearAllResourceReady();
 
-        State::Instance().dlssgDetectedInterpolationCount = 0;
-        State::Instance().dlssgLastSetMode = sl::DLSSGMode::eOff;
-        ReflexHooks::setDlssgFrameCount(0);
+        if (State::Instance().activeFgInput == FGInput::DLSSG)
+        {
+            State::Instance().dlssgDetectedInterpolationCount = 0;
+            State::Instance().dlssgLastSetMode = sl::DLSSGMode::eOff;
+            ReflexHooks::setDlssgFrameCount(0);
+        }
 
         LOG_DEBUG("XeFG entered warm passthrough mode (framesToInterpolate=0, enabled=false)");
         return true;
@@ -1188,9 +1191,12 @@ bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
 
     Config::Instance()->FGXeFGInterpolationCount.set_volatile_value(interpolatedFrameCount);
 
-    State::Instance().dlssgDetectedInterpolationCount = static_cast<int>(interpolatedFrameCount);
-    State::Instance().dlssgLastSetMode = interpolatedFrameCount > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-    ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(interpolatedFrameCount));
+    if (State::Instance().activeFgInput == FGInput::DLSSG)
+    {
+        State::Instance().dlssgDetectedInterpolationCount = static_cast<int>(interpolatedFrameCount);
+        State::Instance().dlssgLastSetMode = interpolatedFrameCount > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
+        ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(interpolatedFrameCount));
+    }
 
     if (_framesToInterpolate != interpolatedFrameCount)
     {

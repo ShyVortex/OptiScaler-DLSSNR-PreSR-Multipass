@@ -3901,10 +3901,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                 XeMfgLoader::TryApply();
                         }
 
-                        state.dlssgDetectedInterpolationCount = srFrames;
-                        state.dlssgLastSetMode = srFrames > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-                        ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(srFrames));
-
                         if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
                             state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
 
@@ -3915,9 +3911,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                         config->FGEnabled = false;
                         config->FGInput = FGInput::NoFG;
                         state.activeFgInput = FGInput::NoFG;
-                        state.dlssgDetectedInterpolationCount = 0;
-                        state.dlssgLastSetMode = sl::DLSSGMode::eOff;
-                        ReflexHooks::setDlssgFrameCount(0);
                         state.fgChanged = true;
                     }
                 }
@@ -4016,9 +4009,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 {
                     config->XeMfgSrGeneratedFrames = srFrames;
                     config->FGXeFGInterpolationCount = srFrames;
-                    state.dlssgDetectedInterpolationCount = srFrames;
-                    state.dlssgLastSetMode = srFrames > 0 ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-                    ReflexHooks::setDlssgFrameCount(static_cast<uint8_t>(srFrames));
                     if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
                         state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
                 }
