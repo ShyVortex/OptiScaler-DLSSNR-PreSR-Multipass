@@ -26,8 +26,10 @@ description: Implementation planning, task progression, testing, and explicit ap
      - Checking previous issues when creating an implementation plan is too late—the audit MUST occur before any solution is proposed to the user in conversation.
      - This rule is critical across new agent chat sessions and context compactions where conversational transcript history is not directly visible in context.
 
-2. **Task Division**:
+2. **Task Division & Single-Task Scoping**:
    - Every implementation plan MUST divide work into clear, discrete, sequential tasks (e.g. Task 1, Task 2, etc.).
+   - Tasks must be atomic, modular, and independently verifiable.
+   - Chaining, bundling, or auto-advancing across tasks in the same turn is strictly prohibited.
 
 3. **Mandatory Dedicated Implementation Plan File in Brain**:
    - Every implementation plan MUST be written to and maintained in a dedicated file in the agent's brain directory (`<appDataDir>/brain/<conversation-id>/`, e.g., `implementation_plan.md` or a descriptive task plan file) before execution begins.
@@ -50,13 +52,28 @@ description: Implementation planning, task progression, testing, and explicit ap
      - When writing the Overview & Environment section of any report under `docs/issues/`, the agent MUST ALWAYS actively check and verify real system and hardware details using terminal commands (e.g. `uname -r`, `/etc/os-release`, `nvidia-smi`) before authoring the document.
      - Never guess, estimate, or copy stale/placeholder OS distributions, kernel versions, GPU models, or driver versions into issue documentation. Accurate, verified environmental metadata is mandatory.
 
-6. **Mandatory Unit Tests**:
+6. **Mandatory Unit Tests & Verification Protocol**:
    - Every implementation plan MUST feature automated unit tests to validate each component or enhancement.
-   - All existing and new unit tests must compile and pass cleanly before considering a task or implementation complete.
+   - All existing and new unit tests must compile and pass cleanly before considering a task complete.
+   - Before completing any task touching C++ source or header files:
+     - Run `clang-format --dry-run --Werror <modified_files>` to guarantee zero style violations.
+     - Verify UTF-8 BOM (`\xef\xbb\xbf`) on all modified C++ files via python or bash check before committing.
 
-7. **Explicit Approval Requirements**:
-   - **Pre-execution Approval**: The agent MUST NOT proceed to execution without explicit user approval of the implementation plan.
-   - **Inter-task Approval**: The agent MUST pause and obtain explicit user approval between tasks before proceeding to subsequent tasks.
+7. **Explicit Approval Requirements & Hard-Blocking Inter-Task Gates (`ask_question`)**:
+   - **Pre-execution Approval**:
+     - The agent MUST NOT proceed to execution without explicit user approval of the implementation plan.
+     - When presenting an implementation plan, the agent must present the plan and await the user's confirmation before executing any code changes.
+   - **Mandatory Hard-Blocking Inter-Task Gate via `ask_question`**:
+     - The agent is **STRICTLY FORBIDDEN** from chaining multiple tasks in a single turn or proceeding to Task N+1 without receiving an explicit user response through `ask_question`.
+     - Upon completing the work, unit tests, and git commit for any given task (Task N):
+       1. The agent MUST update `implementation_plan.md` in the brain directory, marking Task N as completed `[x]`.
+       2. The agent MUST immediately invoke the `ask_question` tool:
+          - `question`: "Task N (<Task Title>) is completed, verified with unit tests, and committed. How would you like to proceed?"
+          - `options`:
+            - `"(Recommended) Proceed to Task N+1: <Task Title>"`
+            - `"Pause execution to inspect and review changes"`
+       3. The `ask_question` tool renders an interactive modal that **hard-blocks the IDE runtime** until the user selects an option.
+       4. The agent MUST NOT call any file-modification tools (`replace_file_content`, `write_to_file`) or issue git commits for subsequent tasks before the user explicitly submits their decision via `ask_question`.
 
 8. **Mandatory User Confirmation Gate Before Updating `.agents` Architecture & Context**:
    - `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` represent verified institutional memory and permanent architectural invariants.
