@@ -3754,8 +3754,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             // Input Source combo
             int sourceIdx = static_cast<int>(config->XeMfgSourceValue());
-            const char* sourceLabels[] = { "Game (Native DLSS-G / Streamline)",
-                                           "OptiScaler (OptiFG / Upscaler Injection)" };
+            const char* sourceLabels[] = { "Game (Native)", "OptiScaler (Injected)" };
             if (ImGui::Combo("Input Source (restart)##xemfg_source", &sourceIdx, sourceLabels, 2))
             {
                 config->XeMfgSourceType = sourceIdx;
