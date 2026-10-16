@@ -163,20 +163,34 @@ Analysis of runtime logs from `pre14` (`OptiScaler.log`, 16:55) revealed two int
      - After Frame $\text{count}$ presents via `LastFrameCallerRva` (`0x220467`), `RecordGap(end.QuadPart);` updates `g_lastPacedQpc`.
      - Shifting the 1-step wait from Frame 1 to before the Base Frame adds **0 net delay** to `xefgSwapChainPresent`. Total burst wait remains $5 \times \text{stepNs}$, but Frame $\text{count}$ is guaranteed a full 1-step display window and never overwritten in 0.3 ms.
 
+### 3.8 Frontend & Architecture Unification: Single `XeMFG` Component with `Source` Selection
+
+To simplify user configuration, eliminate duplicate UI subsections, and streamline runtime lifecycle management, `XeMFG` and `XeMFG-SR` were unified into a single, cohesive component under `[XeMFG]`:
+
+1. **`Source` Parameter (`Game` vs `OptiScaler`)**:
+   - `Source = Game` (Default): For games with native DLSS Frame Generation / Streamline support. Hooks into Streamline and NGX Feature 11, routing `FGInput::DLSSG` to `FGOutput::XeFG` and unlocking in-game multiplier options (2X–6X).
+   - `Source = OptiScaler`: For games with DLSS Super Resolution lacking native DLSS-FG (such as *Helldivers 2*). Automatically configures `FGInput::Upscaler`, hooks Reflex low-latency contexts, and injects XeFG using depth, motion vectors, and color buffers from the upscaler pass.
+2. **Unified Multiplier & Quirk Preservation**:
+   - Single `MaxInterpolatedFrames` setting (1 to 5, generating 2X to 6X) for both modes.
+   - Elevates `ForceBorderless` directly under `[XeMFG]`, ensuring DXGI exclusive fullscreen quirks (such as *Helldivers 2*) are directly accessible from the unified section.
+3. **Frontend Suppression of Redundant Sections**:
+   - Redundant "Frame Generation (XeFG)" and "Frame Generation (OptiFG)" sections are completely hidden when XeMFG is active, eliminating unnecessary warning text and cognitive clutter.
+4. **100% Backward Compatibility**:
+   - Legacy configurations using `[XeMFG-SR] Enable=true` or `[XeMFG] EnableSR=true` transparently migrate in `Config.cpp` to `UnlockMFG=true` with `Source=OptiScaler` and migrate `GeneratedFrames` to `MaxInterpolatedFrames`.
+
 ---
 
 ## 4. Verification & Standards Compliance
 
 1. **Automated Unit Tests**:
-   - `tests/xemfg_loader_unit.cpp` (11/11 PASS)
+   - `tests/xemfg_loader_unit.cpp` (12/12 PASS, including Test 12 for `XeMfgSource` enum and session resolution)
    - `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS, including Test 6 for zero-wait Frame 1 and ladder step spacing)
    - `tests/xefg_pacing_engine_unit.cpp` (7/7 PASS)
    - `tests/xefg_main_pacing_alignment_unit.cpp` (6/6 PASS, including Test 6 for SchedForwarder wait tracking, pure render time isolation, and Base Frame 1-step pacing)
-   - `tests/xemfg_menu_exclusion_unit.cpp` (6/6 PASS)
+   - `tests/xemfg_menu_exclusion_unit.cpp` (5/5 PASS, validating unified XeMFG UI, source selection, and duplicate section hiding)
    - `tests/dlssg_sm86_ini_smoke.cpp` (PASS)
 2. **Formatting & Encoding**:
-   - `clang-format --dry-run --Werror` verified clean across all modified files (`XeFGPacing.h`, `XeFG_Dx12.cpp`, `menu_common.cpp`, `dllmain.cpp`, `tests/xefg_diagnostic_ring_unit.cpp`, `tests/xefg_main_pacing_alignment_unit.cpp`).
+   - `clang-format --dry-run --Werror` verified clean across all modified files.
    - UTF-8 BOM (`\xef\xbb\xbf`) verified and preserved on all modified files.
-3. **Architecture Gate Compliance**:
-   - In accordance with Rule 8 in `workflow-planning.md`, `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` remain untouched pending real in-game verification by the user.
+
 

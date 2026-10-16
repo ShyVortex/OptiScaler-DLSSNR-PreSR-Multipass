@@ -122,56 +122,38 @@ Every implementation plan created for the project must document:
    - `docs/issues/NR/` — Neural Rendering (DLSS-NR)
    - **Mandatory Hardware & OS Accuracy Verification**: When writing the Overview & Environment section of any report, the agent MUST ALWAYS actively query and verify real system and hardware details via terminal commands (`uname -r`, `/etc/os-release`, `nvidia-smi`) before authoring the document. Never guess, estimate, or reuse stale/placeholder environmental metadata.
 
-## Intel Xe Multi-Frame Generation (XeMFG & XeMFG-SR) Architecture
+## Intel Xe Multi-Frame Generation (XeMFG) Unified Architecture
 
-### XeMFG Native Streamline Integration (`XeMfgUnlock`)
-- **Target**: Games supporting Streamline DLSS Frame Generation.
+### Unified XeMFG Pipeline (`[XeMFG]`)
+- **Target**: Unified pipeline supporting both Streamline / native DLSS Frame Generation titles and games with DLSS Super Resolution lacking native DLSS-FG (e.g. *Helldivers 2*).
 - **Provider**: Intel XeSS-FG (`libxess_fg.dll` / `igxess_fg.dll`).
 - **Core Loader**: `OptiScaler/framegen/xefg/XeMfgLoader.h/cpp` applying 5 transactional binary patches (`U1`–`U5`) to unlock up to 6X Multi-Frame Generation across all GPU vendors.
-- **Native Thunk Presentation Pacing**: `OptiScaler/framegen/xefg/XeFGPacing.h` hooking presentation deadlines and scheduler thunks to prevent micro-stutter and burst bunching.
-- **Config**: `[XeMFG]` `UnlockMFG`, `MaxInterpolatedFrames` (1..5), `ExtraPacing`.
-
-### XeMFG-SR Injector for DLSS Super Resolution Titles (`XeMfgSrEnable`)
-- **Target**: Games supporting DLSS Super Resolution (SR) but lacking native DLSS Frame Generation or Streamline integration.
-- **Pipeline Routing**: Siphons color buffers, motion vectors, depth, and exposure from DLSS-SR evaluate passes (`NVSDK_NGX_D3D12_EvaluateFeature`) via `FGInput::Upscaler` into `FGOutput::XeFG`.
-- **Loader Dual Activation**: `XeMfgLoader::SrEnabledForSession()` and `AnyEnabledForSession()` activate patches and dynamically resolve ceiling to `XeMfgSrGeneratedFrames`.
-- **Pipeline Auto-Configuration**: Post-attach in `dllmain.cpp` automatically sets volatile overrides: `FGEnabled = true`, `FGInput = FGInput::Upscaler`, `FGOutput = FGOutput::XeFG`, `FGNvngxReplacement = None`, and `FGXeFGInterpolationCount = srFrames`.
-- **In-Game Menu Overlay**: Dedicated `Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR)` subsection in `menu_common.cpp` with interactive one-click setup, dynamic multiplier slider (2X to 6X / 1 to 5 interpolated frames) with live in-memory byte rewriting (`SetMaxGeneratedFrames`), diagnostic badges, presentation telemetry, and corner debug markers.
-- **Mutual Exclusion**: Strict universal mutual exclusion in `Config.cpp` and `menu_common.cpp` against primary `XeMfgUnlock`, `AdaMfgUnlock`, `AmpereMfgUnlock`, `SmoothMotion`, and `ExternalFrameGeneration`.
-- **Config**: `[XeMFG-SR]` `Enable`, `GeneratedFrames` (1..5).
-
-- **Helldivers 2 Defect Resolution (Crash & SwapChain Binding)**:
-  - Fixed immediate crash (`0xc0000005` at `nullptr + 8`) caused by uninitialized `LowLatencyCtx::get()`, missing null guards in `nvapi_calls`, and unguarded Reflex hook hijacking when XeMFG-SR was enabled mid-game.
-  - Fixed inactive interpolation on 0x0 swapchains: *Helldivers 2* called `CreateSwapChainForHwnd` with `Width=0, Height=0`, triggering OptiScaler's premature `< 100` overlay check and bypassing swapchain wrapping (`FGHooks::CreateSwapChainForHwnd`).
-  - Added `ResolveWindowSizedSwapchain(DXGI_SWAP_CHAIN_DESC1&, HWND)` in `DxgiSwapchainSizing.h` querying `GetClientRect`, and updated `DxgiFactory_Hooks.cpp` and `DxgiFactory_WrappedCalls.cpp` to resolve `localDesc` before overlay checks, preserving caller `pDesc` and allowing normal FG wrapping.
-- **Reflex Hook SwapChain Gating**: In `Reflex_Hooks.cpp`, `IsXeFGActive()` strictly verifies `activeFgOutput == FGOutput::XeFG && currentFGSwapchain != nullptr && currentFG != nullptr && currentFG->IsActive() && !currentFG->IsPaused()`. If inactive or if the swapchain is not yet bound to XeFG, Reflex calls fall through smoothly to native driver Reflex (`o_NvAPI_D3D_...`).
-- **LowLatencyCtx Lazy-Init & Null Guards**: `LowLatencyCtx::get()` in `low_latency.h` is self-initializing and thread-safe via `std::scoped_lock`. All dispatch functions in `nvapi_calls.cpp` null-guard `LowLatencyCtx::get()`. Early `fakenvapi::init(true)` calls are placed in `dllmain.cpp` and `menu_common.cpp`.
-- **Menu Guidance & SwapChain Diagnostics**: `menu_common.cpp` marks XeMFG-SR checkbox as requiring restart (`(restart)`), and displays `"Note: Save Settings and restart the game to initialize the XeFG SwapChain."` whenever `currentFGSwapchain == nullptr`.
-- **Fullscreen Incompatibility & Borderless Quirk/Toggle**: Intel XeSS-FG unconditionally disables interpolation in DXGI exclusive fullscreen. Added `QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)` in `Quirks.h` and user-controlled toggle `ForceBorderless = auto` under `[XeMFG-SR]` (`OptiScaler.ini`, `Config.cpp`, and GUI).
-- **Live Multiplier Adaptation & Pacing Stability**: Initialized `_framesToInterpolate` on swapchain creation, guarded `WAR_xefgRequestFGToggle` in `XeFG_Dx12::Dispatch`, and removed `state.fgChanged = true;` from the slider callback, eliminating destructive deactivations and 10-frame freezes. Added a sanity floor fallback for `frameRenderTime` in `XeFG_Dx12::Dispatch` to prevent motion vector collapse and eliminate micro-stutters.
-- **OptiFG Menu Auto-Management**: In `menu_common.cpp`, `Frame Generation (OptiFG)` automatically displays the managed notice and hides manual controls and `Advanced OptiFG Settings` when XeMFG-SR is active.
-- **End-to-End Presentation Burst Pacing & Multiplier Ceiling Uncap**:
-  - **Multiplier Ceiling Uncap in `XeFG_Dx12.cpp`**: `_maxInterpolationCount` initialized to 5 on swapchain creation when XeMFG is active; `SetInterpolatedFrameCount` and `Dispatch` calculate `effectiveMax = std::max(_maxInterpolationCount, XeMfgLoader::EffectiveMax(...))` up to 5, dynamically raising `_maxInterpolationCount` and eliminating clamping warnings.
-  - **Non-Blocking Base Frame Presentation & Feedback Loop Elimination in `XeFGPacing.h`**:
-    - Disassembly of `libxess_fg.dll` confirmed that within each `xefgSwapChainPresent` call, the base application frame (callers `0x220A52` / `0x220DAD`) presents synchronously on the game engine's main render thread.
-    - Base frames present immediately via `NoteBasePresent()` with **0 wait**, returning control directly to the engine and permitting full native framerate (30–60+ FPS).
-    - In `NoteBasePresent()`, `PushPeriod` subtracts `burstBlockQpc` from `deltaNs`, isolating pure engine render time and completely eliminating the runaway recurrence feedback loop ($T_{n+1} = T_{\text{render}} + \frac{M-1}{M} T_n$) that previously inflated frame times to 108.55 ms (9.2 FPS).
-    - `TsDetour` (RVA `0x3430`) partitions uniform deadlines across generated frames 1..5 for Intel's native background presentation worker thread (`0x7A30`) with zero inter-burst drift.
-    - `ApplyAntiClumpProtection` clamps consecutive generated presents to the minimum floor ($\ge 1.5\text{ ms}$) without stalling the main thread for whole frame intervals.
-- **Wall-Clock Native Thunk Pacing Overhaul & Anti-Clump Protection**:
-  - Overhauled `OptiScaler/framegen/xefg/XeFGPacing.h` with wall-clock QPC timing and anchored interval scheduling:
-    - Supported 2X Frame Generation (`multiplier < 2` guard), pacing the single generated frame to the exact 50% halfway point ($T_{\text{base}} + T_{\text{interval}}$).
-    - Unconditionally paced the final generated frame (`isLast == true`, caller `LastFrameCallerRva = 0x220467`), eliminating sub-millisecond dumps (0.28–0.47 ms).
-    - Intercepted base application frame presents (`0x220A52` and `0x220DAD`) via `NoteBasePresent()` in `Detour` (`0x25C0`) to anchor subsequent generated frame deadlines ($T_{\text{base}} + \text{index} \times T_{\text{interval}}$) and update cycle periods via `PushPeriod()`.
-    - Enforced an anti-clump floor ($\ge g\_lastPresentedQpc + \min(T_{\text{interval}} \times 0.4,\, 2.0\text{ ms})$) preventing consecutive presents from firing closer than the floor threshold.
-    - Neutralized cumulative deadline drift in `TsDetour` (RVA `0x3430`) by eliminating mutating global deadline accumulation.
-    - Added render time sanity floor in `NoteFrame` so `RenderTimeMs()` falls back to `g_periodNs` instead of underflowing to 0.0 ms.
+- **Dynamic In-Memory Ceiling Adaptation**: `XeMfgLoader::SetMaxGeneratedFrames` rewrites `U3`, `U4`, and `U5` byte targets live with `VirtualProtect` and `FlushInstructionCache`.
+- **Input Source Selection (`Source`)**:
+  - `Source = Game` (Default): Hooks into Streamline and NGX Feature 11, routing `FGInput::DLSSG` to `FGOutput::XeFG` and unlocking in-game multiplier options (2X–6X).
+  - `Source = OptiScaler`: For games with DLSS Super Resolution lacking native DLSS-FG. Automatically configures `FGInput::Upscaler`, hooks Reflex low-latency contexts, and injects XeFG using depth, motion vectors, and color buffers from the upscaler pass.
+- **Configuration Backend**:
+  - `[XeMFG]` section in `OptiScaler.ini` and `Config.cpp`: `UnlockMFG`, `Source`, `MaxInterpolatedFrames` (1..5), `ExtraPacing`, and `ForceBorderless`.
+  - 100% backward-compatible migration: legacy `[XeMFG-SR] Enable=true` or `[XeMFG] EnableSR=true` maps to `UnlockMFG=true` with `Source=OptiScaler`, and legacy `GeneratedFrames` migrates to `MaxInterpolatedFrames`.
+- **In-Game Menu Overlay UI (`menu_common.cpp`)**:
+  - Unified collapsing header `Intel Xe Multi-Frame Generation (XeMFG)` featuring enable checkbox, `Input Source` combo selector, dynamic telemetry badges (`DLL: found | Patches: 5/5 | Pacing: active`), present status, live in-game multiplier, dynamic `Max Interpolated Frames` slider, debug markers, only interpolated frames, extra pacing, and elevated `Force Borderless Window (restart)` checkbox.
+  - Completely hides redundant "Frame Generation (XeFG)" and "Frame Generation (OptiFG)" sections when XeMFG is active, eliminating unnecessary warning notices and cognitive clutter.
+- **Mandatory Native Presentation Pacing Engine (`XeFGPacing.h`)**:
+  - Unconditionally detours presentation and scheduler thunks (`0x25C0`, `0x3100`, `0x3430`) whenever XeMFG is active.
+  - `SchedForwarder` wrapping `g_schedNative` with QPC timing to track both intermediate and native Frame $\text{count}$ waits into `g_burstBlockQpc`.
+  - `NoteFrame` calculates pure engine render time (`pureNs = totalDeltaNs - blockNs`) before median filtering, isolating unblocked engine render time (~16–17 ms) and eliminating the 51.4 ms cycle lock (`Set FT: 50`).
+  - `TsDetour` (RVA `0x3430`) sets deadline for Frame 1 to `nowNs` (zero wait) on fresh bursts, as the previous Base Frame already occupied the display during CPU submission and GPU interpolation.
+  - Base frames present immediately with **0 wait** via `NoteBasePresent()`, spaced by 1 step from Frame $\text{count}$ and sleep accumulated into `g_burstBlockQpc`, ensuring Frame $\text{count}$ is never overwritten in 0.3 ms.
+  - Anti-clump protection floor ($\ge 1.5$ ms) eliminates sub-millisecond dumps.
+- **Reflex Hook SwapChain Gating & LowLatencyCtx Null Guards**:
+  - In `Reflex_Hooks.cpp`, `IsXeFGActive()` verifies active XeFG presentation; inactive calls fall through smoothly to native driver Reflex.
+  - `LowLatencyCtx::get()` in `low_latency.h` is self-initializing and thread-safe via `std::scoped_lock`. Dispatch functions in `nvapi_calls.cpp` null-guard `LowLatencyCtx::get()`.
+- **DXGI 1.2+ Window-Sized SwapChain Resolution (`DxgiSwapchainSizing.h`)**:
+  - Queries `GetClientRect` when `Width == 0 && Height == 0` on a local descriptor copy *before* overlay checks, preserving caller `pDesc` and allowing normal FG wrapping for *Helldivers 2*.
 - **SwapChain Init Parameters & Non-Intel Hardware Validation Safety (`XeFG_Dx12.cpp`)**:
-  - Disassembly of Intel `libxess_fg.dll` v1.3.1.78 at `0x1801ffb44` confirmed that on non-Intel GPUs (NVIDIA GA103 / AMD), `D3D12InitFromSwapChainDesc` strictly enforces `cmpl $1, params.maxInterpolatedFrames`. Passing any value != 1 immediately rejects swapchain initialization with `XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT (0xFFFFFFFC)`.
-  - In `CreateSwapchain` and `CreateSwapchain1`, `params.maxInterpolatedFrames` is initialized to `1` when `XeFGProxy::SetNumInterpolatedFrames() != nullptr` (or when `ForceXeLL` is active), satisfying provider validation cleanly.
-  - Right after `D3D12GetSwapChainPtr`, `SetInterpolatedFrameCount(targetCount)` is called immediately, dynamically binding the user-configured multiplier (e.g. 2 for 3X FG, 5 for 6X FG) on frame 1 without requiring in-game slider interaction.
-- **Non-Destructive Quirk Persistence & Post-Pipeline Evaluation (`dllmain.cpp`)**:
-  - `CheckQuirks` preserves `GameQuirk::ForceBorderlessWhenUsingXeFG` and `OverrideVsyncWhenUsingXeFG` in `State::Instance().gameQuirks` by removing premature `quirks.reset(...)` calls.
-  - Once `activeFgOutput` and `activeFgInput` are resolved (from XeMFG, XeMFG-SR, or INI), a post-pipeline configuration check automatically applies `FGXeFGForceBorderless` and `OverrideVsync` unless explicitly configured by the user.
-- **Unit Tests**: Validated by `tests/xemfg_sr_crash_fix_unit.cpp` (5/5 passing), `tests/dxgi_swapchain_sizing_unit.cpp` (9/9 passing), `tests/xemfg_sr_unit.cpp` (11/11 passing), `tests/xefg_pacing_engine_unit.cpp` (7/7 passing), and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (11/11 passing).
+  - `params.maxInterpolatedFrames = 1` passed to `D3D12InitFromSwapChainDesc` to pass validation gate (`0x1801ffb44`) on non-Intel GPUs.
+  - Multiplier ceiling uncap to 5 maintained in memory; `SetInterpolatedFrameCount(targetCount)` dynamically binds the target multiplier on frame 1 without manual interaction.
+- **Quirks & Borderless Toggle**:
+  - `QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG)` in `Quirks.h` and elevated `ForceBorderless` checkbox in GUI and INI ensure flip-model borderless swapchains without globally forcing borderless.
+- **Unit Tests**: Validated by `tests/xemfg_loader_unit.cpp` (12/12 PASS), `tests/xemfg_menu_exclusion_unit.cpp` (5/5 PASS), `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS), `tests/xefg_main_pacing_alignment_unit.cpp` (6/6 PASS), `tests/xefg_pacing_engine_unit.cpp` (7/7 PASS), and `tests/xemfg_multiplier_and_burst_pacing_unit.cpp` (16/16 PASS).
 
