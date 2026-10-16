@@ -608,8 +608,12 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
     }
     else
     {
-        // Subsequent generated frames advance uniformly by stepNs
-        g_nextDeadlineNs = std::max(g_nextDeadlineNs + g_burstStepNs, nowNs + g_burstStepNs);
+        g_nextDeadlineNs += g_burstStepNs;
+
+        // If a previous frame took longer than expected and less than half a step remains,
+        // step forward from current time so the frame never dumps in 0 ms.
+        if (nowNs > 0 && g_nextDeadlineNs < nowNs + (g_burstStepNs / 2))
+            g_nextDeadlineNs = nowNs + g_burstStepNs;
     }
 
     g_lastTsIndex = index;

@@ -113,18 +113,15 @@ inline void TsDetourMock(int64_t* out, int64_t median, uint32_t index, uint32_t 
             }
         }
 
-        int64_t candidateNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
-
         if (nowNs > 0)
         {
-            if (candidateNs > nowNs + targetUnit)
-                candidateNs = nowNs + targetUnit;
-
-            if (candidateNs < nowNs)
-                candidateNs = nowNs;
+            g_nextDeadlineNs = nowNs;
+        }
+        else
+        {
+            g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
         }
 
-        g_nextDeadlineNs = candidateNs;
         g_burstStepNs = targetUnit;
         g_tsRebased++;
     }
@@ -282,7 +279,7 @@ int main()
         printf("  [PASS] Test 5: TsDetour decoupled pure render time preservation & clamp rebasing verified.\n");
     }
 
-    // Test 6: TsDetour windowed deadline clamping and monotonic step forward under GPU lag
+    // Test 6: TsDetour zero-wait Frame 1, step spacing, and diagnostic record tracking under GPU lag
     {
         XeFGDiagTest::ResetState();
         alignas(16) uint8_t ringData[0x200] {};
@@ -291,31 +288,31 @@ int main()
         XeFGDiagTest::g_ring = ringData;
 
         // 4X mode (countPlus1 = 4, median = 20.44 ms, unit = 5.11 ms)
-        // Subtest 6A: Frame 1 cap at nowNs + targetUnit (eliminates 10 ms wait)
+        // Subtest 6A: Frame 1 presents immediately with zero wait (nowNs)
         const int64_t now1 = 1000000000LL;
         int64_t deadline1 = 1010000000LL; // 10 ms in the future
         XeFGDiagTest::TsDetourMock(&deadline1, 20440000LL, 1, 4, now1);
 
-        assert(deadline1 == now1 + 5110000LL && "Frame 1 deadline must be clamped to nowNs + targetUnit (5.11 ms)");
+        assert(deadline1 == now1 && "Frame 1 deadline must be set to nowNs for immediate presentation");
         assert(XeFGDiagTest::g_diagRing[0].detouredOutNs == deadline1 &&
-               "Diag ring record 0 must store clamped deadline");
+               "Diag ring record 0 must store zero-wait deadline");
 
-        // Subtest 6B: Frame 1 floor at nowNs and Frame 2 step forward when GPU lagged
+        // Subtest 6B: Frame 1 presents at nowNs and Frame 2 steps forward uniformly
         XeFGDiagTest::ResetState();
         *pMeasured = 20.44f;
         const int64_t nowLag1 = 1008000000LL;
         int64_t deadlineLag1 = 1005110000LL; // 2.89 ms in the past
         XeFGDiagTest::TsDetourMock(&deadlineLag1, 20440000LL, 1, 4, nowLag1);
 
-        assert(deadlineLag1 == nowLag1 && "Frame 1 in the past must be floored to nowNs");
+        assert(deadlineLag1 == nowLag1 && "Frame 1 in the past must present immediately at nowLag1");
 
         // Frame 2 arrives 0.2 ms after Frame 1
         const int64_t nowLag2 = 1008200000LL;
         int64_t deadlineLag2 = 1005110000LL;
         XeFGDiagTest::TsDetourMock(&deadlineLag2, 20440000LL, 2, 4, nowLag2);
 
-        // Frame 2 must step forward from floored Frame 1 by targetUnit (5.11 ms)
-        assert(deadlineLag2 == nowLag1 + 5110000LL && "Frame 2 must step forward by targetUnit from floored Frame 1");
+        // Frame 2 must step forward from Frame 1 by targetUnit (5.11 ms)
+        assert(deadlineLag2 == nowLag1 + 5110000LL && "Frame 2 must step forward by targetUnit from Frame 1");
         assert(deadlineLag2 - nowLag2 > 4000000LL && "Frame 2 must wait ~4.91 ms, preventing 0.002 ms dump");
         assert(XeFGDiagTest::g_diagRing[1].detouredOutNs == deadlineLag2 &&
                "Diag ring record 1 must store spaced Frame 2 deadline");
@@ -326,7 +323,7 @@ int main()
         XeFGDiagTest::TsDetourMock(&deadlineLag3, 20440000LL, 3, 4, nowHitch);
         assert(deadlineLag3 >= nowHitch + 5110000LL && "Monotonic guard must step deadline forward from nowHitch");
 
-        printf("  [PASS] Test 6: TsDetour windowed deadline clamping, monotonic step, and diagnostic record tracking "
+        printf("  [PASS] Test 6: TsDetour zero-wait Frame 1, step spacing, and diagnostic record tracking "
                "verified.\n");
     }
 

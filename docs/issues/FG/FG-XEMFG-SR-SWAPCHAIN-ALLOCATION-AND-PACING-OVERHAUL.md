@@ -139,15 +139,39 @@ In-depth analysis of high-resolution runtime logs (`OptiScaler_2.log`) under unc
    - With 1.0 ms steps, `blockNs` dropped to 3 ms, making the next cycle compute $25 - 3 = 22\text{ ms}$, creating an alternating flip-flop between 22 ms and 4 ms.
    - **Fix**: In `NoteFrame`, set `g_renderTimeNs = g_periodNs` directly from the stable 15-sample median cycle period, eliminating the 25 ms $\leftrightarrow$ 4 ms oscillation.
 
+### 3.7 Resolution of Synchronous Present Wait Inflation (`Set FT: 50`) & Frame Count Overwrite (`pre14` Log Analysis)
+
+Analysis of runtime logs from `pre14` (`OptiScaler.log`, 16:55) revealed two interacting timing anomalies in `xefgSwapChainPresent` on the game engine's main render thread:
+
+1. **Synchronous Wait-Time Inflation Loop (`Set FT: 50` / 51.4 ms Cycle Lock)**:
+   - In `libxess_fg.dll` (v1.3.1.78), `xefgSwapChainPresent` executes synchronously on the game's main render thread inside `FGHooks::FGPresent`.
+   - Between `FGHooks::FGPresent Present finished` and the subsequent `FGHooks::hkFGPresent1`, the game engine took only ~3.8 ms on the CPU. Inside `o_FGSCPresent1`, GPU upscaling and optical-flow dispatch took ~12.1 ms before Frame 1 reached `ScheduleFrame`.
+   - The true unblocked native frame time was $T_{\text{native}} = T_{\text{total\_cycle}} - T_{\text{cpu\_paced\_wait}} \approx 51.4\text{ ms} - 34.3\text{ ms} = \mathbf{17.1\text{ ms}}$ (~58.5 FPS native).
+   - However, because `NoteFrame` set `g_renderTimeNs = g_periodNs` without subtracting presentation wait times, the 34.3 ms of CPU sleep time inside `xefgSwapChainPresent` was treated as engine render time. This created an infinite self-referential feedback loop clamping `Set FT` to 50.0 ms.
+   - Additionally, native call `0x3100` (`SchedForwarder`) at `0x220411` on Frame $\text{count}$ was not timed or accumulated into `g_burstBlockQpc`.
+   - **Resolution**:
+     - Defined `SchedForwarder` before `ScheduleFrame`, measuring `before` and `after` QPC around `g_schedNative` and accumulating `(after - before)` into `g_burstBlockQpc`.
+     - Routed `ScheduleFrame` through `SchedForwarder` to ensure 100% coverage across all intermediate and native Frame $\text{count}$ waits without double-counting.
+     - In `NoteFrame`, computed `pureNs = (totalDeltaNs > blockNs + 2000000LL) ? (totalDeltaNs - blockNs) : 2000000LL;` before feeding `PushPeriod(pureNs)`. `g_renderTimeNs` reflects pure unblocked engine render time (~16–17 ms / 60 FPS native), completely eliminating the 51.4 ms cycle lock.
+
+2. **Sub-millisecond Frame Count Overwrite (0.3 ms on every 6th present)**:
+   - In `libxess_fg.dll`, Frame $\text{count}$ presented at `0x220462` (`LastFrameCallerRva`), and immediately (**0.306 ms later**) the Base Frame presented at `0x220A52` / `0x220DAD` with zero wait.
+   - Frame $\text{count}$ was destroyed on screen before monitor scanout, while the Base Frame occupied the display for ~16.8 ms during the next frame's CPU submission (~3.8 ms) and GPU interpolation (~12.2 ms).
+   - **Resolution via Wait Shifting**:
+     - Frame 1 wait was reduced from $1 \times \text{step}$ to $0\text{ ms}$ (`nowNs`) in `TsDetour`, because the previous Base Frame was already visible during CPU+GPU execution.
+     - In `Detour`, when caller is Base Frame (`0x220A52` / `0x220DAD`) and `g_lastMultiplier >= 2`, wait $1 \times \text{step}$ from `g_lastPacedQpc` (`WaitUntil(g_lastPacedQpc + QpcFromNs(g_burstStepNs))`), accumulating sleep into `g_burstBlockQpc`.
+     - After Frame $\text{count}$ presents via `LastFrameCallerRva` (`0x220467`), `RecordGap(end.QuadPart);` updates `g_lastPacedQpc`.
+     - Shifting the 1-step wait from Frame 1 to before the Base Frame adds **0 net delay** to `xefgSwapChainPresent`. Total burst wait remains $5 \times \text{stepNs}$, but Frame $\text{count}$ is guaranteed a full 1-step display window and never overwritten in 0.3 ms.
+
 ---
 
 ## 4. Verification & Standards Compliance
 
 1. **Automated Unit Tests**:
    - `tests/xemfg_loader_unit.cpp` (11/11 PASS)
-   - `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS, including Test 6 for windowed deadline clamping and monotonic step)
+   - `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS, including Test 6 for zero-wait Frame 1 and ladder step spacing)
    - `tests/xefg_pacing_engine_unit.cpp` (7/7 PASS)
-   - `tests/xefg_main_pacing_alignment_unit.cpp` (5/5 PASS, including Test 5 for windowed clamping, hitch recovery, and isLast deduplication)
+   - `tests/xefg_main_pacing_alignment_unit.cpp` (6/6 PASS, including Test 6 for SchedForwarder wait tracking, pure render time isolation, and Base Frame 1-step pacing)
    - `tests/xemfg_menu_exclusion_unit.cpp` (6/6 PASS)
    - `tests/dlssg_sm86_ini_smoke.cpp` (PASS)
 2. **Formatting & Encoding**:

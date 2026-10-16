@@ -38,6 +38,11 @@ struct SimulatedMainPacer
     int64_t tsRebased = 0;
     int64_t tsClamped = 0;
 
+    int64_t burstBlockQpc = 0;
+    int64_t lastPacedQpc = 0;
+    int64_t baseFrameWaitNs = 0;
+    int64_t schedForwarderWaitedQpc = 0;
+
     int64_t pacedFrames = 0;
     int64_t scheduledFrames = 0;
     int64_t basePresents = 0;
@@ -45,6 +50,12 @@ struct SimulatedMainPacer
     int64_t NsFromQpc(int64_t delta) const { return freq > 0 ? (delta * 1000000000LL) / freq : 0; }
     int64_t QpcFromNs(int64_t ns) const { return freq > 0 ? (ns * freq) / 1000000000LL : 0; }
     double RenderTimeMs() const { return renderTimeNs > 0 ? static_cast<double>(renderTimeNs) / 1000000.0 : 0.0; }
+
+    void SchedForwarder(int64_t waitQpc)
+    {
+        schedForwarderWaitedQpc += waitQpc;
+        burstBlockQpc += waitQpc;
+    }
 
     void NoteFrame(uint64_t multiplier, int64_t nowQpc)
     {
@@ -61,13 +72,18 @@ struct SimulatedMainPacer
         if (deltaQpc <= 0)
             return;
 
-        const int64_t measuredNs = NsFromQpc(deltaQpc);
-        if (measuredNs < 1000000LL || measuredNs > 500000000LL)
+        const int64_t totalDeltaNs = NsFromQpc(deltaQpc);
+        if (totalDeltaNs < 1000000LL || totalDeltaNs > 500000000LL)
             return;
 
-        periodNs = measuredNs;
+        const int64_t blockQpc = burstBlockQpc;
+        burstBlockQpc = 0;
+        const int64_t blockNs = (blockQpc > 0) ? NsFromQpc(blockQpc) : 0;
+        const int64_t pureNs = (totalDeltaNs > blockNs + 2000000LL) ? (totalDeltaNs - blockNs) : 2000000LL;
+
+        periodNs = pureNs;
         renderTimeNs = periodNs;
-        intervalQpc = deltaQpc / static_cast<int64_t>(multiplier);
+        intervalQpc = (pureNs * freq / 1000000000LL) / static_cast<int64_t>(multiplier);
     }
 
     int64_t TsDetour(int64_t nativeOut, int64_t medianNs, uint32_t countPlus1, uint32_t index, float ringF = 500.0f,
@@ -98,18 +114,15 @@ struct SimulatedMainPacer
                 }
             }
 
-            int64_t candidateNs = nativeOut + static_cast<int64_t>(index) * (unit - nativeUnit);
-
             if (nowNs > 0)
             {
-                if (candidateNs > nowNs + unit)
-                    candidateNs = nowNs + unit;
-
-                if (candidateNs < nowNs)
-                    candidateNs = nowNs;
+                nextDeadlineNs = nowNs;
+            }
+            else
+            {
+                nextDeadlineNs = nativeOut + static_cast<int64_t>(index) * (unit - nativeUnit);
             }
 
-            nextDeadlineNs = candidateNs;
             burstStepNs = unit;
             tsRebased++;
         }
@@ -132,6 +145,7 @@ struct SimulatedMainPacer
         ProviderPacedLast,
         OptiPacedFallback,
         BypassedBaseFrame,
+        PacedBaseFrame,
     };
 
     PacingOutcome TryPace(uint64_t index, uint64_t count, bool isLast, bool schedUsable, bool providerPacesLast)
@@ -154,16 +168,34 @@ struct SimulatedMainPacer
         return PacingOutcome::OptiPacedFallback;
     }
 
-    PacingOutcome OnDetour(int64_t callerRva, uint64_t index, uint64_t count, bool schedUsable, bool providerPacesLast)
+    PacingOutcome OnDetour(int64_t callerRva, uint64_t index, uint64_t count, bool schedUsable, bool providerPacesLast,
+                           int64_t presentQpc = 0, uint64_t multiplier = 4)
     {
         if (callerRva == FrameCallerRva)
+        {
+            lastPacedQpc = presentQpc;
             return TryPace(index, count, false, schedUsable, providerPacesLast);
+        }
 
         if (callerRva == LastFrameCallerRva)
+        {
+            lastPacedQpc = presentQpc;
             return TryPace(index, count, true, schedUsable, providerPacesLast);
+        }
 
         // Caller is base application frame (0x220A52, 0x220DAD)
         basePresents++;
+        if (multiplier >= 2 && lastPacedQpc > 0 && burstStepNs > 0)
+        {
+            const int64_t targetQpc = lastPacedQpc + QpcFromNs(burstStepNs);
+            if (presentQpc < targetQpc)
+            {
+                const int64_t waitedQpc = targetQpc - presentQpc;
+                burstBlockQpc += waitedQpc;
+                baseFrameWaitNs = NsFromQpc(waitedQpc);
+                return PacingOutcome::PacedBaseFrame;
+            }
+        }
         return PacingOutcome::BypassedBaseFrame;
     }
 };
@@ -274,15 +306,12 @@ int main()
         const uint32_t countPlus1 = 4;       // 4X Multi-Frame Generation (3 generated frames)
         const int64_t unit = 5110000LL;      // 5.11 ms per slice
 
-        // Subtest 5A: Windowed Clamping - Cap Frame 1 wait to at most 1 * unit
-        // Intel's stock 2X-biased calculation yields nativeOut 10 ms ahead (half the cycle)
+        // Subtest 5A: Frame 1 immediate presentation at nowNs (zero wait)
         const int64_t nowNs1 = 1000000000LL;          // 1.0 s wall-clock time
         const int64_t nativeOutTooFar = 1010000000LL; // 10 ms ahead (nativeOut - nowNs = 10 ms)
 
         int64_t d1 = pacer.TsDetour(nativeOutTooFar, medianNs, countPlus1, 1, 500.0f, nowNs1);
-        // Candidate was capped at nowNs1 + unit (1000000000 + 5110000 = 1005110000)
-        assert(d1 == nowNs1 + unit && "Frame 1 deadline must be capped to at most nowNs + 1 * unit (5.11 ms)");
-        assert(d1 - nowNs1 == unit && "Frame 1 wait duration must not exceed 1 * unit");
+        assert(d1 == nowNs1 && "Frame 1 deadline must be set to nowNs for immediate presentation");
 
         // Subtest 5B: Windowed Clamping - Floor Frame 1 deadline at nowNs when GPU execution lagged
         // GPU interpolation took 8 ms, so nativeOut (T_0 + 5.11 ms) is already in the past!
@@ -317,7 +346,60 @@ int main()
         assert(pacer.pacedFrames == 0 &&
                "TryPace on isLast must return without calling PaceFrame when scheduler is usable");
 
-        printf("  [PASS] Test 5: Windowed deadline clamping, monotonic step, and isLast deduplication verified.\n");
+        printf(
+            "  [PASS] Test 5: Zero-wait Frame 1, step spacing, monotonic step, and isLast deduplication verified.\n");
+    }
+
+    // Test 6: SchedForwarder wait tracking, pure render time isolation in NoteFrame, and Base Frame 1-step pacing
+    {
+        XeFGMainPacingAlignmentTest::SimulatedMainPacer pacer;
+
+        // Burst 1: Initial presentation at t = 1.000 s
+        const int64_t t0 = 10000000LL; // 1.0 s (10 MHz frequency)
+        pacer.NoteFrame(6, t0);
+
+        // Simulate 6X Multi-Frame Generation (5 generated frames + 1 base frame)
+        // Engine renders native frame in 17.1 ms (171,000 QPC ticks)
+        // Inside xefgSwapChainPresent:
+        // - Frame 1: presents immediately at nowNs (0 wait)
+        pacer.TsDetour(1000000000LL, 17100000LL, 6, 1, 500.0f, 1000000000LL);
+        assert(pacer.burstStepNs == 17100000LL / 6); // 2.85 ms
+        pacer.OnDetour(XeFGMainPacingAlignmentTest::FrameCallerRva, 1, 5, true, true, t0, 6);
+
+        // - Frames 2..4: scheduled via SchedForwarder (each waits 2.85 ms = 28,500 ticks)
+        for (uint32_t i = 2; i <= 4; ++i)
+        {
+            pacer.SchedForwarder(28500);
+            pacer.OnDetour(XeFGMainPacingAlignmentTest::FrameCallerRva, i, 5, true, true, t0 + i * 28500, 6);
+        }
+
+        // - Frame 5: scheduled natively by libxess_fg.dll calling SchedForwarder (2.85 ms = 28,500 ticks)
+        pacer.SchedForwarder(28500);
+        const int64_t frame5PresentQpc = t0 + 4 * 28500;
+        pacer.OnDetour(XeFGMainPacingAlignmentTest::LastFrameCallerRva, 5, 5, true, true, frame5PresentQpc, 6);
+
+        // - Base Frame: arrives 0.3 ms (3,000 ticks) after Frame 5
+        const int64_t baseArriveQpc = frame5PresentQpc + 3000;
+        auto baseOutcome =
+            pacer.OnDetour(XeFGMainPacingAlignmentTest::BaseFrameCaller1Rva, 6, 5, true, true, baseArriveQpc, 6);
+        assert(baseOutcome == XeFGMainPacingAlignmentTest::SimulatedMainPacer::PacingOutcome::PacedBaseFrame);
+        // Base Frame waited 2.85 ms - 0.3 ms = 2.55 ms (25,500 ticks), preserving Frame 5 screen duration!
+        assert(pacer.baseFrameWaitNs == 2550000LL && "Base frame must wait remaining step to protect Frame 5");
+
+        // Total CPU wait inside present = 4 * 28,500 + 25,500 = 139,500 ticks (~13.95 ms)
+        // With total cycle time of 31.05 ms (310,500 ticks), engine render time is 17.1 ms (171,000 ticks)
+        const int64_t t1 = t0 + 310500;
+        pacer.NoteFrame(6, t1);
+
+        // Verify that NoteFrame isolated pure render time (17.1 ms) instead of the inflated 31.05 ms!
+        assert(pacer.renderTimeNs == 17100000LL &&
+               "NoteFrame must isolate pure render time by subtracting presentation sleep");
+        assert(std::abs(pacer.RenderTimeMs() - 17.1) < 0.01 &&
+               "RenderTimeMs must return pure ~17.1 ms, eliminating feedback cycle lock");
+
+        printf(
+            "  [PASS] Test 6: SchedForwarder wait tracking, pure render time isolation, and Base Frame 1-step pacing "
+            "verified.\n");
     }
 
     printf("[+] All XeFGPacing Main Branch Alignment Unit Tests PASSED successfully!\n");
