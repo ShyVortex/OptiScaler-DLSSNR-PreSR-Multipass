@@ -162,10 +162,18 @@ bool EnabledForSession()
            !config->FGDLSSGAdaMfgUnlock.value_or_default() && !config->FGDLSSGAmpereMfgUnlock.value_or_default();
 }
 
+bool IsSourceOptiScaler()
+{
+    auto config = Config::Instance();
+    if (!config)
+        return false;
+    return config->XeMfgSourceValue() == XeMfgSource::OptiScaler;
+}
+
 bool Pending()
 {
     std::scoped_lock lock(g_mutex);
-    return EnabledForSession() && !g_status.Patched && !g_status.PatchFailed;
+    return AnyEnabledForSession() && !g_status.Patched && !g_status.PatchFailed;
 }
 
 unsigned int UnlockedMax()
@@ -364,7 +372,7 @@ void TryApply(HMODULE module)
     if (g_applied || g_status.Patched || g_status.PatchFailed)
         return;
 
-    if (!EnabledForSession())
+    if (!AnyEnabledForSession())
     {
         LOG_DEBUG("XeMFG unlock: disabled in configuration");
         return;
@@ -410,7 +418,9 @@ void TryApply(HMODULE module)
         }
     }
 
-    unsigned int targetCeiling = Config::Instance()->XeMfgMaxFrames.value_or(kDefaultMaxFrames);
+    // Unlock provider DLL capability up to kMaxSupportedFrames (5 generated frames / 6X FG).
+    // The active in-game multiplier is controlled dynamically via SetNumInterpolatedFrames().
+    unsigned int targetCeiling = kMaxSupportedFrames;
 
     bool result = ApplyToMemory(baseAddress, imageSize, targetCeiling, true, g_status);
     if (result)

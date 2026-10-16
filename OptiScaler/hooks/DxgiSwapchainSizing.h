@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <dxgi.h>
+#include <dxgi1_2.h>
 
 // Resolve DXGI's 0x0 "use the window's client size" descriptor before the small-swapchain
 // heuristic and before FG/interop can substitute a different HWND. Only modify our local copy.
@@ -21,6 +22,24 @@ inline bool ResolveWindowSizedSwapchain(DXGI_SWAP_CHAIN_DESC& desc)
 
     desc.BufferDesc.Width = (UINT) width;
     desc.BufferDesc.Height = (UINT) height;
+    return true;
+}
+
+inline bool ResolveWindowSizedSwapchain(DXGI_SWAP_CHAIN_DESC1& desc, HWND window)
+{
+    if (desc.Width != 0 || desc.Height != 0 || window == nullptr)
+        return false;
+
+    RECT rect {};
+    if (!GetClientRect(window, &rect))
+        return false;
+    const LONG width = rect.right - rect.left;
+    const LONG height = rect.bottom - rect.top;
+    if (width < 100 || height < 100)
+        return false;
+
+    desc.Width = (UINT) width;
+    desc.Height = (UINT) height;
     return true;
 }
 

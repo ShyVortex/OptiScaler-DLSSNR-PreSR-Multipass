@@ -2,57 +2,6 @@
 
 // Spreads Intel's generated frames out in time, so that multi frame generation
 // above 2X stops arriving as one clump followed by a gap.
-//
-// The provider already knows what the spacing should be. Once per burst it
-// works out how long a real frame took and divides it by the number of frames
-// the burst will deliver:
-//
-//     0x220254  mov  r9, [r8+8]        ; count = generated frames in this burst
-//     0x220258  lea  rcx, [r9+1]       ; count + 1 = the multiplier
-//     0x22025E  mov  rax, [rbp-0x41]   ; duration of the real frame
-//     0x220262  div  rcx
-//     0x220265  mov  r12, rax          ; -> duration / multiplier, per frame
-//
-// but then the present loop that follows hands every generated frame straight
-// to the swapchain back to back:
-//
-//     0x220280  ...                    ; loop over rbx = 1 .. count-1
-//     0x2202E8  call 0x1800025c0       ; -> jmp 0x18021f730, present one frame
-//     0x2202ED  ...
-//     0x22030A  jb   0x180220280
-//
-// and `r12` is not consumed until the loop has finished, by the FPS limiter
-// block at 0x220317 - which is itself only reached when count > 2 and two other
-// conditions hold. So the burst goes out as fast as the swapchain accepts it and
-// the limiter then holds the *last* frame of the burst back, which is what reads
-// as frames being bunched up and out of order above 2X.
-//
-// The last frame is not presented from the loop at all. It goes out from the
-// call at 0x220462, after the loop and after the provider has submitted the
-// burst, so it needs pacing of its own:
-//
-//     0x220411  call 0x180003100       ; -> jmp 0x18021ee30, submit the burst
-//     0x220445  mov  byte [rsp+0x30], 0
-//     0x220462  call 0x1800025c0       ; present the last generated frame
-//
-// Fixing it means pacing each generated frame, which means getting in between
-// the loop and the present. Every one of those presents goes through the 5 byte
-// thunk at 0x25C0, and that thunk is followed by 11 bytes of int3 padding, so
-// it is 16 bytes that contain nothing but a jump. That is room for a 14 byte
-// `jmp qword ptr [rip+0]`, so the thunk can be redirected anywhere in the
-// address space without relocating a single instruction and without a code cave.
-//
-// The thunk has two other callers (0x220A52, 0x220DAD), so the detour checks
-// the return address and paces only the two sites above; every other present is
-// forwarded untouched.
-//
-// The spacing is not invented here. The provider has a frame scheduler of its
-// own - it just never calls it for the frames the loop presents, only for the
-// burst's last one. So each of those presents is handed to 0x21EE30 with the
-// arguments the present path already has, and the provider works out the
-// presentation time itself. A wall clock does the same job when the scheduler
-// cannot be reached; waiting on the provider's D3D12 fence as well was tried and
-// then removed due to timer tick quantization overshooting.
 
 #include <windows.h>
 #ifdef _MSC_VER
@@ -62,6 +11,8 @@
 #define XE_RETURN_ADDRESS() __builtin_return_address(0)
 #endif
 
+#include <algorithm>
+#include <format>
 #include "Logger.h"
 #include "SysUtils.h"
 
@@ -71,64 +22,27 @@ namespace XeFGPacing
 
 constexpr uint32_t PresentThunkRva = 0x25C0;
 constexpr uint32_t NativePresentRva = 0x21F730;
-
-// Return address of the `call` in the burst loop - i.e. the exact identity
-// of the call site we want to pace.
 constexpr uint32_t PacedCallerRva = 0x2202ED;
-
-// The burst's last generated frame is not presented from the loop. It goes
-// out after the loop and after the provider's own submit, from the call at
-// 0x220462, with the same burst in arg5 but a different arg6 and arg7 = 0
-// instead of 1:
-//
-//     0x220445  mov  byte ptr [rsp+0x30], 0   ; arg7 = 0
-//     0x220462  call 0x25c0
-//
-// Left alone, every burst ends with two frames carrying the same timestamp:
-// at 4X the delivered pattern is 0, i, 2i, 2i instead of 0, i, 2i, 3i.
 constexpr uint32_t LastFrameCallerRva = 0x220467;
 
-// The provider does space that last frame itself - but only from the limiter
-// block at 0x220317, and only when all three of its conditions hold:
-//
-//     0x220317  cmp  byte  ptr [rsi + 0x340], 0   ; enabled
-//     0x220324  cmp  qword ptr [r8 + 8], 2        ; count > 2, i.e. 4X up
-//     0x22032F  cmp  dword ptr [r8 + 0x28], 0     ; per-burst field is 0
-//
-// Mirroring the condition keeps exactly one of us waiting on that frame
-// rather than two waits stacking into one long frame.
 constexpr uint32_t LimiterEnabledOffset = 0x340;
 constexpr uint32_t BurstLimiterField = 0x28;
 
 // --- the provider's own frame scheduler --------------------------------
 
-// 0x3100 schedules the frame: look the frame's record up in the ring at
-// ctx+0x168 by burst->tag, stamp it with the current counter, then have
-// 0x224B30 (via 0x3430) compute a presentation time and hand that time to 0x7A30.
-// Its arg5 is the frame's index in the burst.
 constexpr uint32_t SchedThunkRva = 0x3100;
 constexpr uint32_t SchedFnRva = 0x21EE30;
-
-// arg2 of the scheduler is present arg5 - 0x38, so the gate byte the
-// present path reads into r8 at 0x22040A sits at 0xC0 of it.
 constexpr uint32_t BurstGateOffset = 0xC0;
 
-// The scheduler is not always on. Its entry gate is 0xdbb0 -> 0x21ed40, and
-// the whole of it is two bytes of the context:
-//     [ctx+0x340] == 0 && [ctx+0x341] != 0
 constexpr uint32_t SchedLimiterOffset = 0x340;
 constexpr uint32_t SchedEnableOffset = 0x341;
 
-// arg4 comes out of 0x4DA0, which is a thunk for 0x224CF0.
 constexpr uint32_t RingSnapshotFnRva = 0x224CF0;
 constexpr uint32_t RingOffset = 0x168;
 
-// Every frame that gets a deadline ends up waiting in 0x7A30 -> 0x225070,
-// and the value it waits on is produced by 0x3430 -> 0x224B30.
 constexpr uint32_t TimestampThunkRva = 0x3430;
 constexpr uint32_t TimestampFnRva = 0x224B30;
 
-// The float 0x224B30 clamps, at ring + 0x1B8.
 constexpr uint32_t RingMeasuredOffset = 0x1B8;
 
 inline const uint8_t TimestampThunkExpected[16] = {
@@ -220,11 +134,35 @@ inline int64_t g_statsDeadline = 0;
 
 constexpr int64_t StatsWindowNs = 5000000000LL; // 5 s
 
-inline int64_t NsFromQpc(int64_t delta) { return g_freq.QuadPart > 0 ? (delta * 1000000000LL) / g_freq.QuadPart : 0; }
+inline int64_t NsFromQpc(int64_t delta)
+{
+    if (g_freq.QuadPart <= 0 || delta <= 0)
+        return 0;
+
+    const int64_t sec = delta / g_freq.QuadPart;
+    const int64_t rem = delta % g_freq.QuadPart;
+    return sec * 1000000000LL + (rem * 1000000000LL) / g_freq.QuadPart;
+}
 
 inline int64_t QpcFromNs(int64_t ns) { return g_freq.QuadPart > 0 ? (ns * g_freq.QuadPart) / 1000000000LL : 0; }
 
 inline double MsFromQpc(int64_t qpc) { return g_freq.QuadPart > 0 ? (qpc * 1000.0) / g_freq.QuadPart : 0.0; }
+
+struct DiagFrameRecord
+{
+    uint32_t index = 0;
+    uint32_t countPlus1 = 0;
+    int64_t nativeOutNs = 0;
+    int64_t detouredOutNs = 0;
+    int64_t medianNs = 0;
+    float ringMeasuredMs = 0.0f;
+    int64_t schedDurationUs = 0;
+    bool scheduled = false;
+};
+
+constexpr size_t DiagRingCapacity = 32;
+inline DiagFrameRecord g_diagRing[DiagRingCapacity] {};
+inline uint64_t g_diagSeq = 0;
 
 inline void ResetStats(int64_t nowQpc)
 {
@@ -248,6 +186,40 @@ inline void ReportStats(int64_t multiplier)
              MsFromQpc(g_gapSumQpc / g_gapCount), MsFromQpc(g_gapMinQpc), MsFromQpc(g_gapMaxQpc), g_gapCount,
              g_schedCalls, g_schedRefused, g_schedCalls > 0 ? MsFromQpc(g_schedWaitQpc / g_schedCalls) : 0.0, g_tsCalls,
              g_tsRebased, g_tsClamped, g_renderTimeNs / 1000000.0, g_fedFrameTimeMs);
+
+    if (g_diagSeq > 0)
+    {
+        std::string trace;
+        const uint64_t count = (g_diagSeq < DiagRingCapacity) ? g_diagSeq : DiagRingCapacity;
+        const uint64_t start = (g_diagSeq >= count) ? (g_diagSeq - count) : 0;
+        int lastBurstStart = -1;
+        for (int i = static_cast<int>(count) - 1; i >= 0; i--)
+        {
+            const auto& r = g_diagRing[(start + i) % DiagRingCapacity];
+            if (r.index == 1)
+            {
+                lastBurstStart = i;
+                break;
+            }
+        }
+
+        if (lastBurstStart >= 0)
+        {
+            const float ringMs = g_diagRing[(start + lastBurstStart) % DiagRingCapacity].ringMeasuredMs;
+            const double medMs = g_diagRing[(start + lastBurstStart) % DiagRingCapacity].medianNs / 1000000.0;
+            for (uint64_t i = static_cast<uint64_t>(lastBurstStart); i < count; i++)
+            {
+                const auto& r = g_diagRing[(start + i) % DiagRingCapacity];
+                if (i > static_cast<uint64_t>(lastBurstStart) && r.index == 1)
+                    break;
+
+                trace +=
+                    std::format(" [f{}/{}: nat {:.2f}ms det {:.2f}ms wait {:.2f}ms]", r.index, r.countPlus1,
+                                r.nativeOutNs / 1000000.0, r.detouredOutNs / 1000000.0, r.schedDurationUs / 1000.0);
+            }
+            LOG_INFO("XeFG recent burst trace ({}X, ring {:.2f}ms, med {:.2f}ms):{}", multiplier, ringMs, medMs, trace);
+        }
+    }
 }
 
 inline void RecordGap(int64_t endQpc)
@@ -314,12 +286,20 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
         return;
 
     if (g_lastBurstQpc != 0)
-        PushPeriod(NsFromQpc(nowQpc - g_lastBurstQpc));
-
-    if (g_periodNs > 0)
     {
-        const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
-        g_renderTimeNs = g_periodNs > blockNs ? g_periodNs - blockNs : 0;
+        const int64_t totalDeltaNs = NsFromQpc(nowQpc - g_lastBurstQpc);
+
+        if (totalDeltaNs >= 1000000LL && totalDeltaNs <= 500000000LL)
+        {
+            const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
+
+            // Subtract presentation wait duration from total burst delta BEFORE median filtering
+            // so g_renderTimeNs reflects pure unblocked engine render + GPU interpolation time,
+            // completely eliminating the self-referential wait inflation feedback loop.
+            const int64_t pureNs = (totalDeltaNs > blockNs + 2000000LL) ? (totalDeltaNs - blockNs) : 2000000LL;
+            PushPeriod(pureNs);
+            g_renderTimeNs = g_periodNs;
+        }
     }
 
     g_burstBlockQpc = 0;
@@ -356,13 +336,13 @@ inline void PaceFrame(uint64_t index, uint64_t count)
 {
     const int64_t multiplier = static_cast<int64_t>(count) + 1;
 
-    if (multiplier <= 2)
-        return;
-
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
 
     NoteFrame(index, count, now.QuadPart);
+
+    if (multiplier <= 2)
+        return;
 
     if (index <= 1)
     {
@@ -400,6 +380,30 @@ inline void PaceFrame(uint64_t index, uint64_t count)
     RecordGap(end.QuadPart);
 }
 
+inline bool SchedForwarder(void* ctx, void* burst, uint8_t gate, void* timing, uint32_t index)
+{
+    if (g_schedNative == nullptr)
+        return false;
+
+    LARGE_INTEGER before;
+    QueryPerformanceCounter(&before);
+
+    const bool scheduled = g_schedNative(ctx, burst, gate, timing, index);
+
+    LARGE_INTEGER after;
+    QueryPerformanceCounter(&after);
+
+    const int64_t waitQpc = after.QuadPart - before.QuadPart;
+    g_schedCalls++;
+    g_schedWaitQpc += waitQpc;
+    g_burstBlockQpc += waitQpc;
+
+    if (!scheduled)
+        g_schedRefused++;
+
+    return scheduled;
+}
+
 inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
 {
     if (g_schedNative == nullptr || g_ringSnapshot == nullptr)
@@ -418,18 +422,22 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
 
     NoteFrame(index, count, before.QuadPart);
 
-    const bool scheduled = g_schedNative(ctx, burst, gate, timing, static_cast<uint32_t>(index));
+    const bool scheduled = SchedForwarder(ctx, burst, gate, timing, static_cast<uint32_t>(index));
 
     LARGE_INTEGER after;
     QueryPerformanceCounter(&after);
 
-    g_schedCalls++;
+    const int64_t waitQpc = after.QuadPart - before.QuadPart;
 
-    if (!scheduled)
-        g_schedRefused++;
-
-    g_schedWaitQpc += after.QuadPart - before.QuadPart;
-    g_burstBlockQpc += after.QuadPart - before.QuadPart;
+    if (g_diagSeq > 0)
+    {
+        auto& d = g_diagRing[(g_diagSeq - 1) % DiagRingCapacity];
+        if (d.index == index)
+        {
+            d.schedDurationUs = g_freq.QuadPart > 0 ? (waitQpc * 1000000LL) / g_freq.QuadPart : 0;
+            d.scheduled = scheduled;
+        }
+    }
 
     if (g_schedLogged < SchedLogLimit && index != g_schedLastIndex)
     {
@@ -443,8 +451,6 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
                  reinterpret_cast<uint8_t*>(ctx)[SchedEnableOffset], *reinterpret_cast<uint64_t*>(timing),
                  *reinterpret_cast<uint64_t*>(timing + 8));
     }
-
-    RecordGap(after.QuadPart);
 }
 
 inline bool ProviderPacesLastFrame(void* ctx, const uint8_t* burst, uint64_t count)
@@ -489,6 +495,10 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
             return;
     }
 
+    // When Intel's scheduler is usable, intermediate frames (1 .. count-1) are scheduled here via
+    // ScheduleFrame, and the final generated frame (index = count, isLast = true) is ALREADY
+    // scheduled by Intel's native call at 0x220411 (which invokes 0x3100 -> TsDetour for index = count)
+    // right before 0x220462 (LastFrameCallerRva). Returning here for isLast avoids double-waiting.
     if (g_schedNative != nullptr && SchedulerUsable(ctx))
     {
         if (!isLast)
@@ -510,40 +520,71 @@ inline int64_t Detour(void* ctx, uint32_t a2, uint32_t a3, uint64_t a4, void* ar
         auto* caller = reinterpret_cast<uint8_t*>(XE_RETURN_ADDRESS());
 
         if (caller == g_base + PacedCallerRva)
+        {
             TryPace(ctx, arg5, arg6, arg7, false);
+        }
         else if (caller == g_base + LastFrameCallerRva)
+        {
             TryPace(ctx, arg5, arg6, arg7, true);
+        }
+        else if (g_lastMultiplier >= 2 && g_burstStepNs > 0 && g_lastPacedQpc != 0)
+        {
+            // Caller is the Base Frame present at 0x220A52 / 0x220DAD.
+            // Wait one g_burstStepNs from the presentation of Frame count so that Frame count
+            // stays on screen for a full step rather than being overwritten in 0.3 ms!
+            const int64_t targetQpc = g_lastPacedQpc + QpcFromNs(g_burstStepNs);
+            LARGE_INTEGER before;
+            QueryPerformanceCounter(&before);
+
+            if (before.QuadPart < targetQpc)
+            {
+                WaitUntil(targetQpc);
+                LARGE_INTEGER after;
+                QueryPerformanceCounter(&after);
+                g_burstBlockQpc += (after.QuadPart - before.QuadPart);
+            }
+        }
     }
 
-    return g_native(ctx, a2, a3, a4, arg5, arg6, arg7);
-}
+    const int64_t res = g_native(ctx, a2, a3, a4, arg5, arg6, arg7);
 
-inline bool SchedForwarder(void* ctx, void* burst, uint8_t gate, void* timing, uint32_t index)
-{
-    return g_schedNative != nullptr && g_schedNative(ctx, burst, gate, timing, index);
+    if (g_enabled)
+    {
+        LARGE_INTEGER end;
+        QueryPerformanceCounter(&end);
+        RecordGap(end.QuadPart);
+    }
+
+    return res;
 }
 
 inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32_t index, uint32_t countPlus1)
 {
     void* const result = g_tsNative(a1, out, lookup, timing, index, countPlus1);
 
-    if (out == nullptr || timing == nullptr || index == 0 || index > 5 || countPlus1 < 2)
+    if (out == nullptr || timing == nullptr || index == 0 || index > 5 || countPlus1 < 3)
         return result;
 
+    const int64_t nativeOut = *out;
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-    const int64_t unit = median / static_cast<int64_t>(countPlus1);
 
-    if (unit <= 0)
+    // Calculate target step duration based on pure unblocked render time if available, or ring median
+    const int64_t refNs = (g_renderTimeNs > 0) ? g_renderTimeNs : median;
+    const int64_t stepNs = std::clamp(refNs / static_cast<int64_t>(countPlus1), 1000000LL, 20000000LL);
+
+    if (stepNs <= 0)
         return result;
 
     g_tsCalls++;
+
+    LARGE_INTEGER nowQpc {};
+    QueryPerformanceCounter(&nowQpc);
+    const int64_t nowNs = NsFromQpc(nowQpc.QuadPart);
 
     const bool fresh = index == 1 || index <= g_lastTsIndex || countPlus1 != g_lastTsCountPlus1;
 
     if (fresh)
     {
-        int64_t nativeUnit = unit;
-
         if (g_ring != nullptr)
         {
             float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
@@ -554,26 +595,42 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
             const int64_t fNs = static_cast<int64_t>(f * 1000000.0f);
             const int64_t clampedUnit = fNs / static_cast<int64_t>(countPlus1);
 
-            if (clampedUnit < nativeUnit)
-            {
-                nativeUnit = clampedUnit;
+            if (clampedUnit < stepNs)
                 g_tsClamped++;
-            }
         }
 
-        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
-        g_burstStepNs = unit;
+        // Frame 1 presents immediately when GPU interpolation finishes (0 wait!),
+        // because the display was already occupied by the Base Frame during the preceding
+        // CPU submission + GPU interpolation window (~16 ms).
+        g_nextDeadlineNs = nowNs;
+        g_burstStepNs = stepNs;
         g_tsRebased++;
     }
     else
     {
         g_nextDeadlineNs += g_burstStepNs;
+
+        // If a previous frame took longer than expected and less than half a step remains,
+        // step forward from current time so the frame never dumps in 0 ms.
+        if (nowNs > 0 && g_nextDeadlineNs < nowNs + (g_burstStepNs / 2))
+            g_nextDeadlineNs = nowNs + g_burstStepNs;
     }
 
     g_lastTsIndex = index;
     g_lastTsCountPlus1 = countPlus1;
 
     *out = g_nextDeadlineNs;
+
+    const uint64_t slot = g_diagSeq++;
+    auto& d = g_diagRing[slot % DiagRingCapacity];
+    d.index = index;
+    d.countPlus1 = countPlus1;
+    d.nativeOutNs = nativeOut;
+    d.detouredOutNs = g_nextDeadlineNs;
+    d.medianNs = median;
+    d.ringMeasuredMs = (g_ring != nullptr) ? *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset) : 0.0f;
+    d.schedDurationUs = 0;
+    d.scheduled = false;
 
     return result;
 }
@@ -684,6 +741,7 @@ inline bool Install(uint8_t* base)
     g_tsCalls = 0;
     g_tsRebased = 0;
     g_tsClamped = 0;
+    g_diagSeq = 0;
     ResetStats(0);
 
     void* native = nullptr;
@@ -751,6 +809,12 @@ inline void Uninstall()
         g_tsHooked = false;
     }
 
+    g_ring = nullptr;
+    g_nextDeadlineNs = 0;
+    g_burstStepNs = 0;
+    g_lastTsIndex = 0;
+    g_lastTsCountPlus1 = 0;
+    g_diagSeq = 0;
     g_enabled = false;
     g_native = nullptr;
     g_schedNative = nullptr;

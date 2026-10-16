@@ -869,7 +869,11 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         return result;
     }
 
-    if (pDesc->Height < 100 || pDesc->Width < 100)
+    DXGI_SWAP_CHAIN_DESC1 localDesc {};
+    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+    const bool sizeToWindow = ResolveWindowSizedSwapchain(localDesc, hWnd);
+
+    if (localDesc.Height < 100 || localDesc.Width < 100)
     {
         LOG_WARN("Overlay call! Width: {}, Height: {}", pDesc->Width, pDesc->Height);
         HRESULT result;
@@ -887,8 +891,9 @@ HRESULT DxgiFactoryHooks::CreateSwapChainForHwnd(IDXGIFactory2* realFactory, IUn
         return result;
     }
 
-    DXGI_SWAP_CHAIN_DESC1 localDesc {};
-    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+    if (sizeToWindow)
+        LOG_INFO("CreateSwapChainForHwnd: 0x0 size-to-window descriptor, Hwnd: {:X}, Count: {}, wrapping normally",
+                 (size_t) hWnd, pDesc->BufferCount);
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}",
               localDesc.Width, localDesc.Height, (UINT) localDesc.Format, localDesc.BufferCount, localDesc.Flags,
@@ -1738,7 +1743,11 @@ HRESULT DxgiFactoryHooks::DLSSGCreateSwapChainForHwnd(IDXGIFactory2* realFactory
         return result;
     }
 
-    if (pDesc->Height < 100 || pDesc->Width < 100)
+    DXGI_SWAP_CHAIN_DESC1 localDesc {};
+    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+    const bool sizeToWindow = ResolveWindowSizedSwapchain(localDesc, hWnd);
+
+    if (localDesc.Height < 100 || localDesc.Width < 100)
     {
         LOG_WARN("Overlay call! Width: {}, Height: {}", pDesc->Width, pDesc->Height);
         HRESULT result;
@@ -1756,8 +1765,9 @@ HRESULT DxgiFactoryHooks::DLSSGCreateSwapChainForHwnd(IDXGIFactory2* realFactory
         return result;
     }
 
-    DXGI_SWAP_CHAIN_DESC1 localDesc {};
-    memcpy(&localDesc, pDesc, sizeof(DXGI_SWAP_CHAIN_DESC1));
+    if (sizeToWindow)
+        LOG_INFO("DLSSGCreateSwapChainForHwnd: 0x0 size-to-window descriptor, Hwnd: {:X}, Count: {}, wrapping normally",
+                 (size_t) hWnd, pDesc->BufferCount);
 
     LOG_DEBUG("Width: {}, Height: {}, Format: {}, Count: {}, Flags: {:X}, Hwnd: {:X}, SkipWrapping: {}",
               localDesc.Width, localDesc.Height, (UINT) localDesc.Format, localDesc.BufferCount, localDesc.Flags,

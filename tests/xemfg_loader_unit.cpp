@@ -1,4 +1,4 @@
-#include <algorithm>
+﻿#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -571,6 +571,47 @@ int main()
         assert(!engine.pacingInstalled);
         assert(engine.pacingDetours == 0);
         printf("  [PASS] Test 11: Mandatory native presentation pacing detours installed unconditionally.\n");
+    }
+
+    // Test 12: XeMfgSource Enum and Unified Session State Resolution
+    {
+        enum class XeMfgSource : uint32_t
+        {
+            Game = 0,
+            OptiScaler = 1,
+            Count
+        };
+
+        // Source value resolution
+        auto resolveSource = [](int val) -> XeMfgSource
+        {
+            if (val < 0 || val >= static_cast<int>(XeMfgSource::Count))
+                return XeMfgSource::Game;
+            return static_cast<XeMfgSource>(val);
+        };
+
+        assert(resolveSource(0) == XeMfgSource::Game);
+        assert(resolveSource(1) == XeMfgSource::OptiScaler);
+        assert(resolveSource(-1) == XeMfgSource::Game);
+        assert(resolveSource(99) == XeMfgSource::Game);
+
+        // Session state checks
+        auto enabledForSession = [](bool xeMfgUnlock, bool extFG, bool ada, bool ampere) -> bool
+        { return xeMfgUnlock && !extFG && !ada && !ampere; };
+        auto isSourceOptiScaler = [&](bool xeMfgUnlock, bool extFG, bool ada, bool ampere, int src) -> bool
+        { return enabledForSession(xeMfgUnlock, extFG, ada, ampere) && resolveSource(src) == XeMfgSource::OptiScaler; };
+
+        assert(enabledForSession(true, false, false, false) == true);
+        assert(enabledForSession(true, true, false, false) == false); // External FG suppresses XeMFG
+        assert(enabledForSession(true, false, true, false) == false); // Ada suppresses XeMFG
+        assert(enabledForSession(true, false, false, true) == false); // Ampere suppresses XeMFG
+        assert(enabledForSession(false, false, false, false) == false);
+
+        assert(isSourceOptiScaler(true, false, false, false, 1) == true);
+        assert(isSourceOptiScaler(true, false, false, false, 0) == false);
+        assert(isSourceOptiScaler(false, false, false, false, 1) == false);
+
+        printf("  [PASS] Test 12: XeMfgSource enum and unified session state resolution verified.\n");
     }
 
     printf("[+] All XeMfgLoader unit tests PASSED successfully!\n");

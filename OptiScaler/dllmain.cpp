@@ -43,6 +43,7 @@
 #include <hooks/Streamline_Hooks.h>
 
 #include <nvapi/NvApiHooks.h>
+#include <nvapi/fakenvapi.h>
 
 #include "spoofing/User32_Spoofing.h"
 
@@ -1518,8 +1519,6 @@ static void CheckQuirks(bool isNvidia)
     {
         Config::Instance()->FGXeFGForceBorderless.set_volatile_value(true);
     }
-    else
-        quirks.reset(GameQuirk::ForceBorderlessWhenUsingXeFG);
 
     if (quirks & GameQuirk::OverrideVsyncWhenUsingXeFG && !Config::Instance()->OverrideVsync.has_value() &&
         State::Instance().activeFgOutput == FGOutput::XeFG && State::Instance().activeFgInput != FGInput::NoFG &&
@@ -1527,8 +1526,6 @@ static void CheckQuirks(bool isNvidia)
     {
         Config::Instance()->OverrideVsync.set_volatile_value(true);
     }
-    else
-        quirks.reset(GameQuirk::OverrideVsyncWhenUsingXeFG);
 
     if (quirks & GameQuirk::DisableResizeSkip && !Config::Instance()->FGSkipResizeBuffers.has_value())
     {
@@ -2013,16 +2010,30 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                      (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
-        const bool xeMfgUnlock = XeMfgLoader::EnabledForSession();
-        if (xeMfgUnlock && !State::Instance().externalFrameGeneration)
+        const bool xeMfgActive = XeMfgLoader::EnabledForSession();
+        if (xeMfgActive && !State::Instance().externalFrameGeneration)
         {
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
-            cfg->FGInput.set_volatile_value(FGInput::DLSSG);
             cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
-            LOG_INFO("XeMfgLoader: XeMFG unlock active, auto-configuring pipeline (FGInput=DLSSG, FGOutput=XeFG, "
-                     "FGEnabled=true)");
+            fakenvapi::init(true);
+
+            if (XeMfgLoader::IsSourceOptiScaler())
+            {
+                cfg->FGInput.set_volatile_value(FGInput::Upscaler);
+                const int maxFrames = std::clamp(cfg->XeMfgMaxFrames.value_or(2), 1, 5);
+                cfg->FGXeFGInterpolationCount.set_volatile_value(maxFrames);
+                LOG_INFO("XeMfgLoader: XeMFG active (Source=OptiScaler), auto-configuring pipeline (FGInput=Upscaler, "
+                         "FGOutput=XeFG, InterpolationCount={}, FGEnabled=true)",
+                         maxFrames);
+            }
+            else
+            {
+                cfg->FGInput.set_volatile_value(FGInput::DLSSG);
+                LOG_INFO("XeMfgLoader: XeMFG active (Source=Game), auto-configuring pipeline (FGInput=DLSSG, "
+                         "FGOutput=XeFG, FGEnabled=true)");
+            }
         }
 
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();
@@ -2035,6 +2046,24 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         if (State::Instance().activeFgInput == FGInput::NvngxFG)
             State::Instance().activeFgOutput = FGOutput::NoFG;
+
+        if (State::Instance().activeFgOutput == FGOutput::XeFG && State::Instance().activeFgInput != FGInput::NoFG &&
+            State::Instance().activeFgInput != FGInput::NvngxFG)
+        {
+            auto exeQuirks = getQuirksForExe(State::Instance().gameExe);
+            if ((exeQuirks & GameQuirk::ForceBorderlessWhenUsingXeFG) &&
+                !Config::Instance()->FGXeFGForceBorderless.has_value())
+            {
+                Config::Instance()->FGXeFGForceBorderless.set_volatile_value(true);
+                LOG_INFO("Applied ForceBorderlessWhenUsingXeFG quirk for XeFG output");
+            }
+
+            if ((exeQuirks & GameQuirk::OverrideVsyncWhenUsingXeFG) && !Config::Instance()->OverrideVsync.has_value())
+            {
+                Config::Instance()->OverrideVsync.set_volatile_value(true);
+                LOG_INFO("Applied OverrideVsyncWhenUsingXeFG quirk for XeFG output");
+            }
+        }
 
         // Not foolproof
         // calls LoadLibraryExW inside DllMain but seems mostly fine if we only call NvAPI_GetInterfaceVersionString

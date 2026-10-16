@@ -221,6 +221,13 @@ enum class LowLatencyMode : uint32_t
     Reflex
 };
 
+enum class XeMfgSource : uint32_t
+{
+    Game = 0,
+    OptiScaler = 1,
+    Count
+};
+
 class Config
 {
   public:
@@ -769,10 +776,23 @@ class Config
     CustomOptional<bool> FGXeFGDebugView { false };
     CustomOptional<bool> FGXeFGForceBorderless { false };
 
-    // XeMFG Unlock
+    // XeMFG Unlock & Unified Pipeline
     CustomOptional<bool> XeMfgUnlock { false };
-    CustomOptional<int> XeMfgMaxFrames { 3 };
+    CustomOptional<int> XeMfgSourceType { static_cast<int>(XeMfgSource::Game) };
+    CustomOptional<int> XeMfgMaxFrames { 2 };
     CustomOptional<bool> XeMfgExtraPacing { false }; // Optional native DXGI VBlank pacing, not provider thunk hooks
+
+    // Legacy XeMFG-SR migration holders (deprecated, migrated to XeMfgUnlock + XeMfgSourceType)
+    CustomOptional<bool> XeMfgSrEnable { false };
+    CustomOptional<int> XeMfgSrGeneratedFrames { 2 };
+
+    XeMfgSource XeMfgSourceValue() const
+    {
+        int val = XeMfgSourceType.value_or(static_cast<int>(XeMfgSource::Game));
+        if (val < 0 || val >= static_cast<int>(XeMfgSource::Count))
+            return XeMfgSource::Game;
+        return static_cast<XeMfgSource>(val);
+    }
 
     // DLSSG
     CustomOptional<int> FGDLSSGInterpolationCount { 1 }; // For Opti's own SL instance

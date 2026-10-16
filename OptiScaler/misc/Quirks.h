@@ -337,6 +337,11 @@ static const QuirkEntry quirkTable[] = {
     QUIRK_ENTRY("metroexodus.exe", GameQuirk::DisableDxgiSpoofing, GameQuirk::ForceBorderlessWhenUsingXeFG,
                 GameQuirk::ForceAutoExposure, GameQuirk::DisableHudfix),
 
+    // Helldivers 2
+    // ForceBorderless required for XeFG / XeMFG-SR interpolation (Intel XeSS-FG disables interpolation in exclusive
+    // fullscreen)
+    QUIRK_ENTRY("helldivers2.exe", GameQuirk::ForceBorderlessWhenUsingXeFG),
+
     // Star Wars: Outlaws
     // SL spoof enough to unlock everything DLSS, Hudfix incompatible
     QUIRK_ENTRY("outlaws.exe", GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs,

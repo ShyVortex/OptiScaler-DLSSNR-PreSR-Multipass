@@ -36,6 +36,9 @@ enum class Failure
 
 Status LastStatus();
 bool EnabledForSession();
+bool IsSourceOptiScaler();
+inline bool SrEnabledForSession() { return EnabledForSession() && IsSourceOptiScaler(); }
+inline bool AnyEnabledForSession() { return EnabledForSession(); }
 inline bool IsEnabled() { return EnabledForSession(); }
 bool Pending();
 

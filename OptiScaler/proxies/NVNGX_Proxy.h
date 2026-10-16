@@ -42,7 +42,7 @@ inline static NVSDK_NGX_Result __stdcall Hooked_Dx12_GetFeatureRequirements(
 
     auto result = Original_D3D12_GetFeatureRequirements(Adapter, FeatureDiscoveryInfo, OutSupported);
 
-    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
+    const bool xeMfgActive = XeMfgLoader::AnyEnabledForSession();
     if (result == NVSDK_NGX_Result_Success && FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling)
     {
         LOG_INFO("Spoofing support!");
@@ -74,7 +74,7 @@ inline static NVSDK_NGX_Result __stdcall Hooked_Dx11_GetFeatureRequirements(
 
     auto result = Original_D3D11_GetFeatureRequirements(Adapter, FeatureDiscoveryInfo, OutSupported);
 
-    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
+    const bool xeMfgActive = XeMfgLoader::AnyEnabledForSession();
     if (result == NVSDK_NGX_Result_Success && FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling)
     {
         LOG_INFO("Spoofing support!");
@@ -106,7 +106,7 @@ inline static NVSDK_NGX_Result __stdcall Hooked_Vulkan_GetFeatureRequirements(
 
     auto result = Original_Vulkan_GetFeatureRequirements(Instance, PhysicalDevice, FeatureDiscoveryInfo, OutSupported);
 
-    const bool xeMfgActive = XeMfgLoader::EnabledForSession();
+    const bool xeMfgActive = XeMfgLoader::AnyEnabledForSession();
     if (result == NVSDK_NGX_Result_Success && FeatureDiscoveryInfo->FeatureID == NVSDK_NGX_Feature_SuperSampling)
     {
         LOG_INFO("Spoofing support!");

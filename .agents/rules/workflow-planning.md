@@ -5,29 +5,78 @@ description: Implementation planning, task progression, testing, and explicit ap
 
 # Implementation Planning & Task Progression Rules
 
-1. **Task Division**:
-   - Every implementation plan MUST divide work into clear, discrete, sequential tasks (e.g. Task 1, Task 2, etc.).
+1. **Mandatory Prior Issue Documentation Audit (`docs/issues/`) Before Proposing Any Solution (Pre-Proposal Gate)**:
+   - **Audit Prior to Proposing Solutions (Not Just at Implementation Planning)**:
+     - The agent MUST NOT wait until creating an implementation plan to check previous issues and historical investigations.
+     - BEFORE **proposing, pitching, suggesting, or discussing ANY solution, fix, detour, or workaround** to the user in chat, and before formulating any triage hypothesis or implementation plan, the agent MUST FIRST search, inspect, and cross-reference:
+       - Existing issue documentation in `docs/issues/` corresponding to the domain of the user request:
+         - `docs/issues/FG/` — Frame Generation (DLSS-G, FSR-FG, XeFG, Smooth Motion, external proxies, presentation pacing detours)
+         - `docs/issues/NR/` — Neural Rendering (DLSS-NR, Pre-SR/Post-SR pipelines, multi-mip textures, format bouncing)
+         - `docs/issues/SR/` — Super Resolution (DLSS, FSR, XeSS)
+         - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
+       - Historical git commit logs, commit messages, and previous triage investigations in the repository (`git log -S`, `git log -G`, `git log --grep`).
+   - **Strict Prohibition on Repeating Previously Attempted or Failed Solutions**:
+     - The primary objective of this pre-proposal audit is to **avoid repeating an already previously attempted solution**.
+     - The agent MUST actively verify whether a candidate fix, formula, clamp, detour, or approach was already attempted previously.
+     - If an approach was already tried and resulted in documented failures, regressions, or user rejection (e.g. capping `g_burstStepNs` in `TsDetour`, passing raw fluctuating swapchain deltas, or blocking the engine render thread):
+       - The agent is **STRICTLY PROHIBITED** from proposing, recommending, or re-implementing that same solution again.
+       - The agent must explicitly acknowledge the prior failure, explain why it failed based on the documented evidence, and formulate a fundamentally sound solution that respects verified invariants.
+   - **Applies to Every Conversational Turn**:
+     - This audit gate applies to **every conversational suggestion, triage idea, and diagnostic discussion**, NOT just formal implementation plans.
+     - Checking previous issues when creating an implementation plan is too late—the audit MUST occur before any solution is proposed to the user in conversation.
+     - This rule is critical across new agent chat sessions and context compactions where conversational transcript history is not directly visible in context.
 
-2. **Mandatory Issue Triage & Validity Documentation**:
+2. **Task Division & Single-Task Scoping**:
+   - Every implementation plan MUST divide work into clear, discrete, sequential tasks (e.g. Task 1, Task 2, etc.).
+   - Tasks must be atomic, modular, and independently verifiable.
+   - Chaining, bundling, or auto-advancing across tasks in the same turn is strictly prohibited.
+
+3. **Mandatory Dedicated Implementation Plan File in Brain**:
+   - Every implementation plan MUST be written to and maintained in a dedicated file in the agent's brain directory (`<appDataDir>/brain/<conversation-id>/`, e.g., `implementation_plan.md` or a descriptive task plan file) before execution begins.
+   - The agent MUST keep this plan file continuously updated, marking tasks as completed (`[x]`) as work progresses, so that the agent and user can always reference it across turns, model changes, and context compactions without losing execution state or confusing ongoing initiatives.
+
+4. **Mandatory Issue Triage & Validity Documentation**:
    - Every implementation plan MUST explicitly document:
      - **Reported Issue**: The exact bug, defect, or unexpected behavior reported by the user or discovered in the field.
      - **Issue Validity Assessment**: A rigorous analysis verifying whether the issue is a genuine defect/bug in the codebase vs. a user misconfiguration, unsupported environment, or operational error.
      - **Solution Applied / Proposed**: The precise technical mechanism and architectural changes designed to solve the underlying defect.
 
-3. **Mandatory Issue Documentation in `docs/issues/`**:
+5. **Mandatory Issue Documentation in `docs/issues/`**:
    - Every resolved or investigated defect/issue MUST be preserved in a dedicated markdown document under the `docs/issues/` directory, organized into domain subfolders:
      - `docs/issues/SR/` — Super Resolution (DLSS, FSR, XeSS)
      - `docs/issues/FG/` — Frame Generation (DLSS-G, FSR-FG, XeFG, Smooth Motion, external proxies)
      - `docs/issues/RR/` — Ray Reconstruction (DLSS-D)
      - `docs/issues/NR/` — Neural Rendering (DLSS-NR)
    - The document must record the environment, reported symptoms, validity assessment, root cause, applied solution, and test verification.
+   - **Mandatory Hardware & OS Accuracy Verification**:
+     - When writing the Overview & Environment section of any report under `docs/issues/`, the agent MUST ALWAYS actively check and verify real system and hardware details using terminal commands (e.g. `uname -r`, `/etc/os-release`, `nvidia-smi`) before authoring the document.
+     - Never guess, estimate, or copy stale/placeholder OS distributions, kernel versions, GPU models, or driver versions into issue documentation. Accurate, verified environmental metadata is mandatory.
 
-4. **Mandatory Unit Tests**:
+6. **Mandatory Unit Tests & Verification Protocol**:
    - Every implementation plan MUST feature automated unit tests to validate each component or enhancement.
-   - All existing and new unit tests must compile and pass cleanly before considering a task or implementation complete.
+   - All existing and new unit tests must compile and pass cleanly before considering a task complete.
+   - Before completing any task touching C++ source or header files:
+     - Run `clang-format --dry-run --Werror <modified_files>` to guarantee zero style violations.
+     - Verify UTF-8 BOM (`\xef\xbb\xbf`) on all modified C++ files via python or bash check before committing.
 
-5. **Explicit Approval Requirements**:
-   - **Pre-execution Approval**: The agent MUST NOT proceed to execution without explicit user approval of the implementation plan.
-   - **Inter-task Approval**: The agent MUST pause and obtain explicit user approval between tasks before proceeding to subsequent tasks.
+7. **Explicit Approval Requirements & Hard-Blocking Inter-Task Gates (`ask_question`)**:
+   - **Pre-execution Approval**:
+     - The agent MUST NOT proceed to execution without explicit user approval of the implementation plan.
+     - When presenting an implementation plan, the agent must present the plan and await the user's confirmation before executing any code changes.
+   - **Mandatory Hard-Blocking Inter-Task Gate via `ask_question`**:
+     - The agent is **STRICTLY FORBIDDEN** from chaining multiple tasks in a single turn or proceeding to Task N+1 without receiving an explicit user response through `ask_question`.
+     - Upon completing the work, unit tests, and git commit for any given task (Task N):
+       1. The agent MUST update `implementation_plan.md` in the brain directory, marking Task N as completed `[x]`.
+       2. The agent MUST immediately invoke the `ask_question` tool:
+          - `question`: "Task N (<Task Title>) is completed, verified with unit tests, and committed. How would you like to proceed?"
+          - `options`:
+            - `"(Recommended) Proceed to Task N+1: <Task Title>"`
+            - `"Pause execution to inspect and review changes"`
+       3. The `ask_question` tool renders an interactive modal that **hard-blocks the IDE runtime** until the user selects an option.
+       4. The agent MUST NOT call any file-modification tools (`replace_file_content`, `write_to_file`) or issue git commits for subsequent tasks before the user explicitly submits their decision via `ask_question`.
 
-
+8. **Mandatory User Confirmation Gate Before Updating `.agents` Architecture & Context**:
+   - `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` represent verified institutional memory and permanent architectural invariants.
+   - **Strict Prohibition on Premature Updates**: The agent MUST NEVER update `.agents/rules/optiscaler-architecture.md` or `.agents/CONTEXT.md` during development, triage, or unverified task completion.
+   - **Explicit User Confirmation Required**: These files MUST ONLY be updated **after** the user explicitly tests and confirms in real gameplay/execution that the solution or feature is working as intended.
+   - **Active Investigation Artifacts**: During implementation and testing, all triage, findings, root cause analysis, and test results belong strictly in `docs/issues/`, unit tests (`tests/`), and the implementation plan.

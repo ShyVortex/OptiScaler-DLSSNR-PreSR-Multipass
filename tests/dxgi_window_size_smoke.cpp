@@ -60,6 +60,38 @@ try
     local.OutputWindow = threshold.hwnd;
     expect(ResolveWindowSizedSwapchain(local) && local.BufferDesc.Width == 100, "100px boundary rejected");
 
+    DXGI_SWAP_CHAIN_DESC1 source1 {};
+    source1.BufferCount = 2;
+    source1.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    source1.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    source1.SampleDesc.Count = 1;
+    source1.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+
+    auto local1 = source1;
+    expect(ResolveWindowSizedSwapchain(local1, game.hwnd), "DESC1 normal hidden game window rejected");
+    expect(local1.Width == 640 && local1.Height == 360, "DESC1 wrong client dimensions");
+    expect(source1.Width == 0 && source1.Height == 0, "DESC1 caller descriptor changed");
+
+    local1 = source1;
+    expect(!ResolveWindowSizedSwapchain(local1, tiny.hwnd) && local1.Width == 0, "DESC1 tiny helper window accepted");
+
+    local1 = source1;
+    expect(!ResolveWindowSizedSwapchain(local1, nullptr), "DESC1 null HWND accepted");
+
+    local1 = source1;
+    expect(!ResolveWindowSizedSwapchain(local1, reinterpret_cast<HWND>(static_cast<INT_PTR>(-1))),
+           "DESC1 invalid HWND accepted");
+
+    local1 = source1;
+    local1.Width = 32;
+    local1.Height = 32;
+    expect(!ResolveWindowSizedSwapchain(local1, game.hwnd) && local1.Width == 32,
+           "DESC1 explicit tiny size overridden");
+
+    local1 = source1;
+    expect(ResolveWindowSizedSwapchain(local1, threshold.hwnd) && local1.Width == 100 && local1.Height == 100,
+           "DESC1 100px boundary rejected");
+
     // Verify the actual legacy DXGI contract with WARP, without injecting into a game or showing UI.
     ComPtr<ID3D11Device> device;
     check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
@@ -82,10 +114,23 @@ try
         expect(resolved.BufferDesc.Width == 640 && resolved.BufferDesc.Height == 360,
                "DXGI raw/normalized descriptors disagree");
     }
-    expect(IsCompositionWindow(game.hwnd), "own hidden composition window rejected");
-    expect(!IsCompositionWindow(tiny.hwnd) && !IsCompositionWindow(nullptr), "invalid composition window accepted");
+
     ComPtr<IDXGIFactory2> factory2;
     check(factory.As(&factory2));
+    for (bool normalize : { false, true })
+    {
+        auto desc1 = source1;
+        if (normalize)
+            ResolveWindowSizedSwapchain(desc1, game.hwnd);
+        ComPtr<IDXGISwapChain1> swapchain1;
+        check(factory2->CreateSwapChainForHwnd(device.Get(), game.hwnd, &desc1, nullptr, nullptr, &swapchain1));
+        DXGI_SWAP_CHAIN_DESC1 resolved1 {};
+        check(swapchain1->GetDesc1(&resolved1));
+        expect(resolved1.Width == 640 && resolved1.Height == 360, "DXGI 1.2 raw/normalized descriptors disagree");
+    }
+
+    expect(IsCompositionWindow(game.hwnd), "own hidden composition window rejected");
+    expect(!IsCompositionWindow(tiny.hwnd) && !IsCompositionWindow(nullptr), "invalid composition window accepted");
     DXGI_SWAP_CHAIN_DESC1 composition {};
     composition.Width = 640;
     composition.Height = 360;
@@ -115,7 +160,8 @@ try
     expect(resized.Width == 800 && resized.Height == 450 && resized.SwapEffect == DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL &&
                resized.Flags == 0,
            "composition resize changed contract");
-    std::puts("PASS: client-size classification, descriptor preservation, raw/normalized 0x0 DXGI and composition "
+    std::puts("PASS: client-size classification (DESC & DESC1), descriptor preservation, raw/normalized 0x0 DXGI and "
+              "composition "
               "create/attach/resize (WARP)");
     return 0;
 }
