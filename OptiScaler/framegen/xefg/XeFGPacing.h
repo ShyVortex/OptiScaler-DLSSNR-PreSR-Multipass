@@ -2,57 +2,6 @@
 
 // Spreads Intel's generated frames out in time, so that multi frame generation
 // above 2X stops arriving as one clump followed by a gap.
-//
-// The provider already knows what the spacing should be. Once per burst it
-// works out how long a real frame took and divides it by the number of frames
-// the burst will deliver:
-//
-//     0x220254  mov  r9, [r8+8]        ; count = generated frames in this burst
-//     0x220258  lea  rcx, [r9+1]       ; count + 1 = the multiplier
-//     0x22025E  mov  rax, [rbp-0x41]   ; duration of the real frame
-//     0x220262  div  rcx
-//     0x220265  mov  r12, rax          ; -> duration / multiplier, per frame
-//
-// but then the present loop that follows hands every generated frame straight
-// to the swapchain back to back:
-//
-//     0x220280  ...                    ; loop over rbx = 1 .. count-1
-//     0x2202E8  call 0x1800025c0       ; -> jmp 0x18021f730, present one frame
-//     0x2202ED  ...
-//     0x22030A  jb   0x180220280
-//
-// and `r12` is not consumed until the loop has finished, by the FPS limiter
-// block at 0x220317 - which is itself only reached when count > 2 and two other
-// conditions hold. So the burst goes out as fast as the swapchain accepts it and
-// the limiter then holds the *last* frame of the burst back, which is what reads
-// as frames being bunched up and out of order above 2X.
-//
-// The last frame is not presented from the loop at all. It goes out from the
-// call at 0x220462, after the loop and after the provider has submitted the
-// burst, so it needs pacing of its own:
-//
-//     0x220411  call 0x180003100       ; -> jmp 0x18021ee30, submit the burst
-//     0x220445  mov  byte [rsp+0x30], 0
-//     0x220462  call 0x1800025c0       ; present the last generated frame
-//
-// Fixing it means pacing each generated frame, which means getting in between
-// the loop and the present. Every one of those presents goes through the 5 byte
-// thunk at 0x25C0, and that thunk is followed by 11 bytes of int3 padding, so
-// it is 16 bytes that contain nothing but a jump. That is room for a 14 byte
-// `jmp qword ptr [rip+0]`, so the thunk can be redirected anywhere in the
-// address space without relocating a single instruction and without a code cave.
-//
-// The thunk has two other callers (0x220A52, 0x220DAD), so the detour checks
-// the return address and paces only the two sites above; every other present is
-// forwarded untouched.
-//
-// The spacing is not invented here. The provider has a frame scheduler of its
-// own - it just never calls it for the frames the loop presents, only for the
-// burst's last one. So each of those presents is handed to 0x21EE30 with the
-// arguments the present path already has, and the provider works out the
-// presentation time itself. A wall clock does the same job when the scheduler
-// cannot be reached; waiting on the provider's D3D12 fence as well was tried and
-// then removed due to timer tick quantization overshooting.
 
 #include <windows.h>
 #ifdef _MSC_VER
@@ -62,6 +11,8 @@
 #define XE_RETURN_ADDRESS() __builtin_return_address(0)
 #endif
 
+#include <algorithm>
+#include <format>
 #include "Logger.h"
 #include "SysUtils.h"
 
@@ -71,64 +22,27 @@ namespace XeFGPacing
 
 constexpr uint32_t PresentThunkRva = 0x25C0;
 constexpr uint32_t NativePresentRva = 0x21F730;
-
-// Return address of the `call` in the burst loop - i.e. the exact identity
-// of the call site we want to pace.
 constexpr uint32_t PacedCallerRva = 0x2202ED;
-
-// The burst's last generated frame is not presented from the loop. It goes
-// out after the loop and after the provider's own submit, from the call at
-// 0x220462, with the same burst in arg5 but a different arg6 and arg7 = 0
-// instead of 1:
-//
-//     0x220445  mov  byte ptr [rsp+0x30], 0   ; arg7 = 0
-//     0x220462  call 0x25c0
-//
-// Left alone, every burst ends with two frames carrying the same timestamp:
-// at 4X the delivered pattern is 0, i, 2i, 2i instead of 0, i, 2i, 3i.
 constexpr uint32_t LastFrameCallerRva = 0x220467;
 
-// The provider does space that last frame itself - but only from the limiter
-// block at 0x220317, and only when all three of its conditions hold:
-//
-//     0x220317  cmp  byte  ptr [rsi + 0x340], 0   ; enabled
-//     0x220324  cmp  qword ptr [r8 + 8], 2        ; count > 2, i.e. 4X up
-//     0x22032F  cmp  dword ptr [r8 + 0x28], 0     ; per-burst field is 0
-//
-// Mirroring the condition keeps exactly one of us waiting on that frame
-// rather than two waits stacking into one long frame.
 constexpr uint32_t LimiterEnabledOffset = 0x340;
 constexpr uint32_t BurstLimiterField = 0x28;
 
 // --- the provider's own frame scheduler --------------------------------
 
-// 0x3100 schedules the frame: look the frame's record up in the ring at
-// ctx+0x168 by burst->tag, stamp it with the current counter, then have
-// 0x224B30 (via 0x3430) compute a presentation time and hand that time to 0x7A30.
-// Its arg5 is the frame's index in the burst.
 constexpr uint32_t SchedThunkRva = 0x3100;
 constexpr uint32_t SchedFnRva = 0x21EE30;
-
-// arg2 of the scheduler is present arg5 - 0x38, so the gate byte the
-// present path reads into r8 at 0x22040A sits at 0xC0 of it.
 constexpr uint32_t BurstGateOffset = 0xC0;
 
-// The scheduler is not always on. Its entry gate is 0xdbb0 -> 0x21ed40, and
-// the whole of it is two bytes of the context:
-//     [ctx+0x340] == 0 && [ctx+0x341] != 0
 constexpr uint32_t SchedLimiterOffset = 0x340;
 constexpr uint32_t SchedEnableOffset = 0x341;
 
-// arg4 comes out of 0x4DA0, which is a thunk for 0x224CF0.
 constexpr uint32_t RingSnapshotFnRva = 0x224CF0;
 constexpr uint32_t RingOffset = 0x168;
 
-// Every frame that gets a deadline ends up waiting in 0x7A30 -> 0x225070,
-// and the value it waits on is produced by 0x3430 -> 0x224B30.
 constexpr uint32_t TimestampThunkRva = 0x3430;
 constexpr uint32_t TimestampFnRva = 0x224B30;
 
-// The float 0x224B30 clamps, at ring + 0x1B8.
 constexpr uint32_t RingMeasuredOffset = 0x1B8;
 
 inline const uint8_t TimestampThunkExpected[16] = {
@@ -374,14 +288,10 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
     if (g_lastBurstQpc != 0)
         PushPeriod(NsFromQpc(nowQpc - g_lastBurstQpc));
 
+    // Feed the stable 15-sample median cycle period so TagFrameConstants does not flip-flop
+    // between 25 ms and 4 ms on alternating frames when background worker waits are subtracted.
     if (g_periodNs > 0)
-    {
-        const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
-        if (g_periodNs > blockNs && (g_periodNs - blockNs) >= 1000000LL)
-            g_renderTimeNs = g_periodNs - blockNs;
-        else
-            g_renderTimeNs = g_periodNs;
-    }
+        g_renderTimeNs = g_periodNs;
 
     g_burstBlockQpc = 0;
     g_lastBurstQpc = nowQpc;
@@ -420,7 +330,6 @@ inline void PaceFrame(uint64_t index, uint64_t count)
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
 
-    // Always record burst period on index == 1 even at 2X so RenderTimeMs() stays valid.
     NoteFrame(index, count, now.QuadPart);
 
     if (multiplier <= 2)
@@ -445,12 +354,7 @@ inline void PaceFrame(uint64_t index, uint64_t count)
         if (g_intervalQpc <= 0)
             return;
 
-        // If intermediate frames were handled by Intel's scheduler and only the final
-        // generated frame reaches PaceFrame, anchor its target relative to the last paced frame.
-        if (g_lastPacedQpc != 0 && g_targetQpc <= now.QuadPart)
-            g_targetQpc = g_lastPacedQpc + g_intervalQpc;
-        else
-            g_targetQpc += g_intervalQpc;
+        g_targetQpc += g_intervalQpc;
     }
 
     const int64_t latest = now.QuadPart + QpcFromNs(g_periodNs);
@@ -463,12 +367,6 @@ inline void PaceFrame(uint64_t index, uint64_t count)
 
     LARGE_INTEGER end;
     QueryPerformanceCounter(&end);
-
-    // Account for wall-clock wait duration in g_burstBlockQpc so pure render time
-    // estimation in NoteFrame() deducts the last frame's wait as well.
-    const int64_t waitQpc = end.QuadPart - now.QuadPart;
-    if (waitQpc > 0)
-        g_burstBlockQpc += waitQpc;
 
     RecordGap(end.QuadPart);
 }
@@ -504,11 +402,6 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
     const int64_t waitQpc = after.QuadPart - before.QuadPart;
     g_schedWaitQpc += waitQpc;
     g_burstBlockQpc += waitQpc;
-
-    // Anchor wall-clock target to the latest scheduled frame so the final frame (isLast)
-    // can seamlessly step by one interval from the last intermediate frame.
-    if (g_intervalQpc > 0)
-        g_targetQpc = after.QuadPart;
 
     if (g_diagSeq > 0)
     {
@@ -578,12 +471,15 @@ inline void TryPace(void* ctx, void* arg5, void* arg6, uint64_t arg7, bool isLas
             return;
     }
 
-    // Route intermediate frames (1 .. count-1) through Intel's frame scheduler when usable.
-    // The final generated frame (isLast, caller 0x220467) is presented *after* 0x21EE30 has
-    // already executed for the burst, so it must fall through to ProviderPacesLastFrame / PaceFrame.
-    if (g_schedNative != nullptr && SchedulerUsable(ctx) && !isLast)
+    // When Intel's scheduler is usable, intermediate frames (1 .. count-1) are scheduled here via
+    // ScheduleFrame, and the final generated frame (index = count, isLast = true) is ALREADY
+    // scheduled by Intel's native call at 0x220411 (which invokes 0x3100 -> TsDetour for index = count)
+    // right before 0x220462 (LastFrameCallerRva). Returning here for isLast avoids double-waiting.
+    if (g_schedNative != nullptr && SchedulerUsable(ctx))
     {
-        ScheduleFrame(ctx, burst, index);
+        if (!isLast)
+            ScheduleFrame(ctx, burst, index);
+
         return;
     }
 
@@ -629,17 +525,19 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 
     g_tsCalls++;
 
+    LARGE_INTEGER nowQpc {};
+    QueryPerformanceCounter(&nowQpc);
+    const int64_t nowNs = NsFromQpc(nowQpc.QuadPart);
+
     const bool fresh = index == 1 || index <= g_lastTsIndex || countPlus1 != g_lastTsCountPlus1;
 
     if (fresh)
     {
         int64_t nativeUnit = unit;
-        int64_t targetUnit = unit;
 
         if (g_ring != nullptr)
         {
-            const float rawF = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
-            float f = rawF;
+            float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
 
             if (!(f >= 0.125f) || f > 500.0f)
                 f = 500.0f;
@@ -652,26 +550,38 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
                 nativeUnit = clampedUnit;
                 g_tsClamped++;
             }
-
-            // When a valid decoupled frameRenderTime (>= 1.0 ms) is fed via TagFrameConstants,
-            // Intel's native 0x224B30 already computes *out using clampedUnit (the pure render step).
-            // Do NOT overwrite it with 'unit' (which is derived from the wait-inflated ring median),
-            // as doing so re-couples presentation wait times into future deadlines and triggers the
-            // resonant lock above 60 FPS. Only rebase to 'unit' when rawF < 1.0f (e.g. FTInput=Zero
-            // where 0x224B30 clamps 0.0f to 0.125f ms).
-            if (rawF >= 1.0f && rawF <= 500.0f && clampedUnit > 0)
-            {
-                targetUnit = nativeUnit;
-            }
         }
 
-        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
-        g_burstStepNs = targetUnit;
+        // Reconstruct the burst's true anchor timestamp (T_0) before Intel's 2X-biased step,
+        // then partition uniformly by 'unit' (T_cycle / countPlus1).
+        int64_t candidateNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
+
+        if (nowNs > 0)
+        {
+            // 1. Cap Frame 1 wait to at most 1 * unit (e.g. 5.11 ms at 4X instead of 10.02 ms)
+            //    so Frame 1 never consumes 50% of the cycle or triggers the resonant lock.
+            if (candidateNs > nowNs + unit)
+                candidateNs = nowNs + unit;
+
+            // 2. Floor Frame 1 deadline at nowNs so if GPU interpolation took longer than 1 * unit,
+            //    Frame 1 presents immediately AND Frame 2 (g_nextDeadlineNs + unit) is still spaced
+            //    by a full 'unit' (5.11 ms) after Frame 1 instead of expiring in 0.002 ms!
+            if (candidateNs < nowNs)
+                candidateNs = nowNs;
+        }
+
+        g_nextDeadlineNs = candidateNs;
+        g_burstStepNs = unit;
         g_tsRebased++;
     }
     else
     {
         g_nextDeadlineNs += g_burstStepNs;
+
+        // If a previous frame's presentation took longer than expected, ensure the next
+        // generated frame still steps forward from the current time rather than dumping in 0 ms.
+        if (nowNs > 0 && g_nextDeadlineNs < nowNs + (g_burstStepNs / 2))
+            g_nextDeadlineNs = nowNs + g_burstStepNs;
     }
 
     g_lastTsIndex = index;
