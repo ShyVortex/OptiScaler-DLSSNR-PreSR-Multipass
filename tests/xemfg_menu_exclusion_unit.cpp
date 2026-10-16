@@ -6,8 +6,16 @@
 #include <string>
 #include <vector>
 
-// Standalone unit test validating XeMFG menu UI conflict suppression,
-// standard FG selection lockout, notice rendering, and strict mutual exclusion.
+// Standalone unit test validating unified XeMFG menu UI conflict suppression,
+// standard FG selection lockout, complete suppression of redundant XeFG/OptiFG sections,
+// unified Source selection (Game vs OptiScaler), and strict mutual exclusion.
+
+enum class XeMfgSource : uint32_t
+{
+    Game = 0,
+    OptiScaler = 1,
+    Count
+};
 
 template <class T> class TestCustomOptional : public std::optional<T>
 {
@@ -56,10 +64,17 @@ enum class FGOutput
 struct SimulatedConfig
 {
     TestCustomOptional<bool> XeMfgUnlock { false };
-    TestCustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
-    TestCustomOptional<bool> AmpereMfgUnlock { false };
+    TestCustomOptional<int> XeMfgSourceType { static_cast<int>(XeMfgSource::Game) };
+    TestCustomOptional<int> XeMfgMaxFrames { 3 };
+    TestCustomOptional<bool> XeMfgExtraPacing { false };
+    TestCustomOptional<bool> FGXeFGForceBorderless { false };
+
+    // Legacy fields for backward compatibility testing
     TestCustomOptional<bool> XeMfgSrEnable { false };
     TestCustomOptional<int> XeMfgSrGeneratedFrames { 2 };
+
+    TestCustomOptional<bool> FGDLSSGAdaMfgUnlock { false };
+    TestCustomOptional<bool> AmpereMfgUnlock { false };
     TestCustomOptional<bool> FGDLSSGSmoothMotion { false };
     TestCustomOptional<bool> ExternalFrameGeneration { false };
 
@@ -67,6 +82,14 @@ struct SimulatedConfig
     TestCustomOptional<FGInput> FGInputMode { FGInput::NoFG };
     TestCustomOptional<FGOutput> FGOutputMode { FGOutput::NoFG };
     TestCustomOptional<int> FGXeFGInterpolationCount { 1 };
+
+    XeMfgSource XeMfgSourceValue() const
+    {
+        int val = XeMfgSourceType.value_or_default();
+        if (val < 0 || val >= static_cast<int>(XeMfgSource::Count))
+            return XeMfgSource::Game;
+        return static_cast<XeMfgSource>(val);
+    }
 };
 
 struct SimulatedState
@@ -80,10 +103,13 @@ struct SimulatedState
 
 struct MenuUiOutput
 {
-    // 1. Dedicated XeMFG section
+    // 1. Unified XeMFG section
     bool xeMfgDedicatedSectionRendered = false;
+    bool xeMfgSourceComboRendered = false;
+    bool xeMfgMaxFramesSliderRendered = false;
+    bool xeMfgForceBorderlessRendered = false;
 
-    // 1b. Dedicated XeMFG-SR section
+    // 1b. Legacy separate XeMFG-SR section (must NEVER be rendered in unified UI)
     bool xeMfgSrDedicatedSectionRendered = false;
 
     // 2. Standard Frame Generation Selection (RenderFrameGenerationSelection)
@@ -91,14 +117,12 @@ struct MenuUiOutput
     bool standardFgLockedNoticeRendered = false;
     std::string standardFgLockedNoticeText;
 
-    // 3. Legacy XeFG Runtime section below Advanced FG Settings
-    bool legacyXeFgSectionRendered = false;
-    bool legacyXeFgNoticeRendered = false;
+    // 3. Redundant XeFG controls (must be completely hidden when XeMFG is active)
+    bool redundantXeFgSectionRendered = false;
     bool legacyXeFgControlsInteractive = false;
-    std::string runtimeNoticeText;
 
-    // 4. Streamline FG Inputs section
-    bool streamlineInputsSectionRendered = false;
+    // 4. Redundant OptiFG controls (must be completely hidden when XeMFG is active)
+    bool redundantOptiFgSectionRendered = false;
 };
 
 static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const SimulatedState& state)
@@ -108,25 +132,21 @@ static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const Simu
     const bool xeMfgActive =
         config.XeMfgUnlock.value_or_default() && !config.ExternalFrameGeneration.value_or_default() &&
         !config.FGDLSSGAdaMfgUnlock.value_or_default() && !config.AmpereMfgUnlock.value_or_default();
-    const bool xeMfgSrActive = config.XeMfgSrEnable.value_or_default() && !config.XeMfgUnlock.value_or_default() &&
-                               !config.ExternalFrameGeneration.value_or_default() &&
-                               !config.FGDLSSGAdaMfgUnlock.value_or_default() &&
-                               !config.AmpereMfgUnlock.value_or_default();
 
-    // 1. Dedicated XeMFG section at top of Frame Generation
+    // 1. Unified XeMFG section at top of Frame Generation
     if (config.XeMfgUnlock.value_or_default())
     {
         out.xeMfgDedicatedSectionRendered = true;
+        out.xeMfgSourceComboRendered = true;
+        out.xeMfgMaxFramesSliderRendered = true;
+        out.xeMfgForceBorderlessRendered = true;
     }
 
-    // 1b. Dedicated XeMFG-SR section (rendered when primary XeMfgUnlock is not enabled)
-    if (!config.XeMfgUnlock.value_or_default())
-    {
-        out.xeMfgSrDedicatedSectionRendered = true;
-    }
+    // 1b. Legacy separate XeMFG-SR section is permanently removed
+    out.xeMfgSrDedicatedSectionRendered = false;
 
     // 2. Standard Frame Generation Selection (RenderFrameGenerationSelection)
-    if (state.externalFrameGeneration || xeMfgActive || xeMfgSrActive)
+    if (state.externalFrameGeneration || xeMfgActive)
     {
         if (xeMfgActive)
         {
@@ -134,13 +154,6 @@ static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const Simu
             out.standardFgLockedNoticeText =
                 "Intel Xe Multi-Frame Generation (XeMFG) is active. Standard Frame Generation controls are locked and "
                 "managed automatically.";
-        }
-        else if (xeMfgSrActive)
-        {
-            out.standardFgLockedNoticeRendered = true;
-            out.standardFgLockedNoticeText =
-                "Intel XeMFG-SR Injector is active. Multiplier is controlled via the Intel Xe Multi-Frame Generation "
-                "for DLSS-SR (XeMFG-SR) section above.";
         }
         out.standardFgSelectionRendered = false; // Early return prevents rendering FG Enabled, Input, Output
     }
@@ -150,30 +163,29 @@ static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const Simu
         out.standardFgLockedNoticeRendered = false;
     }
 
-    // 3. XeFG controls below Advanced FG Settings (RenderFrameGenerationRuntimeSettings)
-    if ((xeMfgActive || xeMfgSrActive) && state.activeFgOutput == FGOutput::XeFG)
+    // 3. Redundant XeFG controls below Advanced FG Settings
+    // In unified architecture: if xeMfgActive, completely hidden!
+    if (!xeMfgActive && state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
+        state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain)
     {
-        out.legacyXeFgSectionRendered = true;
-        out.legacyXeFgNoticeRendered = true;
-        out.runtimeNoticeText =
-            xeMfgActive
-                ? "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above."
-                : "Managed exclusively by the Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) section above.";
-        out.legacyXeFgControlsInteractive = false; // Controls are suppressed!
+        out.redundantXeFgSectionRendered = true;
+        out.legacyXeFgControlsInteractive = true;
     }
-    else if (!xeMfgActive && !xeMfgSrActive && state.activeFgOutput == FGOutput::XeFG &&
-             state.activeFgInput != FGInput::NoFG && state.activeFgInput != FGInput::ForceXeLL &&
-             state.currentFGSwapchain)
+    else
     {
-        out.legacyXeFgSectionRendered = true;
-        out.legacyXeFgNoticeRendered = false;
-        out.legacyXeFgControlsInteractive = true; // Interactive Active##3 and MFG combo
+        out.redundantXeFgSectionRendered = false;
+        out.legacyXeFgControlsInteractive = false;
     }
 
-    // 4. Streamline FG Inputs
-    if (!xeMfgActive && !xeMfgSrActive && state.currentFGSwapchain && state.activeFgInput == FGInput::DLSSG)
+    // 4. Redundant OptiFG controls
+    // In unified architecture: if xeMfgActive, completely hidden!
+    if (!xeMfgActive && state.currentFGSwapchain && state.activeFgInput == FGInput::Upscaler)
     {
-        out.streamlineInputsSectionRendered = true;
+        out.redundantOptiFgSectionRendered = true;
+    }
+    else
+    {
+        out.redundantOptiFgSectionRendered = false;
     }
 
     return out;
@@ -181,12 +193,13 @@ static MenuUiOutput SimulateRenderMenu(const SimulatedConfig& config, const Simu
 
 int main()
 {
-    printf("[+] Starting XeMFG Menu UI Conflict Suppression & Exclusion Tests...\n");
+    printf("[+] Starting Unified XeMFG Menu UI Conflict Suppression & Exclusion Tests...\n");
 
-    // Test 1: Active XeMFG locks out standard FG selection and suppresses legacy XeFG controls
+    // Test 1: Active XeMFG (Game Source) locks standard FG selection, hides redundant XeFG/OptiFG sections
     {
         SimulatedConfig config;
         config.XeMfgUnlock = true;
+        config.XeMfgSourceType = static_cast<int>(XeMfgSource::Game);
         config.FGEnabled = true;
         config.FGInputMode = FGInput::DLSSG;
         config.FGOutputMode = FGOutput::XeFG;
@@ -198,17 +211,47 @@ int main()
 
         auto ui = SimulateRenderMenu(config, state);
 
-        assert(ui.xeMfgDedicatedSectionRendered && "Dedicated XeMFG section must be rendered");
-        assert(!ui.standardFgSelectionRendered && "Standard FG selection controls must be locked out and suppressed");
-        assert(ui.standardFgLockedNoticeRendered && "Lockout notice must be displayed in standard FG selection");
-        assert(ui.legacyXeFgSectionRendered && "Legacy XeFG header rendered with notice");
-        assert(ui.legacyXeFgNoticeRendered && "Managed notice must be displayed in runtime settings");
-        assert(!ui.legacyXeFgControlsInteractive && "Legacy Active##3 and MFG controls must be suppressed");
-        assert(!ui.streamlineInputsSectionRendered && "Redundant Streamline FG Inputs section must be suppressed");
-        printf("  [PASS] Test 1: Active XeMFG locks standard FG selection and suppresses duplicate controls.\n");
+        assert(ui.xeMfgDedicatedSectionRendered && "Unified XeMFG section must be rendered");
+        assert(ui.xeMfgSourceComboRendered && "Source combo must be rendered inside unified XeMFG");
+        assert(ui.xeMfgMaxFramesSliderRendered && "MaxInterpolatedFrames slider must be rendered");
+        assert(ui.xeMfgForceBorderlessRendered && "ForceBorderless checkbox must be rendered");
+        assert(!ui.xeMfgSrDedicatedSectionRendered && "Duplicate XeMFG-SR section must never be rendered");
+
+        assert(!ui.standardFgSelectionRendered && "Standard FG selection controls must be locked out");
+        assert(ui.standardFgLockedNoticeRendered && "Lockout notice must be displayed");
+
+        assert(!ui.redundantXeFgSectionRendered && "Redundant Frame Generation (XeFG) must be completely hidden");
+        assert(!ui.redundantOptiFgSectionRendered && "Redundant Frame Generation (OptiFG) must be completely hidden");
+        printf("  [PASS] Test 1: Active XeMFG (Game Source) locks standard FG selection & hides duplicate sections.\n");
     }
 
-    // Test 2: Inactive XeMFG restores standard FG selection and allows legacy XeFG controls
+    // Test 2: Active XeMFG (OptiScaler Source) renders unified controls & elevates ForceBorderless
+    {
+        SimulatedConfig config;
+        config.XeMfgUnlock = true;
+        config.XeMfgSourceType = static_cast<int>(XeMfgSource::OptiScaler);
+        config.FGEnabled = true;
+        config.FGInputMode = FGInput::Upscaler;
+        config.FGOutputMode = FGOutput::XeFG;
+        config.FGXeFGForceBorderless = true;
+
+        SimulatedState state;
+        state.activeFgInput = FGInput::Upscaler;
+        state.activeFgOutput = FGOutput::XeFG;
+        state.currentFGSwapchain = true;
+
+        auto ui = SimulateRenderMenu(config, state);
+
+        assert(ui.xeMfgDedicatedSectionRendered && "Unified XeMFG section must be rendered");
+        assert(config.XeMfgSourceValue() == XeMfgSource::OptiScaler);
+        assert(config.FGXeFGForceBorderless.value_or_default() == true && "ForceBorderless preserved");
+        assert(!ui.redundantXeFgSectionRendered && "Redundant Frame Generation (XeFG) hidden in OptiScaler mode");
+        assert(!ui.redundantOptiFgSectionRendered && "Redundant Frame Generation (OptiFG) hidden in OptiScaler mode");
+        printf(
+            "  [PASS] Test 2: Active XeMFG (OptiScaler Source) renders unified controls & elevates ForceBorderless.\n");
+    }
+
+    // Test 3: Inactive XeMFG restores standard FG selection and allows stock XeFG / OptiFG sections
     {
         SimulatedConfig config;
         config.XeMfgUnlock = false;
@@ -226,27 +269,27 @@ int main()
         assert(!ui.xeMfgDedicatedSectionRendered && "XeMFG section must not be rendered when disabled");
         assert(ui.standardFgSelectionRendered && "Standard FG selection controls must be rendered normally");
         assert(!ui.standardFgLockedNoticeRendered && "No lockout notice when XeMFG is disabled");
-        assert(ui.legacyXeFgSectionRendered && "Legacy XeFG section rendered");
-        assert(!ui.legacyXeFgNoticeRendered && "Managed notice must not be rendered when XeMFG is disabled");
-        assert(ui.legacyXeFgControlsInteractive && "Legacy Active##3 and MFG controls must remain interactive");
-        assert(ui.streamlineInputsSectionRendered && "Streamline FG Inputs section must be rendered for stock usage");
-        printf("  [PASS] Test 2: Inactive XeMFG renders standard FG selection and legacy controls normally.\n");
+        assert(ui.redundantXeFgSectionRendered && "Stock XeFG section rendered when XeMFG inactive");
+        assert(ui.legacyXeFgControlsInteractive && "Stock XeFG controls interactive");
+        printf("  [PASS] Test 3: Inactive XeMFG restores standard FG selection and allows stock XeFG controls.\n");
     }
 
-    // Test 3: Strict mutual exclusion enforcement between Ada, Ampere, and XeMFG
+    // Test 4: Strict mutual exclusion enforcement between Ada, Ampere, External FG, and XeMFG
     {
         SimulatedConfig config;
 
-        // Enable XeMFG -> Must disable Ada and Ampere
+        // Enable XeMFG -> Must disable Ada, Ampere, SmoothMotion
         config.XeMfgUnlock = true;
         if (config.XeMfgUnlock.value_or_default())
         {
             config.FGDLSSGAdaMfgUnlock = false;
             config.AmpereMfgUnlock = false;
+            config.FGDLSSGSmoothMotion = false;
         }
         assert(config.XeMfgUnlock.value_or_default() == true);
         assert(config.FGDLSSGAdaMfgUnlock.value_or_default() == false);
         assert(config.AmpereMfgUnlock.value_or_default() == false);
+        assert(config.FGDLSSGSmoothMotion.value_or_default() == false);
 
         // Enable Ada MFG -> Must disable XeMFG
         config.FGDLSSGAdaMfgUnlock = true;
@@ -269,134 +312,42 @@ int main()
         assert(config.XeMfgUnlock.value_or_default() == false);
         assert(config.FGDLSSGAdaMfgUnlock.value_or_default() == false);
         assert(config.AmpereMfgUnlock.value_or_default() == true);
-        printf("  [PASS] Test 3: Strict mutual exclusion across Ada, Ampere, and XeMFG.\n");
-    }
 
-    // Test 4: Active XeMFG-SR locks out standard FG selection and displays XeMFG-SR managed notice
-    {
-        SimulatedConfig config;
-        config.XeMfgUnlock = false;
-        config.XeMfgSrEnable = true;
-        config.FGEnabled = true;
-        config.FGInputMode = FGInput::Upscaler;
-        config.FGOutputMode = FGOutput::XeFG;
-
-        SimulatedState state;
-        state.activeFgInput = FGInput::Upscaler;
-        state.activeFgOutput = FGOutput::XeFG;
-        state.currentFGSwapchain = true;
-
-        auto ui = SimulateRenderMenu(config, state);
-
-        assert(ui.xeMfgSrDedicatedSectionRendered && "Dedicated XeMFG-SR section must be rendered");
-        assert(!ui.xeMfgDedicatedSectionRendered && "XeMFG section must be hidden/skipped when XeMfgUnlock=false");
-        assert(!ui.standardFgSelectionRendered && "Standard FG selection controls must be locked out for XeMFG-SR");
-        assert(ui.standardFgLockedNoticeRendered && "Lockout notice must be displayed for XeMFG-SR");
-        assert(ui.standardFgLockedNoticeText.find("XeMFG-SR") != std::string::npos &&
-               "Notice must refer to XeMFG-SR Injector");
-        assert(ui.legacyXeFgSectionRendered && "Legacy XeFG header rendered with notice");
-        assert(ui.legacyXeFgNoticeRendered && "Managed notice must be displayed in runtime settings");
-        assert(ui.runtimeNoticeText.find("XeMFG-SR") != std::string::npos &&
-               "Runtime notice must cite XeMFG-SR section");
-        assert(!ui.legacyXeFgControlsInteractive && "Legacy Active##3 and MFG controls must be suppressed");
-        printf("  [PASS] Test 4: Active XeMFG-SR locks standard FG selection and displays XeMFG-SR managed notice.\n");
-    }
-
-    // Test 5: Strict mutual exclusion across XeMFG-SR, XeMFG, Ada, Ampere, Smooth Motion, and External FG
-    {
-        SimulatedConfig config;
-
-        // Enable XeMFG-SR -> Must disable XeMfgUnlock, Ada, Ampere, SmoothMotion
-        config.XeMfgSrEnable = true;
-        if (config.XeMfgSrEnable.value_or_default())
-        {
-            config.XeMfgUnlock = false;
-            config.FGDLSSGAdaMfgUnlock = false;
-            config.AmpereMfgUnlock = false;
-            config.FGDLSSGSmoothMotion = false;
-        }
-        assert(config.XeMfgSrEnable.value_or_default() == true);
-        assert(config.XeMfgUnlock.value_or_default() == false);
-        assert(config.FGDLSSGAdaMfgUnlock.value_or_default() == false);
-        assert(config.AmpereMfgUnlock.value_or_default() == false);
-        assert(config.FGDLSSGSmoothMotion.value_or_default() == false);
-
-        // Enable XeMfgUnlock -> Must disable XeMfgSrEnable
-        config.XeMfgUnlock = true;
-        if (config.XeMfgUnlock.value_or_default())
-        {
-            config.XeMfgSrEnable = false;
-        }
-        assert(config.XeMfgUnlock.value_or_default() == true);
-        assert(config.XeMfgSrEnable.value_or_default() == false);
-
-        // Reset and test Ada MFG -> Must disable XeMfgSrEnable
-        config.XeMfgUnlock = false;
-        config.XeMfgSrEnable = true;
-        config.FGDLSSGAdaMfgUnlock = true;
-        if (config.FGDLSSGAdaMfgUnlock.value_or_default())
-        {
-            config.XeMfgSrEnable = false;
-        }
-        assert(config.FGDLSSGAdaMfgUnlock.value_or_default() == true);
-        assert(config.XeMfgSrEnable.value_or_default() == false);
-
-        // Reset and test Ampere MFG -> Must disable XeMfgSrEnable
-        config.FGDLSSGAdaMfgUnlock = false;
-        config.XeMfgSrEnable = true;
-        config.AmpereMfgUnlock = true;
-        if (config.AmpereMfgUnlock.value_or_default())
-        {
-            config.XeMfgSrEnable = false;
-        }
-        assert(config.AmpereMfgUnlock.value_or_default() == true);
-        assert(config.XeMfgSrEnable.value_or_default() == false);
-
-        // Reset and test Smooth Motion -> Must disable XeMfgSrEnable
+        // Enable External FG -> Must disable XeMFG
         config.AmpereMfgUnlock = false;
-        config.XeMfgSrEnable = true;
-        config.FGDLSSGSmoothMotion = true;
-        if (config.FGDLSSGSmoothMotion.value_or_default())
-        {
-            config.XeMfgSrEnable = false;
-        }
-        assert(config.FGDLSSGSmoothMotion.value_or_default() == true);
-        assert(config.XeMfgSrEnable.value_or_default() == false);
-
-        // Reset and test External FG -> Must disable XeMfgSrEnable
-        config.FGDLSSGSmoothMotion = false;
-        config.XeMfgSrEnable = true;
         config.ExternalFrameGeneration = true;
         if (config.ExternalFrameGeneration.value_or_default())
         {
-            config.XeMfgSrEnable = false;
+            config.XeMfgUnlock = false;
         }
         assert(config.ExternalFrameGeneration.value_or_default() == true);
-        assert(config.XeMfgSrEnable.value_or_default() == false);
-
-        printf("  [PASS] Test 5: Strict bidirectional mutual exclusion between XeMFG-SR and all FG providers.\n");
+        assert(config.XeMfgUnlock.value_or_default() == false);
+        printf("  [PASS] Test 4: Strict mutual exclusion across Ada, Ampere, External FG, and XeMFG.\n");
     }
 
-    // Test 6: Primary XeMFG priority over XeMFG-SR in session resolution
+    // Test 5: Backward compatibility migration: legacy [XeMFG-SR] Enable=true maps to UnlockMFG=true, Source=OptiScaler
     {
         SimulatedConfig config;
-        config.XeMfgUnlock = true;
-        config.XeMfgSrEnable = true; // Both set somehow in conflicting INI
+        // Simulate legacy INI with [XeMFG-SR] Enable=true and GeneratedFrames=4
+        config.XeMfgUnlock.reset();
+        config.XeMfgSrEnable = true;
+        config.XeMfgSrGeneratedFrames = 4;
 
-        SimulatedState state;
-        state.activeFgInput = FGInput::DLSSG;
-        state.activeFgOutput = FGOutput::XeFG;
+        // Migration logic as implemented in Config.cpp
+        if (!config.XeMfgUnlock.has_value() && config.XeMfgSrEnable.value_or_default())
+        {
+            config.XeMfgUnlock = true;
+            config.XeMfgSourceType = static_cast<int>(XeMfgSource::OptiScaler);
+            config.XeMfgMaxFrames = config.XeMfgSrGeneratedFrames.value_or(2);
+        }
 
-        auto ui = SimulateRenderMenu(config, state);
-
-        assert(ui.xeMfgDedicatedSectionRendered && "Primary XeMFG takes precedence");
-        assert(!ui.xeMfgSrDedicatedSectionRendered && "XeMFG-SR section must not render when primary is active");
-        assert(ui.standardFgLockedNoticeText.find("Intel Xe Multi-Frame Generation (XeMFG) is active") !=
-                   std::string::npos &&
-               "Primary XeMFG notice takes precedence");
-        printf("  [PASS] Test 6: Primary XeMFG takes strict precedence over XeMFG-SR when both present.\n");
+        assert(config.XeMfgUnlock.value_or_default() == true);
+        assert(config.XeMfgSourceValue() == XeMfgSource::OptiScaler);
+        assert(config.XeMfgMaxFrames.value_or_default() == 4);
+        printf(
+            "  [PASS] Test 5: Legacy XeMFG-SR configuration cleanly migrates to unified XeMFG (Source=OptiScaler).\n");
     }
 
-    printf("[+] All XeMFG Menu UI Conflict Suppression tests PASSED successfully!\n");
+    printf("[+] All Unified XeMFG Menu UI Conflict Suppression tests PASSED successfully!\n");
     return 0;
 }

@@ -3192,7 +3192,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     bool external = config->ExternalFrameGeneration.value_or_default();
     const bool ampereActive = config->FGDLSSGAmpereMfgUnlock.value_or_default();
     const bool xeActive = XeMfgLoader::EnabledForSession();
-    const bool xeSrActive = XeMfgLoader::SrEnabledForSession();
     const bool onLinux = state.isRunningOnLinux || primaryGpu.usesVkd3dProton;
     const bool isNvidia = primaryGpu.vendorId == VendorId::Nvidia;
     const int configuredFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
@@ -3217,7 +3216,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             config->ExternalFrameGeneration = external;
             if (external)
+            {
+                config->XeMfgUnlock = false;
                 config->XeMfgSrEnable = false;
+            }
         }
         ShowHelpMarker("Leaves Streamline, Reflex and FG control to the game/external mod."
                        "\nNR and NGX upscaling remain available. Save Settings and restart."
@@ -3233,7 +3235,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     bool adaUnlock = config->FGDLSSGAdaMfgUnlock.value_or_default();
     const bool isAda = primaryGpu.vendorId == VendorId::Nvidia &&
                        primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_AD100;
-    const bool disableAda = !isAda || ampereActive || xeActive || xeSrActive || state.externalFrameGeneration;
+    const bool disableAda = !isAda || ampereActive || xeActive || state.externalFrameGeneration;
 
     if (disableAda)
     {
@@ -3253,11 +3255,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         {
             ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
                            "Disable XeMfgUnlock first, Save Settings and restart.");
-        }
-        else if (xeSrActive)
-        {
-            ShowHelpMarker("Disabled because the Intel XeMFG-SR injector is active.\n"
-                           "Disable XeMfgSrEnable first, Save Settings and restart.");
         }
         else
         {
@@ -3320,7 +3317,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         // Mutual exclusion: disable if Ada, XeMFG, or XeMFG-SR is already enabled
         const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-        if (adaActive || xeActive || xeSrActive)
+        if (adaActive || xeActive)
         {
             ImGui::BeginDisabled();
             ImGui::Checkbox("Enable SM86/SM75 MFG (experimental; restart)##ampere", &ampereUnlock);
@@ -3330,15 +3327,10 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
                                "Disable AdaMfgUnlock first, Save Settings and restart.");
             }
-            else if (xeActive)
+            else
             {
                 ShowHelpMarker("Disabled because the Intel XeMFG unlock is active.\n"
                                "Disable XeMfgUnlock first, Save Settings and restart.");
-            }
-            else
-            {
-                ShowHelpMarker("Disabled because the Intel XeMFG-SR injector is active.\n"
-                               "Disable XeMfgSrEnable first, Save Settings and restart.");
             }
         }
         else
@@ -3700,18 +3692,119 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                     config->XeMfgSrEnable = false;
                     config->FGDLSSGSmoothMotion = false;
                     NvApiHooks::ApplySmoothMotionDrs(false);
+
+                    if (config->XeMfgSourceValue() == XeMfgSource::OptiScaler)
+                    {
+                        config->FGEnabled = true;
+                        config->FGInput = FGInput::Upscaler;
+                        config->FGOutput = FGOutput::XeFG;
+                        config->FGNvngxReplacement = FGNvngxReplacement::None;
+
+                        state.activeFgInput = FGInput::Upscaler;
+                        state.activeFgOutput = FGOutput::XeFG;
+                        state.activeFgNvngx = FGNvngxReplacement::None;
+
+                        const int maxFrames = std::clamp(config->XeMfgMaxFrames.value_or(3), 1, 5);
+                        config->FGXeFGInterpolationCount = maxFrames;
+
+                        fakenvapi::init(true);
+                        XeFGProxy::InitXeFG();
+                        if (XeFGProxy::Module() != nullptr)
+                            XeMfgLoader::TryApply(XeFGProxy::Module());
+                        else
+                            XeMfgLoader::TryApply();
+
+                        if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
+                            state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
+
+                        state.fgChanged = true;
+                    }
+                    else
+                    {
+                        config->FGEnabled = true;
+                        config->FGInput = FGInput::DLSSG;
+                        config->FGOutput = FGOutput::XeFG;
+                        config->FGNvngxReplacement = FGNvngxReplacement::None;
+
+                        state.activeFgInput = FGInput::DLSSG;
+                        state.activeFgOutput = FGOutput::XeFG;
+                        state.activeFgNvngx = FGNvngxReplacement::None;
+                        state.fgChanged = true;
+                    }
+                }
+                else
+                {
+                    if (config->XeMfgSourceValue() == XeMfgSource::OptiScaler)
+                    {
+                        config->FGEnabled = false;
+                        config->FGInput = FGInput::NoFG;
+                        state.activeFgInput = FGInput::NoFG;
+                        state.fgChanged = true;
+                    }
                 }
             }
             ShowHelpMarker("Natively unlocks Intel Xe Multi-Frame Generation (XeMFG) in libxess_fg.dll.\n"
                            "Allows 3X, 4X, 5X, and 6X frame generation across Intel, AMD, and NVIDIA GPUs.\n"
-                           "When FG Input is set to DLSSG (Streamline) or OptiFG and FG Output is XeFG,\n"
-                           "in-game multiplier options are fully unlocked and routed to XeFG.\n"
+                           "Supports both native DLSS-G / Streamline titles and OptiScaler pipeline injection.\n"
                            "Provides native Multi-Frame Generation on Linux (Proton/VKD3D) without 2X fallbacks.\n"
                            "Save Settings and restart after changing.");
         }
 
         if (xeUnlock)
         {
+            // Input Source combo
+            int sourceIdx = static_cast<int>(config->XeMfgSourceValue());
+            const char* sourceLabels[] = { "Game (Native DLSS-G / Streamline)",
+                                           "OptiScaler (OptiFG / Upscaler Injection)" };
+            if (ImGui::Combo("Input Source (restart)##xemfg_source", &sourceIdx, sourceLabels, 2))
+            {
+                config->XeMfgSourceType = sourceIdx;
+                if (sourceIdx == static_cast<int>(XeMfgSource::OptiScaler))
+                {
+                    config->FGEnabled = true;
+                    config->FGInput = FGInput::Upscaler;
+                    config->FGOutput = FGOutput::XeFG;
+                    config->FGNvngxReplacement = FGNvngxReplacement::None;
+
+                    state.activeFgInput = FGInput::Upscaler;
+                    state.activeFgOutput = FGOutput::XeFG;
+                    state.activeFgNvngx = FGNvngxReplacement::None;
+
+                    const int maxFrames = std::clamp(config->XeMfgMaxFrames.value_or(3), 1, 5);
+                    config->FGXeFGInterpolationCount = maxFrames;
+
+                    fakenvapi::init(true);
+                    XeFGProxy::InitXeFG();
+                    if (XeFGProxy::Module() != nullptr)
+                        XeMfgLoader::TryApply(XeFGProxy::Module());
+                    else
+                        XeMfgLoader::TryApply();
+
+                    if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
+                        state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
+
+                    state.fgChanged = true;
+                }
+                else
+                {
+                    config->FGEnabled = true;
+                    config->FGInput = FGInput::DLSSG;
+                    config->FGOutput = FGOutput::XeFG;
+                    config->FGNvngxReplacement = FGNvngxReplacement::None;
+
+                    state.activeFgInput = FGInput::DLSSG;
+                    state.activeFgOutput = FGOutput::XeFG;
+                    state.activeFgNvngx = FGNvngxReplacement::None;
+                    state.fgChanged = true;
+                }
+            }
+            ShowHelpMarker(
+                "Determines how frame generation inputs (depth, motion vectors, HUD) are fed into XeFG:\n"
+                "• Game: For titles with native DLSS Frame Generation / Streamline support. Unlocks in-game settings.\n"
+                "• OptiScaler: For games with DLSS Super Resolution lacking native DLSS-FG (e.g. Helldivers 2).\n"
+                "  Injects XeFG directly using vectors and depth from the upscaler pass.\n"
+                "Save Settings and restart after changing.");
+
             const auto& status = XeMfgLoader::LastStatus();
 
             // Status display
@@ -3730,6 +3823,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                         : (status.PatchesApplied > 0 ? (std::to_string(status.PatchesApplied) + "/5") : "not applied");
                 ImGui::TextWrapped("DLL: %s | Patches: %s | Pacing: %s", status.ModuleFound ? "found" : "missing",
                                    patchStr.c_str(), pacingStr.c_str());
+            }
+
+            if (config->XeMfgSourceValue() == XeMfgSource::OptiScaler && state.currentFGSwapchain == nullptr)
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
+                                   "Note: Save Settings and restart the game to initialize the XeFG SwapChain.");
             }
 
             if (status.HasPresentTelemetry)
@@ -3758,19 +3857,24 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             {
                 liveMultiplier = static_cast<int>(state.currentFG->GetInterpolatedFrameCount());
             }
-            if (liveMultiplier <= 0 && state.dlssgLastSetMode != sl::DLSSGMode::eOff &&
-                config->FGXeFGInterpolationCount.has_value() && config->FGXeFGInterpolationCount.value() > 0)
+            if (liveMultiplier <= 0 && config->FGXeFGInterpolationCount.has_value() &&
+                config->FGXeFGInterpolationCount.value() > 0)
             {
                 liveMultiplier = config->FGXeFGInterpolationCount.value();
+            }
+            if (liveMultiplier <= 0 && config->XeMfgSourceValue() == XeMfgSource::OptiScaler)
+            {
+                liveMultiplier = config->XeMfgMaxFrames.value_or(3);
             }
 
             if (liveMultiplier > 0)
             {
                 ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
                                    liveMultiplier + 1);
-                ShowHelpMarker("Multiplier selected by the game engine or Streamline options call.");
+                ShowHelpMarker(
+                    "Multiplier selected by the game engine, Streamline options call, or OptiScaler injection.");
             }
-            else if (state.dlssgLastSetMode == sl::DLSSGMode::eOff)
+            else if (state.dlssgLastSetMode == sl::DLSSGMode::eOff && config->XeMfgSourceValue() == XeMfgSource::Game)
             {
                 ImGui::TextDisabled("In-Game Multiplier: Off (Disabled in-game)");
                 ShowHelpMarker("Frame generation is currently set to Off in the game's display settings.");
@@ -3781,24 +3885,27 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ShowHelpMarker("In-game multiplier will be reported once the game's Streamline DLSS-G option is set.");
             }
 
-            // MaxGeneratedFrames slider
+            // MaxInterpolatedFrames slider
             int maxFrames = config->XeMfgMaxFrames.value_or(3);
             const char* xeFrameLabels[] = { "1 (2X FG)", "2 (3X FG)", "3 (4X FG) [Default]", "4 (5X FG)", "5 (6X FG)" };
             const char* currentLabel =
                 (maxFrames >= 1 && maxFrames <= 5) ? xeFrameLabels[maxFrames - 1] : xeFrameLabels[2];
-            if (ImGui::SliderInt("Max Generated Frames##xemfg", &maxFrames, 1, 5, currentLabel))
+            if (ImGui::SliderInt("Max Interpolated Frames##xemfg", &maxFrames, 1, 5, currentLabel))
             {
                 config->XeMfgMaxFrames = maxFrames;
+                config->FGXeFGInterpolationCount = maxFrames;
                 if (XeMfgLoader::IsEnabled())
                     XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(maxFrames));
+                if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
+                    state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
             }
-            ShowHelpMarker(
-                "Maximum generated frames advertised to the game engine via Streamline and allowed in XeFG.\n"
-                "1 = 2X FG (1 generated frame)\n"
-                "2 = 3X FG (2 generated frames)\n"
-                "3 = 4X FG (3 generated frames, default)\n"
-                "4 = 5X FG (4 generated frames)\n"
-                "5 = 6X FG (5 generated frames)");
+            ShowHelpMarker("Number of interpolated frames generated per real rendered frame (allowed in XeFG and "
+                           "advertised to Streamline).\n"
+                           "1 = 2X FG (1 interpolated frame)\n"
+                           "2 = 3X FG (2 interpolated frames)\n"
+                           "3 = 4X FG (3 interpolated frames, default)\n"
+                           "4 = 5X FG (4 interpolated frames)\n"
+                           "5 = 6X FG (5 interpolated frames)");
 
             bool fgDV = config->FGXeFGDebugView.value_or_default();
             if (ImGui::Checkbox("Debug Markers (Corners)##xemfg", &fgDV))
@@ -3826,235 +3933,18 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
                            "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
                            "Enable only if your display exhibits severe tear-lines without V-Sync.");
+
+            bool fgBorderless = config->FGXeFGForceBorderless.value_or_default();
+            if (ImGui::Checkbox("Force Borderless Window (restart)##xemfg", &fgBorderless))
+            {
+                config->FGXeFGForceBorderless = fgBorderless;
+            }
+            ShowHelpMarker("Forces borderless windowed mode on swapchains.\n"
+                           "Required for games that use DXGI exclusive fullscreen (e.g. Helldivers 2),\n"
+                           "as Intel XeFG disables frame interpolation in exclusive fullscreen.");
         }
 
         ImGui::Unindent();
-    }
-
-    // ── Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) Injector ──
-    if (!config->XeMfgUnlock.value_or_default())
-    {
-        if (ImGui::CollapsingHeader("Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR)"))
-        {
-            ImGui::Indent();
-
-            bool srEnable = config->XeMfgSrEnable.value_or_default();
-            const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-            const bool externalActive = config->ExternalFrameGeneration.value_or_default();
-            const bool disableXeSr = !srEnable && (adaActive || ampereActive || externalActive || xeActive);
-
-            if (disableXeSr)
-            {
-                ImGui::BeginDisabled();
-                ImGui::Checkbox("Enable XeMFG-SR Injector (Multi-Frame Generation; restart)##xemfg_sr", &srEnable);
-                ImGui::EndDisabled();
-                if (adaActive)
-                {
-                    ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
-                                   "Disable AdaMfgUnlock first, Save Settings and restart.");
-                }
-                else if (xeActive)
-                {
-                    ShowHelpMarker("Disabled because the primary Intel XeMFG unlock is active.\n"
-                                   "Disable XeMfgUnlock first, Save Settings and restart.");
-                }
-                else
-                {
-                    ShowHelpMarker(externalActive ? "Disabled because external frame generation is selected.\n"
-                                                    "Disable External first, Save Settings and restart."
-                                                  : "Disabled because the Ampere (SM86) MFG unlock is active.\n"
-                                                    "Disable AmpereMfgUnlock first, Save Settings and restart.");
-                }
-            }
-            else
-            {
-                if (ImGui::Checkbox("Enable XeMFG-SR Injector (Multi-Frame Generation; restart)##xemfg_sr", &srEnable))
-                {
-                    config->XeMfgSrEnable = srEnable;
-                    if (srEnable)
-                    {
-                        config->XeMfgUnlock = false;
-                        config->FGDLSSGAdaMfgUnlock = false;
-                        config->FGDLSSGAmpereMfgUnlock = false;
-                        config->FGDLSSGSmoothMotion = false;
-                        NvApiHooks::ApplySmoothMotionDrs(false);
-
-                        config->FGEnabled = true;
-                        config->FGInput = FGInput::Upscaler;
-                        config->FGOutput = FGOutput::XeFG;
-                        config->FGNvngxReplacement = FGNvngxReplacement::None;
-
-                        state.activeFgInput = FGInput::Upscaler;
-                        state.activeFgOutput = FGOutput::XeFG;
-                        state.activeFgNvngx = FGNvngxReplacement::None;
-
-                        const int srFrames = std::clamp(config->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
-                        config->FGXeFGInterpolationCount = srFrames;
-
-                        fakenvapi::init(true);
-                        XeFGProxy::InitXeFG();
-                        if (XeFGProxy::Module() != nullptr)
-                            XeMfgLoader::TryApply(XeFGProxy::Module());
-                        else
-                            XeMfgLoader::TryApply();
-
-                        if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
-                            state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
-
-                        state.fgChanged = true;
-                    }
-                    else
-                    {
-                        config->FGEnabled = false;
-                        config->FGInput = FGInput::NoFG;
-                        state.activeFgInput = FGInput::NoFG;
-                        state.fgChanged = true;
-                    }
-                }
-                ShowHelpMarker(
-                    "Enables Intel Xe Multi-Frame Generation (XeMFG) for games that have DLSS Super Resolution\n"
-                    "but lack native DLSS Frame Generation or Streamline integration.\n"
-                    "Siphons depth, motion vectors, and color buffers from DLSS-SR passes into XeFG.\n"
-                    "Allows 3X, 4X, 5X, and 6X Multi-Frame Generation across Intel, AMD, and NVIDIA GPUs.\n"
-                    "Requires a restart if enabled mid-game so the DXGI SwapChain can be initialized with XeFG.\n"
-                    "Once active, generated frame multiplier sliders adjust live during active gameplay.");
-            }
-
-            if (srEnable)
-            {
-                const auto& status = XeMfgLoader::LastStatus();
-
-                // Status display
-                if (!status.ErrorMessage.empty())
-                {
-                    ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s",
-                                       status.ErrorMessage.c_str());
-                }
-                else
-                {
-                    std::string pacingStr = status.PacingInstalled ? "active (native provider)"
-                                                                   : (status.VerifiedPacing ? "verified" : "standard");
-                    std::string patchStr =
-                        status.Applied ? "active (5/5)"
-                                       : (status.PatchesApplied > 0 ? (std::to_string(status.PatchesApplied) + "/5")
-                                                                    : "not applied");
-                    ImGui::TextWrapped("DLL: %s | Patches: %s | Pacing: %s", status.ModuleFound ? "found" : "missing",
-                                       patchStr.c_str(), pacingStr.c_str());
-                }
-
-                if (state.currentFGSwapchain == nullptr)
-                {
-                    ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
-                                       "Note: Save Settings and restart the game to initialize the XeFG SwapChain.");
-                }
-
-                if (status.HasPresentTelemetry)
-                {
-                    if (status.LastFrameGenResult == 0)
-                    {
-                        ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)),
-                                           "Present Status: OK (%u frames presented, FG %s)",
-                                           status.LastFramesPresented,
-                                           status.IsFrameGenEnabled ? "Enabled" : "Disabled");
-                    }
-                    else
-                    {
-                        ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
-                                           "Present Status: Code %d (%u frames presented, FG %s)",
-                                           status.LastFrameGenResult, status.LastFramesPresented,
-                                           status.IsFrameGenEnabled ? "Enabled" : "Disabled");
-                    }
-                    ShowHelpMarker("Real-time presentation status from xefgSwapChainGetLastPresentStatus.\n"
-                                   "Indicates whether Intel XeSS-FG is actively producing neural interpolated frames\n"
-                                   "or silently falling back to native frames.");
-                }
-
-                // In-game multiplier status
-                int liveMultiplier = 0;
-                if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
-                {
-                    liveMultiplier = static_cast<int>(state.currentFG->GetInterpolatedFrameCount());
-                }
-                if (liveMultiplier <= 0 && config->FGXeFGInterpolationCount.has_value() &&
-                    config->FGXeFGInterpolationCount.value() > 0)
-                {
-                    liveMultiplier = config->FGXeFGInterpolationCount.value();
-                }
-                if (liveMultiplier <= 0)
-                {
-                    liveMultiplier = config->XeMfgSrGeneratedFrames.value_or(2);
-                }
-
-                if (liveMultiplier > 0)
-                {
-                    ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
-                                       liveMultiplier + 1);
-                    ShowHelpMarker("Active frame generation multiplier applied to the DLSS-SR evaluation pipeline.");
-                }
-                else
-                {
-                    ImGui::TextDisabled("In-Game Multiplier: Off");
-                }
-
-                // GeneratedFrames slider
-                int srFrames = config->XeMfgSrGeneratedFrames.value_or(2);
-                const char* srFrameLabels[] = { "1 (2X FG)", "2 (3X FG) [Default]", "3 (4X FG)", "4 (5X FG)",
-                                                "5 (6X FG)" };
-                const char* currentSrLabel =
-                    (srFrames >= 1 && srFrames <= 5) ? srFrameLabels[srFrames - 1] : srFrameLabels[1];
-                if (ImGui::SliderInt("Generated Frames##xemfg_sr", &srFrames, 1, 5, currentSrLabel))
-                {
-                    config->XeMfgSrGeneratedFrames = srFrames;
-                    config->FGXeFGInterpolationCount = srFrames;
-                    if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
-                        state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(srFrames));
-                }
-                ShowHelpMarker("Number of interpolated frames generated per real DLSS-SR rendered frame.\n"
-                               "1 = 2X FG (1 interpolated frame)\n"
-                               "2 = 3X FG (2 interpolated frames, default)\n"
-                               "3 = 4X FG (3 interpolated frames)\n"
-                               "4 = 5X FG (4 interpolated frames)\n"
-                               "5 = 6X FG (5 interpolated frames)");
-
-                bool fgDV = config->FGXeFGDebugView.value_or_default();
-                if (ImGui::Checkbox("Debug Markers (Corners)##xemfg_sr", &fgDV))
-                {
-                    config->FGXeFGDebugView = fgDV;
-                    state.fgChanged = true;
-                }
-                ShowHelpMarker("Renders marker quads in the corners of real interpolated frames.\n"
-                               "If you do not see marker quads, frames are not being interpolated.");
-
-                ImGui::SameLine(0.0f, 16.0f);
-                if (ImGui::Checkbox("Only Interpolated Frames##xemfg_sr", &state.fgOnlyGenerated))
-                {
-                    state.fgChanged = true;
-                }
-                ShowHelpMarker("Renders ONLY generated frames and blanks native frames.\n"
-                               "If interpolation is active, motion will remain visible.\n"
-                               "If interpolation has failed, the screen will turn black.");
-
-                bool extraPacing = config->XeMfgExtraPacing.value_or(false);
-                if (ImGui::Checkbox("Display VBlank Sync (Extra Pacing)##xemfg_sr", &extraPacing))
-                {
-                    config->XeMfgExtraPacing = extraPacing;
-                }
-                ShowHelpMarker("Forces SyncInterval=1 and disables tearing on generated frames.\n"
-                               "Recommended: OFF (Default) — allows XeSS-FG to pace presentations natively.\n"
-                               "Enable only if your display exhibits severe tear-lines without V-Sync.");
-
-                bool fgBorderless = config->FGXeFGForceBorderless.value_or_default();
-                if (ImGui::Checkbox("Force Borderless Window (restart)##xemfg_sr", &fgBorderless))
-                {
-                    config->FGXeFGForceBorderless = fgBorderless;
-                }
-                ShowHelpMarker("Forces borderless windowed mode on swapchains.\n"
-                               "Required for games that use DXGI exclusive fullscreen (e.g. Helldivers 2),\n"
-                               "as Intel XeFG disables frame interpolation in exclusive fullscreen.");
-            }
-
-            ImGui::Unindent();
-        }
     }
 
     // ── NVIDIA Smooth Motion (Driver-level Frame Interpolation) ─────
@@ -4063,7 +3953,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     const bool isAdaOrBlackwell = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id >= NV_GPU_ARCHITECTURE_AD100);
     const bool isAmpere = isNvidia && (primaryGpu.nvidiaArchInfo.architecture_id == NV_GPU_ARCHITECTURE_GA100);
     const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
-    const bool fgConflict = ampereActive || adaActive || xeActive || xeSrActive || state.externalFrameGeneration;
+    const bool fgConflict = ampereActive || adaActive || xeActive || state.externalFrameGeneration;
     const bool disableSmoothMotion = onLinux || (!isAdaOrBlackwell && !isAmpere) || fgConflict;
 
     if (disableSmoothMotion)
@@ -4238,12 +4128,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             ImGui::TextWrapped(
                 "Intel XeMFG is active. Multiplier is controlled via the Intel Xe Multi-Frame Generation (XeMFG) "
                 "section above or in-game settings.");
-        }
-        else if (xeSrActive)
-        {
-            ImGui::TextWrapped(
-                "Intel XeMFG-SR Injector is active. Multiplier is controlled via the Intel Xe Multi-Frame Generation "
-                "for DLSS-SR (XeMFG-SR) section above.");
         }
         return;
     }
@@ -5123,21 +5007,11 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
     }
 
     const bool xeMfgActive = XeMfgLoader::EnabledForSession();
-    const bool xeMfgSrActive = XeMfgLoader::SrEnabledForSession();
 
     // XeFG controls
-    if ((xeMfgActive || xeMfgSrActive) && state.activeFgOutput == FGOutput::XeFG)
-    {
-        ImGui::SeparatorText("Frame Generation (XeFG)");
-        ImGui::TextColored(
-            toneMapColor(ImVec4(0.4f, 0.8f, 1.0f, 1.0f)),
-            xeMfgActive
-                ? "Managed exclusively by the Intel Xe Multi-Frame Generation (XeMFG) section above."
-                : "Managed exclusively by the Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) section above.");
-    }
-    else if (!xeMfgActive && state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
-             state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain != nullptr &&
-             XeFGProxy::InitXeFG() && fgOutput)
+    if (!xeMfgActive && state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
+        state.activeFgInput != FGInput::ForceXeLL && state.currentFGSwapchain != nullptr && XeFGProxy::InitXeFG() &&
+        fgOutput)
     {
         ImGui::SeparatorText("Frame Generation (XeFG)");
 
@@ -5468,20 +5342,15 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
     }
 
     // OptiFG
-    if (state.api != API::Vulkan && state.currentFGSwapchain != nullptr && state.activeFgInput == FGInput::Upscaler)
+    if (!xeMfgActive && state.api != API::Vulkan && state.currentFGSwapchain != nullptr &&
+        state.activeFgInput == FGInput::Upscaler)
     {
         SeparatorWithHelpMarker("Frame Generation (OptiFG)", "Using upscaler data for FG");
 
-        if (xeMfgSrActive)
-        {
-            ImGui::TextColored(
-                toneMapColor(ImVec4(0.4f, 0.8f, 1.0f, 1.0f)),
-                "Managed exclusively by the Intel Xe Multi-Frame Generation for DLSS-SR (XeMFG-SR) section above.");
-        }
-        else if (currentFeature != nullptr && !currentFeature->IsFrozen() &&
-                 ((state.activeFgOutput == FGOutput::FSRFG && FfxApiProxy::IsFGReady()) ||
-                  (state.activeFgOutput == FGOutput::XeFG && XeFGProxy::Module() != nullptr) ||
-                  (state.activeFgOutput == FGOutput::DLSSG && StreamlineProxy::Module() != nullptr)))
+        if (currentFeature != nullptr && !currentFeature->IsFrozen() &&
+            ((state.activeFgOutput == FGOutput::FSRFG && FfxApiProxy::IsFGReady()) ||
+             (state.activeFgOutput == FGOutput::XeFG && XeFGProxy::Module() != nullptr) ||
+             (state.activeFgOutput == FGOutput::DLSSG && StreamlineProxy::Module() != nullptr)))
         {
             if (!Config::Instance()->FGDisableHUDFix.value_or_default() &&
                 state.swapchainInteropApi == SwapchainInteropApi::None)
