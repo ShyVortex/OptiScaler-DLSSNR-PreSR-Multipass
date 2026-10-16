@@ -4110,7 +4110,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         }
     }
 
-    if (state.externalFrameGeneration || ampereFallbackToFsrFg || xeActive || xeSrActive)
+    if (state.externalFrameGeneration || ampereFallbackToFsrFg || xeActive)
     {
         if (state.externalFrameGeneration)
             ImGui::TextWrapped("External FG is active. Set the multiplier in the game or unlocker, not OptiScaler.");
