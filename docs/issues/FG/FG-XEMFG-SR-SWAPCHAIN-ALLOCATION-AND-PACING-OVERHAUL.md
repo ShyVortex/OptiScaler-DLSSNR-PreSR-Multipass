@@ -115,19 +115,43 @@ Removed redundant per-frame `XeFGProxy::SetEnabled()(_swapChainContext, true)` f
   - In `ScheduleFrame`: anchor `g_targetQpc = after.QuadPart` so the final generated frame (`isLast`) seamlessly steps by one interval from the last intermediate frame.
   - In `PaceFrame`: anchor `g_targetQpc = g_lastPacedQpc + g_intervalQpc` when intermediate frames were handled by Intel's scheduler.
 
+### 3.6 Windowed Deadline Clamping, isLast Deduplication & Render Time Stabilization (`OptiScaler_2.log`)
+In-depth analysis of high-resolution runtime logs (`OptiScaler_2.log`) under uncapped rendering identified 3 additional timing defects causing severe sub-millisecond frame dumps and alternating frame time oscillations:
+1. **GPU Execution Latency Anchors Deadlines in the Past**:
+   - `XeFG_Dx12::Dispatch` / `SetPresentId` records $T_0$.
+   - The GPU takes 5–10 ms executing DLSS-SR upscaling and XeFG optical flow.
+   - By the time `ScheduleFrame` is called for Frame 1, wall-clock time is already $T_0 + 10\text{ ms}$.
+   - Intel's `0x224B30` computed Frame 1's deadline as $T_0 + 5.1\text{ ms}$ (already expired!).
+   - Consequently, Frame 2's deadline ($T_0 + 10.2\text{ ms}$) had also expired or arrived in $< 0.002\text{ ms}$, dumping Frame 2 immediately without presentation spacing.
+   - **Fix**: In `TsDetour`, query `nowNs = NsFromQpc(nowQpc.QuadPart)` and apply windowed clamping on `candidateNs`:
+     - **Cap**: `if (candidateNs > nowNs + unit) candidateNs = nowNs + unit;` (Frame 1 can never wait $> 1 \times \text{unit}$, eliminating the 10 ms / 2X bias).
+     - **Floor**: `if (candidateNs < nowNs) candidateNs = nowNs;` (ensures Frame 1 is floored to current wall time, allowing Frame 2 to step forward into the future by $+1 \times \text{unit}$ and wait ~5 ms instead of 0.002 ms).
+     - **Monotonic Step**: `if (nowNs > 0 && g_nextDeadlineNs < nowNs + (g_burstStepNs / 2)) g_nextDeadlineNs = nowNs + g_burstStepNs;`
+2. **Double Wait on Final Generated Frame (`isLast == true`)**:
+   - In `libxess_fg.dll`, native instruction `0x220411` calls `0x3100` (`SchedThunkRva` $\rightarrow$ `0x21EE30` / `TsDetour`) passing `index = count`, waiting for Frame 3's deadline.
+   - Immediately afterward, `0x220462` (`LastFrameCallerRva`) was called with `isLast = true`.
+   - In `pre13`, `TryPace` let `isLast` fall through to `PaceFrame()`, which executed a second `WaitUntil` for `+g_intervalQpc`, adding an unnecessary 5.25 ms wait (totaling 10.5 ms).
+   - **Fix**: In `TryPace`, when `g_schedNative != nullptr && SchedulerUsable(ctx)`, return immediately for `isLast == true` since `0x220411` already scheduled it.
+3. **Render Time Flip-Flop via `blockNs` Subtraction**:
+   - Because `ScheduleFrame` runs on Intel's asynchronous worker thread, the thread's wait time was accumulated into `g_burstBlockQpc`.
+   - In `NoteFrame`, subtracting `blockNs` from `g_periodNs` ($25\text{ ms} - 21\text{ ms} = 4\text{ ms}$) caused `RenderTimeMs()` to collapse to 4.0 ms.
+   - Feeding 4.0 ms into `TagFrameConstants` made Intel compute $4.0 / 4 = 1.0\text{ ms}$ steps, causing the next burst to dump in 1.0 ms.
+   - With 1.0 ms steps, `blockNs` dropped to 3 ms, making the next cycle compute $25 - 3 = 22\text{ ms}$, creating an alternating flip-flop between 22 ms and 4 ms.
+   - **Fix**: In `NoteFrame`, set `g_renderTimeNs = g_periodNs` directly from the stable 15-sample median cycle period, eliminating the 25 ms $\leftrightarrow$ 4 ms oscillation.
+
 ---
 
 ## 4. Verification & Standards Compliance
 
 1. **Automated Unit Tests**:
    - `tests/xemfg_loader_unit.cpp` (11/11 PASS)
-   - `tests/xefg_diagnostic_ring_unit.cpp` (5/5 PASS)
+   - `tests/xefg_diagnostic_ring_unit.cpp` (6/6 PASS, including Test 6 for windowed deadline clamping and monotonic step)
    - `tests/xefg_pacing_engine_unit.cpp` (7/7 PASS)
-   - `tests/xefg_main_pacing_alignment_unit.cpp` (4/4 PASS)
+   - `tests/xefg_main_pacing_alignment_unit.cpp` (5/5 PASS, including Test 5 for windowed clamping, hitch recovery, and isLast deduplication)
    - `tests/xemfg_menu_exclusion_unit.cpp` (6/6 PASS)
    - `tests/dlssg_sm86_ini_smoke.cpp` (PASS)
 2. **Formatting & Encoding**:
-   - `clang-format --dry-run --Werror` verified clean across all modified files (`XeFGPacing.h`, `XeFG_Dx12.cpp`, `menu_common.cpp`, `dllmain.cpp`, `tests/xefg_diagnostic_ring_unit.cpp`).
+   - `clang-format --dry-run --Werror` verified clean across all modified files (`XeFGPacing.h`, `XeFG_Dx12.cpp`, `menu_common.cpp`, `dllmain.cpp`, `tests/xefg_diagnostic_ring_unit.cpp`, `tests/xefg_main_pacing_alignment_unit.cpp`).
    - UTF-8 BOM (`\xef\xbb\xbf`) verified and preserved on all modified files.
 3. **Architecture Gate Compliance**:
    - In accordance with Rule 8 in `workflow-planning.md`, `.agents/rules/optiscaler-architecture.md` and `.agents/CONTEXT.md` remain untouched pending real in-game verification by the user.

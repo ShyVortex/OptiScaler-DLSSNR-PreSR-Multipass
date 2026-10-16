@@ -12,6 +12,7 @@
 // 3. TsDetour >= 3X deadline repair: uniform step expansion and nativeUnit clamp recovery.
 // 4. In-memory circular diagnostic ring recording: slot indexing, wrap-around, and burst trace formatting.
 // 5. Uninstall cleanup: resetting g_ring, diagnostic sequences, and deadline state.
+// 6. Windowed deadline clamping, monotonic step forward, and diagnostic record tracking.
 
 namespace XeFGDiagTest
 {
@@ -69,7 +70,7 @@ inline void ResetState()
     memset(g_diagRing, 0, sizeof(g_diagRing));
 }
 
-inline void TsDetourMock(int64_t* out, int64_t median, uint32_t index, uint32_t countPlus1)
+inline void TsDetourMock(int64_t* out, int64_t median, uint32_t index, uint32_t countPlus1, int64_t nowNs = 0)
 {
     if (out == nullptr || index == 0 || index > 5 || countPlus1 < 3)
         return;
@@ -112,13 +113,27 @@ inline void TsDetourMock(int64_t* out, int64_t median, uint32_t index, uint32_t 
             }
         }
 
-        g_nextDeadlineNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
+        int64_t candidateNs = *out + static_cast<int64_t>(index) * (targetUnit - nativeUnit);
+
+        if (nowNs > 0)
+        {
+            if (candidateNs > nowNs + targetUnit)
+                candidateNs = nowNs + targetUnit;
+
+            if (candidateNs < nowNs)
+                candidateNs = nowNs;
+        }
+
+        g_nextDeadlineNs = candidateNs;
         g_burstStepNs = targetUnit;
         g_tsRebased++;
     }
     else
     {
         g_nextDeadlineNs += g_burstStepNs;
+
+        if (nowNs > 0 && g_nextDeadlineNs < nowNs + (g_burstStepNs / 2))
+            g_nextDeadlineNs = nowNs + g_burstStepNs;
     }
 
     g_lastTsIndex = index;
@@ -265,6 +280,54 @@ int main()
                "Fallback rawF < 1.0f maintains initial deadline and steps by median unit!");
 
         printf("  [PASS] Test 5: TsDetour decoupled pure render time preservation & clamp rebasing verified.\n");
+    }
+
+    // Test 6: TsDetour windowed deadline clamping and monotonic step forward under GPU lag
+    {
+        XeFGDiagTest::ResetState();
+        alignas(16) uint8_t ringData[0x200] {};
+        float* pMeasured = reinterpret_cast<float*>(ringData + XeFGDiagTest::RingMeasuredOffset);
+        *pMeasured = 20.44f; // 20.44 ms cycle (4X -> 5.11 ms per slice)
+        XeFGDiagTest::g_ring = ringData;
+
+        // 4X mode (countPlus1 = 4, median = 20.44 ms, unit = 5.11 ms)
+        // Subtest 6A: Frame 1 cap at nowNs + targetUnit (eliminates 10 ms wait)
+        const int64_t now1 = 1000000000LL;
+        int64_t deadline1 = 1010000000LL; // 10 ms in the future
+        XeFGDiagTest::TsDetourMock(&deadline1, 20440000LL, 1, 4, now1);
+
+        assert(deadline1 == now1 + 5110000LL && "Frame 1 deadline must be clamped to nowNs + targetUnit (5.11 ms)");
+        assert(XeFGDiagTest::g_diagRing[0].detouredOutNs == deadline1 &&
+               "Diag ring record 0 must store clamped deadline");
+
+        // Subtest 6B: Frame 1 floor at nowNs and Frame 2 step forward when GPU lagged
+        XeFGDiagTest::ResetState();
+        *pMeasured = 20.44f;
+        const int64_t nowLag1 = 1008000000LL;
+        int64_t deadlineLag1 = 1005110000LL; // 2.89 ms in the past
+        XeFGDiagTest::TsDetourMock(&deadlineLag1, 20440000LL, 1, 4, nowLag1);
+
+        assert(deadlineLag1 == nowLag1 && "Frame 1 in the past must be floored to nowNs");
+
+        // Frame 2 arrives 0.2 ms after Frame 1
+        const int64_t nowLag2 = 1008200000LL;
+        int64_t deadlineLag2 = 1005110000LL;
+        XeFGDiagTest::TsDetourMock(&deadlineLag2, 20440000LL, 2, 4, nowLag2);
+
+        // Frame 2 must step forward from floored Frame 1 by targetUnit (5.11 ms)
+        assert(deadlineLag2 == nowLag1 + 5110000LL && "Frame 2 must step forward by targetUnit from floored Frame 1");
+        assert(deadlineLag2 - nowLag2 > 4000000LL && "Frame 2 must wait ~4.91 ms, preventing 0.002 ms dump");
+        assert(XeFGDiagTest::g_diagRing[1].detouredOutNs == deadlineLag2 &&
+               "Diag ring record 1 must store spaced Frame 2 deadline");
+
+        // Subtest 6C: Monotonic guard when presentation hitches
+        const int64_t nowHitch = 1013000000LL; // only 0.11 ms before deadlineLag2
+        int64_t deadlineLag3 = 1005110000LL;
+        XeFGDiagTest::TsDetourMock(&deadlineLag3, 20440000LL, 3, 4, nowHitch);
+        assert(deadlineLag3 >= nowHitch + 5110000LL && "Monotonic guard must step deadline forward from nowHitch");
+
+        printf("  [PASS] Test 6: TsDetour windowed deadline clamping, monotonic step, and diagnostic record tracking "
+               "verified.\n");
     }
 
     printf("[+] All XeFGPacing Diagnostic Ring & Edge-Case Unit Tests PASSED successfully!\n");

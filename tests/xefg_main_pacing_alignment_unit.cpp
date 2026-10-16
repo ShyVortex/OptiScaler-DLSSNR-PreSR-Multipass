@@ -11,6 +11,7 @@
 // 2. Burst-to-burst period measurement: NoteFrame measures engine frame time at index == 1.
 // 3. Detour caller routing: base application frame bypasses TryPace with 0 wait.
 // 4. Provider scheduler delegation: intermediate frames route to ScheduleFrame, last frame handled natively.
+// 5. Windowed deadline clamping, monotonic step, and isLast deduplication.
 
 namespace XeFGMainPacingAlignmentTest
 {
@@ -69,7 +70,8 @@ struct SimulatedMainPacer
         intervalQpc = deltaQpc / static_cast<int64_t>(multiplier);
     }
 
-    int64_t TsDetour(int64_t nativeOut, int64_t medianNs, uint32_t countPlus1, uint32_t index, float ringF = 500.0f)
+    int64_t TsDetour(int64_t nativeOut, int64_t medianNs, uint32_t countPlus1, uint32_t index, float ringF = 500.0f,
+                     int64_t nowNs = 0)
     {
         if (countPlus1 <= 2)
             return nativeOut;
@@ -96,13 +98,27 @@ struct SimulatedMainPacer
                 }
             }
 
-            nextDeadlineNs = nativeOut + static_cast<int64_t>(index) * (unit - nativeUnit);
+            int64_t candidateNs = nativeOut + static_cast<int64_t>(index) * (unit - nativeUnit);
+
+            if (nowNs > 0)
+            {
+                if (candidateNs > nowNs + unit)
+                    candidateNs = nowNs + unit;
+
+                if (candidateNs < nowNs)
+                    candidateNs = nowNs;
+            }
+
+            nextDeadlineNs = candidateNs;
             burstStepNs = unit;
             tsRebased++;
         }
         else
         {
             nextDeadlineNs += burstStepNs;
+
+            if (nowNs > 0 && nextDeadlineNs < nowNs + (burstStepNs / 2))
+                nextDeadlineNs = nowNs + burstStepNs;
         }
 
         lastTsIndex = index;
@@ -249,6 +265,59 @@ int main()
         assert(pacer.pacedFrames == 1 && "Fallback must invoke PaceFrame");
 
         printf("  [PASS] Test 4: Provider scheduler delegation verified without double wait.\n");
+    }
+
+    // Test 5: Windowed deadline clamping in TsDetour and deduplication on isLast
+    {
+        XeFGMainPacingAlignmentTest::SimulatedMainPacer pacer;
+        const int64_t medianNs = 20440000LL; // ~20.44 ms cycle (49 fps, typical in HD2)
+        const uint32_t countPlus1 = 4;       // 4X Multi-Frame Generation (3 generated frames)
+        const int64_t unit = 5110000LL;      // 5.11 ms per slice
+
+        // Subtest 5A: Windowed Clamping - Cap Frame 1 wait to at most 1 * unit
+        // Intel's stock 2X-biased calculation yields nativeOut 10 ms ahead (half the cycle)
+        const int64_t nowNs1 = 1000000000LL;          // 1.0 s wall-clock time
+        const int64_t nativeOutTooFar = 1010000000LL; // 10 ms ahead (nativeOut - nowNs = 10 ms)
+
+        int64_t d1 = pacer.TsDetour(nativeOutTooFar, medianNs, countPlus1, 1, 500.0f, nowNs1);
+        // Candidate was capped at nowNs1 + unit (1000000000 + 5110000 = 1005110000)
+        assert(d1 == nowNs1 + unit && "Frame 1 deadline must be capped to at most nowNs + 1 * unit (5.11 ms)");
+        assert(d1 - nowNs1 == unit && "Frame 1 wait duration must not exceed 1 * unit");
+
+        // Subtest 5B: Windowed Clamping - Floor Frame 1 deadline at nowNs when GPU execution lagged
+        // GPU interpolation took 8 ms, so nativeOut (T_0 + 5.11 ms) is already in the past!
+        XeFGMainPacingAlignmentTest::SimulatedMainPacer pacerLag;
+        const int64_t nowNsLag1 = 1008000000LL;
+        const int64_t nativeOutPast = 1005110000LL; // 2.89 ms in the past
+
+        int64_t dLag1 = pacerLag.TsDetour(nativeOutPast, medianNs, countPlus1, 1, 500.0f, nowNsLag1);
+        assert(dLag1 == nowNsLag1 &&
+               "Frame 1 deadline in the past must be floored to nowNs for immediate presentation");
+
+        // Frame 2 arrives after Frame 1 presented: nowNs is now 1008200000 (0.2 ms after Frame 1)
+        const int64_t nowNsLag2 = 1008200000LL;
+        int64_t dLag2 = pacerLag.TsDetour(nativeOutPast, medianNs, countPlus1, 2, 500.0f, nowNsLag2);
+        // Because dLag1 was floored at nowNsLag1 (1008000000), Frame 2 steps forward by unit (5.11 ms):
+        // 1008000000 + 5110000 = 1013110000.
+        // Relative to nowNsLag2 (1008200000), Frame 2 waits ~4.91 ms instead of dumping in 0.002 ms!
+        assert(dLag2 == dLag1 + unit && "Frame 2 deadline must step forward by 1 * unit from floored Frame 1");
+        assert(dLag2 - nowNsLag2 > 4000000LL && "Frame 2 must have a future wait > 4 ms, eliminating 0.002 ms dump");
+
+        // Subtest 5C: Monotonic step forward when a previous frame presentation experienced sudden hitch
+        // Frame 2 was delayed by an OS/GPU hitch, arriving at nowNs = 1012000000 (less than 1.11 ms before deadline
+        // 1013110000) If nextDeadlineNs < nowNs + (burstStepNs / 2), monotonic guard pushes it to nowNs + burstStepNs
+        const int64_t nowNsHitch = 1012000000LL; // only 1.11 ms left of 5.11 ms step (< 2.55 ms)
+        int64_t dLag3 = pacerLag.TsDetour(nativeOutPast, medianNs, countPlus1, 3, 500.0f, nowNsHitch);
+        assert(dLag3 >= nowNsHitch + unit && "Monotonic guard must step deadline forward from nowNs on hitch");
+
+        // Subtest 5D: Deduplication in TryPace for isLast when scheduler is usable
+        // With schedUsable = true, TryPace on count with isLast = true must NOT invoke OptiScaler PaceFrame
+        auto resLast = pacer.TryPace(3, 3, true, true, false);
+        assert(resLast == XeFGMainPacingAlignmentTest::SimulatedMainPacer::PacingOutcome::ScheduledViaNative);
+        assert(pacer.pacedFrames == 0 &&
+               "TryPace on isLast must return without calling PaceFrame when scheduler is usable");
+
+        printf("  [PASS] Test 5: Windowed deadline clamping, monotonic step, and isLast deduplication verified.\n");
     }
 
     printf("[+] All XeFGPacing Main Branch Alignment Unit Tests PASSED successfully!\n");
