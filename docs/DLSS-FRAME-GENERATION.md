@@ -194,3 +194,61 @@ counsel or the licensing contact listed in NVIDIA's RTX licence.
 
 Checksums and valid signatures establish provenance and detect modification, not that software is
 bug-free or guaranteed free of malware. Keep Windows Security enabled and scan downloads normally.
+
+## Internal mode (experimental)
+
+`[DLSSG] AmpereMfgMode=Internal` changes what the sideloaded dlssg_sm86 mod (the RTX 20/30 MFG
+unlock, `AmpereMfgUnlock=true`) does. Instead of forcing `[FrameGen] External=true` and handing MFG
+control to the game, OptiScaler keeps its own DLSS FG output active, and the mod's process-wide
+`nvngx_dlssg.dll` substitution serves that Streamline-host feature with the mod's SM86/SM75 CUDA
+kernels: real DLSS-G interpolation on RTX 20/30 inside OptiScaler's FG route. This mode is
+experimental and startup-only: change it, save settings, restart.
+
+Requirements:
+
+- `AmpereMfgUnlock=true` with the mod DLL at `OptiScaler\dlssg_sm86\dlssg_sm86.dll` (SilyNoMeta
+  dlssg_for_sm86 build, bundled factory 310.9.1 DLSS-G runtime).
+- `[FrameGen] External=false`, `Enabled=true` and `FGOutput=dlssg`. The FG Nvngx replacement is
+  forced to `None` in this mode; any replacement masquerades as `nvngx_dlssg.dll` itself and
+  defeats the mod's substitution.
+- `FGInput=upscaler` for games without native FG (for example RE Engine titles driven through
+  REFramework + PDPerfPlugin). The mode drives OptiScaler's own FG pipeline; do not enable a
+  second FG implementation at the same time.
+- The complete Streamline set from the sections above in `OptiScaler/streamline`, Windows
+  Hardware-accelerated GPU scheduling (HAGS) enabled, and a current NVIDIA driver.
+
+```ini
+[DLSSG]
+AmpereMfgUnlock=true
+AmpereMfgMode=Internal
+InterpolationCount=1
+
+[FrameGen]
+External=false
+Enabled=true
+FGInput=upscaler
+FGOutput=dlssg
+```
+
+Start at 2X (`InterpolationCount=1`), especially on RE Engine games where 3X and higher have been
+unstable. Raise the count only after 2X works. Watch `OptiScaler.log` for the decisive identity line:
+
+```text
+AmpereMfg internal: nvngx_dlssg.dll identity resolves to <path>
+```
+
+A path under `OptiScaler\dlssg_sm86` proves the mod's substitution fired; a path under
+`OptiScaler\streamline` is a substitution miss. The identity line fires only when OptiScaler's own
+`GetModuleHandle` masquerade performs the first lazy load of `nvngx_dlssg.dll`; if `sl.dlss_g` or
+the NGX snippet loader performed that first load instead, the line may be absent — absence is fine
+when FG works, but if FG fails with no line, check the Streamline log for
+`Ignoring plugin 'sl.dlss_g'` instead of assuming a substitution miss. Triage:
+
+| Observation | Action |
+|---|---|
+| Identity resolves to the `OptiScaler\streamline` path | Substitution miss: keep `OptiScaler.log` and any Streamline log, and report it |
+| Streamline log shows `Ignoring plugin 'sl.dlss_g'` | Set `[DLSSG] AmpereMfgSpoofArchToGame=1` and restart |
+| Architecture-gate failure persists | Send `OptiScaler\dlssg_sm86\logs` with the report |
+
+To revert, set `AmpereMfgMode=External` (or `AmpereMfgUnlock=false`), save settings and restart.
+The default path is unaffected.

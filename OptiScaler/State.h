@@ -58,6 +58,12 @@ enum class FGNvngxReplacement : uint32_t
     Combo,
 };
 
+enum class AmpereMfgMode : uint32_t
+{
+    External,
+    Internal,
+};
+
 enum class WorkingMode : uint32_t
 {
     Dxgi,
@@ -181,6 +187,11 @@ class State
     FGOutput activeFgOutput = FGOutput::NoFG;
     // This should be set to a non-None value only if all other requirements are met and nvngx can be used
     FGNvngxReplacement activeFgNvngx = FGNvngxReplacement::None;
+
+    // Ampere MFG (SM86/SM75 sideload unlock): mirror of the parsed DLSSG.AmpereMfgMode value
+    AmpereMfgMode ampereMfgMode = AmpereMfgMode::External;
+    // Set once at startup (unlock && mode==Internal && !External && !fsrfg-fallback); startup-only
+    bool ampereMfgInternalActive = false;
 
     // Streamline FG inputs
     Sl_Inputs_Dx12 slFGInputs = {};

@@ -3203,12 +3203,19 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
     if (ampereActive)
     {
-        external = true;
+        // AmpereMfgMode=Internal drives OptiScaler's own FG route instead, so External FG must stay
+        // off (startup-only mode, change DLSSG.AmpereMfgMode); every other mode keeps the forced-ON lock.
+        const bool ampereInternal = config->FGDLSSGAmpereMfgMode.value_or("External") == "Internal";
+        external = !ampereInternal;
         ImGui::BeginDisabled();
         ImGui::Checkbox("External frame generation / MFG unlocker", &external);
         ImGui::EndDisabled();
-        ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
-                       "To disable External FG, disable Ampere SM86 MFG below first.");
+        if (ampereInternal)
+            ShowHelpMarker("Locked to disabled: AmpereMfgMode=Internal drives OptiScaler's own FG route "
+                           "(startup-only; change DLSSG.AmpereMfgMode).");
+        else
+            ShowHelpMarker("Automatically locked to enabled because the Ampere (SM86) MFG unlocker is active.\n"
+                           "To disable External FG, disable Ampere SM86 MFG below first.");
     }
     else
     {
@@ -3332,7 +3339,9 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 config->FGDLSSGAmpereMfgUnlock = ampereUnlock;
                 if (ampereUnlock)
                 {
-                    config->ExternalFrameGeneration = true;
+                    // Internal mode drives OptiScaler's own FG route, so External FG must stay off.
+                    if (config->FGDLSSGAmpereMfgMode.value_or("External") != "Internal")
+                        config->ExternalFrameGeneration = true;
                     config->FGDLSSGAdaMfgUnlock = false;
                     config->XeMfgUnlock = false;
                     config->FGDLSSGSmoothMotion = false;
@@ -3349,11 +3358,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                        "Supports Dynamic Multi-Frame Generation, live control, and universal proxy initialization.\n"
                        "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
                        "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
-                       "Do not combine with the Ada unlock or another external MFG unlocker.")
+                       "Do not combine with the Ada unlock or another external MFG unlocker.\n"
+                       "With AmpereMfgMode=Internal, OptiScaler's own FG route stays active and the mod "
+                       "serves its DLSS-G output (experimental; startup-only).")
                     : ("sdli1995 Ampere/Turing unlock. Sideloads the dlssg_for_sm86 proxy.\n"
                        "Auto-enables External FG mode: the game controls MFG from its own menu.\n"
                        "Supports RTX 20 (SM75) and RTX 30 (SM86) series. Save Settings and restart.\n"
-                       "Do not combine with the Ada unlock or another external MFG unlocker.");
+                       "Do not combine with the Ada unlock or another external MFG unlocker.\n"
+                       "With AmpereMfgMode=Internal, OptiScaler's own FG route stays active and the mod "
+                       "serves its DLSS-G output (experimental; startup-only).");
             ShowHelpMarker(helpText.c_str());
         }
 
@@ -3395,6 +3408,28 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                        liveStr.c_str());
                 }
             }
+
+            // Ampere MFG Mode combo (External / Internal)
+            const char* ampereModeOptions[] = { "External (game controls MFG)",
+                                                "Internal (OptiScaler FG route, experimental)" };
+            std::string currentAmpereMode = config->FGDLSSGAmpereMfgMode.value_or("External");
+            int ampereModeIdx = (currentAmpereMode == "Internal") ? 1 : 0;
+            if (ImGui::Combo("Ampere MFG Mode##sm86", &ampereModeIdx, ampereModeOptions, 2))
+            {
+                const char* storedAmpereModeOptions[] = { "External", "Internal" };
+                config->FGDLSSGAmpereMfgMode = std::string(storedAmpereModeOptions[ampereModeIdx]);
+            }
+            ShowHelpMarker("External: forces External FG mode; the game or unlocker controls MFG (historic "
+                           "default).\n"
+                           "Internal: keeps OptiScaler's own FG route active and serves DLSS-G through the "
+                           "sideloaded dlssg_sm86 runtime on SM86/SM75. Requires FGOutput=dlssg; the FG Nvngx "
+                           "replacement stays None. Experimental and startup-only.\n"
+                           "Save Settings and restart to apply.");
+
+            // Startup-only mode: hint while the saved config differs from the session (Ada unlock idiom).
+            const bool ampereInternalConfigured = config->FGDLSSGAmpereMfgMode.value_or("External") == "Internal";
+            if (ampereInternalConfigured != (state.ampereMfgMode == AmpereMfgMode::Internal))
+                ImGui::TextWrapped("Save Settings and restart to apply this change.");
 
             // MaxGeneratedFrames slider
             if (dmfgActive)

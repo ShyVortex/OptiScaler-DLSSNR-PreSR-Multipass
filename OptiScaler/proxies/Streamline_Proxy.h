@@ -95,7 +95,11 @@ class StreamlineProxy
             auto slCommonPath = localSlPath / L"sl.common.dll";
             State::Instance().optiSlCommon = NtdllProxy::LoadLibraryExW_Ldr(slCommonPath.c_str(), NULL, NULL);
             auto dlssgPath = localSlPath / L"nvngx_dlssg.dll"; // TODO: maybe some search?
-            State::Instance().optiDLSSG = NtdllProxy::LoadLibraryExW_Ldr(dlssgPath.c_str(), NULL, NULL);
+            // AmpereMfg internal mode: the sideloaded dlssg_sm86 mod's LdrLoadDll hook must own the FIRST
+            // nvngx_dlssg.dll load; this pre-resolved direct-ntdll call would bypass its substitution.
+            // optiDLSSG has no readers (SLICE 0 audit), so it is simply left null in internal mode.
+            if (!State::Instance().ampereMfgInternalActive)
+                State::Instance().optiDLSSG = NtdllProxy::LoadLibraryExW_Ldr(dlssgPath.c_str(), NULL, NULL);
 
             return HookStreamline(_dll);
         }

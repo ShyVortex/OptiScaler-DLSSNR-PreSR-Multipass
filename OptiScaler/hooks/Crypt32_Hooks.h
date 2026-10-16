@@ -36,7 +36,10 @@ static BOOL hkCryptQueryObject(DWORD dwObjectType, const void* pvObject, DWORD d
                                       phMsg, ppvContext);
         }
 
-        if (pathString.contains("nvngx.dll") && !State::Instance().nvngxExists &&
+        // "_nvngx.dll" is the real DriverStore NGXCore and must validate against its OWN signature: the substring
+        // "nvngx.dll" matches it, and this redirect would poison sl.common's NGX bootstrap. See Wintrust_Hooks.h.
+        if (pathString.contains("nvngx.dll") && !pathString.contains("_nvngx.dll") &&
+            !pathString.contains("nvngx.dll_") && !State::Instance().nvngxExists &&
             State::Instance().nvngxReplacement.has_value() &&
             (Config::Instance()->DxgiSpoofing.value_or_default() ||
              Config::Instance()->StreamlineSpoofing.value_or_default()))

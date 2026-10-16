@@ -9,6 +9,10 @@
 #include <shlobj.h>
 #include <cwctype>
 #include <queue>
+#include <chrono>
+#include <functional>
+#include <mutex>
+#include <vector>
 
 #include <hooks/Gdi32_Hooks.h>
 
@@ -909,4 +913,60 @@ std::map<Util::Luid, std::filesystem::path> Util::GetDriverStore()
         NtdllProxy::FreeLibrary_Ldr(hGdi32);
 
     return result;
+}
+
+namespace
+{
+// Retired GPU objects wait out their drain delay here instead of being destroyed on a
+// detached thread. Destruction happens on the thread that calls ProcessDelayedDestroys()
+// (the render thread via the per-frame evaluate paths), so teardown no longer races the
+// driver work that is concurrently running on that thread.
+std::mutex delayedDestroyMutex;
+std::vector<std::pair<std::chrono::steady_clock::time_point, std::function<void()>>> delayedDestroys;
+constexpr std::chrono::seconds delayedDestroyDelay { 2 };
+} // namespace
+
+void Util::RetireDelayedDestroy(std::function<void()> destroy)
+{
+    if (!destroy)
+        return;
+
+    try
+    {
+        std::scoped_lock lock(delayedDestroyMutex);
+        delayedDestroys.emplace_back(std::chrono::steady_clock::now() + delayedDestroyDelay, std::move(destroy));
+    }
+    catch (...)
+    {
+        LOG_ERROR("DelayedDestroy: retire queue allocation failed; destroying immediately on this thread");
+        destroy();
+    }
+}
+
+void Util::ProcessDelayedDestroys()
+{
+    std::vector<std::function<void()>> matured;
+
+    {
+        std::scoped_lock lock(delayedDestroyMutex);
+        const auto now = std::chrono::steady_clock::now();
+
+        for (auto it = delayedDestroys.begin(); it != delayedDestroys.end();)
+        {
+            if (it->first <= now)
+            {
+                matured.push_back(std::move(it->second));
+                it = delayedDestroys.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    // Destroy outside the queue lock: feature destructors release GPU objects and may
+    // re-enter retirement (nested features, NR lifetimes) from this same thread.
+    for (auto& destroy : matured)
+        destroy();
 }

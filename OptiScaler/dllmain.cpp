@@ -1891,10 +1891,93 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         const bool ampereFallbackToFsrFg = AmpereMfgLoader::ShouldFallbackToFsrFg(
             ampereMaxFrames, onLinux, ampereMfgUnlock, ampereFallbackSetting, ampereDynamicMfg);
 
+        // AmpereMfgMode=Internal: activate OptiScaler's internal FG route instead of the historic
+        // external-FG forcing (startup-only, see DLSSG.AmpereMfgMode in OptiScaler.ini).
+        const bool ampereMfgInternalRequested =
+            ampereMfgUnlock && State::Instance().ampereMfgMode == AmpereMfgMode::Internal && !ampereFallbackToFsrFg;
+
+        // Conflict auto-correct: External=true + Internal mode. Session-only volatile override,
+        // the user's ini value is preserved (same idiom as the external-FG zeroing below).
+        if (ampereMfgInternalRequested && Config::Instance()->ExternalFrameGeneration.value_or_default())
+        {
+            LOG_WARN("AmpereMfgMode=Internal conflicts with External=true; "
+                     "auto-correcting External to false for this session");
+            Config::Instance()->ExternalFrameGeneration.set_volatile_value(false);
+        }
+
         // Initial state of FG
         State::Instance().externalFrameGeneration =
-            (Config::Instance()->ExternalFrameGeneration.value_or_default() || ampereMfgUnlock) &&
+            (Config::Instance()->ExternalFrameGeneration.value_or_default() ||
+             (ampereMfgUnlock && State::Instance().ampereMfgMode != AmpereMfgMode::Internal)) &&
             !ampereFallbackToFsrFg;
+
+        // AmpereMfgMode=Internal combo enforcement: volatile overrides only, the user's ini
+        // values are preserved. The mirrors below pick up whatever is effective here.
+        if (ampereMfgInternalRequested && !State::Instance().externalFrameGeneration)
+        {
+            auto* cfg = Config::Instance();
+
+            // Any nvngx replacement makes OptiScaler masquerade as nvngx_dlssg.dll itself and
+            // would defeat the dlssg_sm86 mod's process-wide substitution.
+            if (cfg->FGNvngxReplacement.value_or_default() != FGNvngxReplacement::None)
+            {
+                auto replacementName = [](FGNvngxReplacement replacement)
+                {
+                    switch (replacement)
+                    {
+                    case FGNvngxReplacement::Nukems:
+                        return "Nukems";
+                    case FGNvngxReplacement::Arturs:
+                        return "Arturs";
+                    case FGNvngxReplacement::FFX:
+                        return "FFX";
+                    case FGNvngxReplacement::Combo:
+                        return "Combo";
+                    case FGNvngxReplacement::None:
+                    default:
+                        return "None";
+                    }
+                };
+                LOG_WARN("Internal mode forces FG Nvngx replacement to None; {} is ignored this session",
+                         replacementName(cfg->FGNvngxReplacement.value_or_default()));
+                cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
+            }
+
+            // Internal mode serves OptiScaler's own DLSS-G output: FGOutput must be dlssg, FG must
+            // be enabled and a valid FG input must be selected. Hard-disable FG on any failure.
+            bool internalComboValid = true;
+            if (cfg->FGOutput.value_or_default() != FGOutput::DLSSG)
+            {
+                LOG_ERROR("AmpereMfg internal mode requires FGOutput=dlssg; internal FG disabled this session");
+                internalComboValid = false;
+            }
+            if (!cfg->FGEnabled.value_or_default())
+            {
+                LOG_ERROR("AmpereMfg internal mode requires FG enabled (FrameGen Enabled=true); "
+                          "internal FG disabled this session");
+                internalComboValid = false;
+            }
+            if (cfg->FGInput.value_or_default() == FGInput::NoFG)
+            {
+                LOG_ERROR("AmpereMfg internal mode requires a valid FG input (FGInput must not be NoFG); "
+                          "internal FG disabled this session");
+                internalComboValid = false;
+            }
+
+            if (internalComboValid)
+            {
+                State::Instance().ampereMfgInternalActive = true;
+                LOG_INFO("AmpereMfg internal mode active: mod will serve OptiScaler's DLSS-G output on this "
+                         "Ampere GPU (startup-only)");
+            }
+            else
+            {
+                // Hard-disable FG for this session (never fall through to the real DLSS-G feature).
+                cfg->FGOutput.set_volatile_value(FGOutput::NoFG);
+                cfg->FGEnabled.set_volatile_value(false);
+            }
+        }
+
         if (State::Instance().externalFrameGeneration)
         {
             // Only runtime overrides: preserve the user's OptiFG configuration for the next

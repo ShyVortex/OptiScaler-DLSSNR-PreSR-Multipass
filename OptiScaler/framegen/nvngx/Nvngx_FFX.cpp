@@ -2,6 +2,7 @@
 #include "Nvngx_FFX.h"
 
 #include <NVNGX_Parameter.h>
+#include <Util.h>
 
 #include "proxies/NVNGX_Proxy.h"
 #include "proxies/Ntdll_Proxy.h"
@@ -240,6 +241,10 @@ NVSDK_NGX_Result Nvngx_FFX::D3D12_EvaluateFeature(ID3D12GraphicsCommandList* InC
 
     if (!InParameters || !InOurHandle)
         return NVSDK_NGX_Result_FAIL_InvalidParameter;
+
+    // Retired FFX framegen contexts must be destroyed on this render thread,
+    // never on a background thread while the driver is in use here.
+    Util::ProcessDelayedDestroys();
 
     if (!Init())
         return NVSDK_NGX_Result_Fail;

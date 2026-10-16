@@ -729,6 +729,10 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D11_EvaluateFeature(ID3D11DeviceConte
         }
     }
 
+    // Retired upscaler features (backend changes) must be destroyed on this render thread,
+    // never on a background thread while the driver is in use here.
+    Util::ProcessDelayedDestroys();
+
     evalCounter++;
     if (Config::Instance()->SkipFirstFrames.has_value() && evalCounter < Config::Instance()->SkipFirstFrames.value())
         return NVSDK_NGX_Result_Success;

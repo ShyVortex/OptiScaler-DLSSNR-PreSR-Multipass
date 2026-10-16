@@ -254,6 +254,18 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
     const int effectiveFrames = (dynamicMfg && hasDynamicMfgSupport) ? maxCeiling : configuredFrames;
     const int maxFrames = ResolveMaxGeneratedFrames(effectiveFrames, onLinux, maxCeiling);
 
+    // Internal route reconciliation: OptiScaler drives the multiplier via slDLSSGSetOptions /
+    // InterpolationCount. Warn (do not mutate) when the requested InterpolationCount exceeds the mod's
+    // resolved MaxGeneratedFrames; the mod clamps generated frames to its companion ini value.
+    if (State::Instance().ampereMfgInternalActive)
+    {
+        const int interpolationCount = cfg->FGDLSSGInterpolationCount.value_or_default();
+        if (interpolationCount > maxFrames)
+            LOG_WARN("AmpereMfgLoader: Requested InterpolationCount={} exceeds AmpereMfgMaxFrames={}; generated "
+                     "frames will be clamped by the mod",
+                     interpolationCount, maxFrames);
+    }
+
     if (onLinux && configuredFrames == 1 && !dynamicMfg)
     {
         LOG_INFO("AmpereMfgLoader: On Linux/Proton with 2X FG (configured max frames 1); SetFlipConfig is stubbed in "
@@ -295,7 +307,8 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
              is3101Runtime, hasDynamicMfgSupport, IdentifyGpu::getPrimaryGpu().name);
 
     return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch,
-                               dynamicMfg, dynamicTargetFps, hasDynamicMfgSupport);
+                               dynamicMfg, dynamicTargetFps, hasDynamicMfgSupport,
+                               State::Instance().ampereMfgInternalActive);
 }
 
 std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)
@@ -434,6 +447,17 @@ void TrySetup()
 
     if (!cfg->FGDLSSGAmpereMfgUnlock.value_or_default())
         return;
+
+    // Internal acceptance: AmpereMfgMode=Internal must only load the mod while the internal FG route is
+    // actually active (State::ampereMfgInternalActive is set once at startup when unlock && Internal &&
+    // !External && !fsrfg-fallback). An invalid combo must not load the mod on top of OptiScaler's own FG
+    // route; the always-run probe above keeps status/UI metadata populated.
+    if (cfg->FGDLSSGAmpereMfgMode.value_or("External") == "Internal" && !State::Instance().ampereMfgInternalActive)
+    {
+        s_status.ErrorMessage = "Internal mode requested but inactive (invalid FG configuration); mod not loaded.";
+        LOG_ERROR("AmpereMfgLoader: internal mode requested but inactive (invalid FG configuration); mod not loaded");
+        return;
+    }
 
     if (s_setupAttempted)
         return;
@@ -714,6 +738,10 @@ void TrySetup()
     s_status.ErrorMessage.clear();
     LOG_INFO("AmpereMfgLoader: SM86/SM75 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
 
+    if (State::Instance().ampereMfgInternalActive)
+        LOG_INFO("AmpereMfg internal: mod loaded from {} (variant: {})", wstring_to_string(dllPath.wstring()),
+                 s_status.ModName);
+
     // Store module handle for live programmatic control
     s_hModule = hMod;
 
@@ -737,7 +765,16 @@ void TrySetup()
         const int explicitOverride = cfg->FGDLSSGOverrideInterpolationCount.value_or(0);
         uint32_t mode = 0;
         uint32_t multiplier = 0;
-        ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
+        if (State::Instance().ampereMfgInternalActive)
+        {
+            // Internal FG route: FollowGame (mode 0) unless Dynamic MFG is explicitly requested;
+            // a fixed multiplier (mode 2) would fight OptiScaler's own slDLSSGSetOptions multiplier.
+            ResolveControlModeAndMultiplierInternal(dynamicMfg, mode, multiplier);
+        }
+        else
+        {
+            ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
+        }
         uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
 
         if (s_pfnRequestControl)

@@ -1195,6 +1195,9 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
         return NVSDK_NGX_Result_FAIL_FeatureNotFound;
     }
 
+    // Retired GPU objects must be destroyed on this render thread
+    Util::ProcessDelayedDestroys();
+
     if (!InCmdList)
     {
         LOG_ERROR("InCmdList is null");
