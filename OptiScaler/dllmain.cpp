@@ -1927,33 +1927,30 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
                      (fallbackType == "xefg" ? "XeFG" : "FSRFG"));
         }
 
-        const bool xeMfgUnlock = XeMfgLoader::EnabledForSession();
-        if (xeMfgUnlock && !State::Instance().externalFrameGeneration)
+        const bool xeMfgActive = XeMfgLoader::EnabledForSession();
+        if (xeMfgActive && !State::Instance().externalFrameGeneration)
         {
             auto* cfg = Config::Instance();
             cfg->FGEnabled.set_volatile_value(true);
-            cfg->FGInput.set_volatile_value(FGInput::DLSSG);
             cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
             cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
             fakenvapi::init(true);
-            LOG_INFO("XeMfgLoader: XeMFG unlock active, auto-configuring pipeline (FGInput=DLSSG, FGOutput=XeFG, "
-                     "FGEnabled=true)");
-        }
 
-        const bool xeMfgSrActive = XeMfgLoader::SrEnabledForSession();
-        if (xeMfgSrActive && !State::Instance().externalFrameGeneration)
-        {
-            auto* cfg = Config::Instance();
-            cfg->FGEnabled.set_volatile_value(true);
-            cfg->FGInput.set_volatile_value(FGInput::Upscaler);
-            cfg->FGOutput.set_volatile_value(FGOutput::XeFG);
-            cfg->FGNvngxReplacement.set_volatile_value(FGNvngxReplacement::None);
-            const int srFrames = std::clamp(cfg->XeMfgSrGeneratedFrames.value_or(2), 1, 5);
-            cfg->FGXeFGInterpolationCount.set_volatile_value(srFrames);
-            fakenvapi::init(true);
-            LOG_INFO("XeMfgLoader: XeMFG-SR injector active, auto-configuring pipeline (FGInput=Upscaler, "
-                     "FGOutput=XeFG, InterpolationCount={}, FGEnabled=true)",
-                     srFrames);
+            if (XeMfgLoader::IsSourceOptiScaler())
+            {
+                cfg->FGInput.set_volatile_value(FGInput::Upscaler);
+                const int maxFrames = std::clamp(cfg->XeMfgMaxFrames.value_or(2), 1, 5);
+                cfg->FGXeFGInterpolationCount.set_volatile_value(maxFrames);
+                LOG_INFO("XeMfgLoader: XeMFG active (Source=OptiScaler), auto-configuring pipeline (FGInput=Upscaler, "
+                         "FGOutput=XeFG, InterpolationCount={}, FGEnabled=true)",
+                         maxFrames);
+            }
+            else
+            {
+                cfg->FGInput.set_volatile_value(FGInput::DLSSG);
+                LOG_INFO("XeMfgLoader: XeMFG active (Source=Game), auto-configuring pipeline (FGInput=DLSSG, "
+                         "FGOutput=XeFG, FGEnabled=true)");
+            }
         }
 
         State::Instance().activeFgInput = Config::Instance()->FGInput.value_or_default();

@@ -162,17 +162,13 @@ bool EnabledForSession()
            !config->FGDLSSGAdaMfgUnlock.value_or_default() && !config->FGDLSSGAmpereMfgUnlock.value_or_default();
 }
 
-bool SrEnabledForSession()
+bool IsSourceOptiScaler()
 {
     auto config = Config::Instance();
     if (!config)
         return false;
-    return config->XeMfgSrEnable.value_or_default() && !config->XeMfgUnlock.value_or_default() &&
-           !config->ExternalFrameGeneration.value_or_default() && !config->FGDLSSGAdaMfgUnlock.value_or_default() &&
-           !config->FGDLSSGAmpereMfgUnlock.value_or_default();
+    return config->XeMfgSourceValue() == XeMfgSource::OptiScaler;
 }
-
-bool AnyEnabledForSession() { return EnabledForSession() || SrEnabledForSession(); }
 
 bool Pending()
 {

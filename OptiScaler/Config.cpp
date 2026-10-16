@@ -358,54 +358,72 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGXeFGDebugView.set_from_config(readBool("XeFG", "DebugView"));
             FGXeFGForceBorderless.set_from_config(readBool("XeFG", "ForceBorderless"));
 
-            // XeMFG Unlock
+            // XeMFG Unlock & Unified Pipeline
             XeMfgUnlock.set_from_config(readBool("XeMFG", "UnlockMFG"));
             if (!XeMfgUnlock.has_value())
                 XeMfgUnlock.set_from_config(readBool("XeFG", "UnlockMFG"));
 
+            // Parse Source: "Game" (0) or "OptiScaler" (1)
+            auto sourceStr = readString("XeMFG", "Source");
+            if (sourceStr.has_value())
+            {
+                std::string s = sourceStr.value();
+                std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+                if (s == "optiscaler" || s == "optifg" || s == "sr" || s == "upscaler")
+                    XeMfgSourceType.set_from_config(static_cast<int>(XeMfgSource::OptiScaler));
+                else if (s == "game" || s == "native" || s == "dlssg" || s == "streamline")
+                    XeMfgSourceType.set_from_config(static_cast<int>(XeMfgSource::Game));
+            }
+
             XeMfgMaxFrames.set_from_config(readInt("XeMFG", "MaxInterpolatedFrames"));
             if (!XeMfgMaxFrames.has_value())
                 XeMfgMaxFrames.set_from_config(readInt("XeFG", "MaxInterpolatedFrames"));
-            if (XeMfgMaxFrames.has_value() && (XeMfgMaxFrames.value() < 1 || XeMfgMaxFrames.value() > 5))
-                XeMfgMaxFrames.reset();
 
             XeMfgExtraPacing.set_from_config(readBool("XeMFG", "ExtraPacing"));
             if (!XeMfgExtraPacing.has_value())
                 XeMfgExtraPacing.set_from_config(readBool("XeFG", "ExtraPacing"));
 
-            // XeMFG-SR Injector (games with DLSS-SR but without native DLSS-FG)
-            XeMfgSrEnable.set_from_config(readBool("XeMFG-SR", "Enable"));
-            if (!XeMfgSrEnable.has_value())
-                XeMfgSrEnable.set_from_config(readBool("XeMFG", "EnableSR"));
+            auto xemfgForceBorderless = readBool("XeMFG", "ForceBorderless");
+            if (xemfgForceBorderless.has_value())
+                FGXeFGForceBorderless.set_from_config(xemfgForceBorderless);
 
-            XeMfgSrGeneratedFrames.set_from_config(readInt("XeMFG-SR", "GeneratedFrames"));
-            if (!XeMfgSrGeneratedFrames.has_value())
-                XeMfgSrGeneratedFrames.set_from_config(readInt("XeMFG", "SrGeneratedFrames"));
-            if (XeMfgSrGeneratedFrames.has_value() &&
-                (XeMfgSrGeneratedFrames.value() < 1 || XeMfgSrGeneratedFrames.value() > 5))
-                XeMfgSrGeneratedFrames.reset();
+            // Legacy XeMFG-SR migration (deprecated sections)
+            auto legacySrEnable = readBool("XeMFG-SR", "Enable");
+            if (!legacySrEnable.has_value())
+                legacySrEnable = readBool("XeMFG", "EnableSR");
 
-            auto srForceBorderless = readBool("XeMFG-SR", "ForceBorderless");
-            if (srForceBorderless.has_value())
-                FGXeFGForceBorderless.set_from_config(srForceBorderless);
-
-            // Strict mutual exclusion: primary XeMFG takes precedence over XeMFG-SR
-            if (XeMfgUnlock.value_or_default())
+            if (legacySrEnable.has_value())
             {
-                if (XeMfgSrEnable.value_or_default())
+                XeMfgSrEnable.set_from_config(legacySrEnable.value());
+                if (legacySrEnable.value())
                 {
-                    LOG_WARN("Config: Primary XeMFG (native DLSS-G) is enabled; disabling XeMFG-SR injector due to "
-                             "mutual exclusion");
-                    XeMfgSrEnable.set_from_config(false);
+                    // If legacy SR was explicitly enabled and XeMfgUnlock was not explicitly set to false,
+                    // migrate to unified XeMFG with Source = OptiScaler
+                    if (!XeMfgUnlock.has_value() || XeMfgUnlock.value())
+                    {
+                        XeMfgUnlock.set_from_config(true);
+                        XeMfgSourceType.set_from_config(static_cast<int>(XeMfgSource::OptiScaler));
+                    }
                 }
             }
 
-            // Universal MFG mutual exclusion with Ada, Ampere, and external FG
-            if (FGDLSSGAdaMfgUnlock.value_or_default() || FGDLSSGAmpereMfgUnlock.value_or_default() ||
-                ExternalFrameGeneration.value_or_default())
+            auto legacySrFrames = readInt("XeMFG-SR", "GeneratedFrames");
+            if (!legacySrFrames.has_value())
+                legacySrFrames = readInt("XeMFG", "SrGeneratedFrames");
+
+            if (legacySrFrames.has_value())
             {
-                XeMfgSrEnable.set_from_config(false);
+                XeMfgSrGeneratedFrames.set_from_config(legacySrFrames.value());
+                if (!XeMfgMaxFrames.has_value())
+                    XeMfgMaxFrames.set_from_config(legacySrFrames.value());
             }
+
+            auto legacySrForceBorderless = readBool("XeMFG-SR", "ForceBorderless");
+            if (legacySrForceBorderless.has_value() && !xemfgForceBorderless.has_value())
+                FGXeFGForceBorderless.set_from_config(legacySrForceBorderless);
+
+            if (XeMfgMaxFrames.has_value() && (XeMfgMaxFrames.value() < 1 || XeMfgMaxFrames.value() > 5))
+                XeMfgMaxFrames.reset();
         }
 
         {
@@ -1317,20 +1335,15 @@ bool Config::SaveIni(std::filesystem::path destination)
                      GetBoolValue(Instance()->FGXeFGForceBorderless.value_for_config()).c_str());
     }
 
-    // XeMFG Unlock
+    // XeMFG Unified Architecture
     {
         ini.SetValue("XeMFG", "UnlockMFG", GetBoolValue(Instance()->XeMfgUnlock.value_for_config()).c_str());
+        const char* sourceStr = (Instance()->XeMfgSourceValue() == XeMfgSource::OptiScaler) ? "OptiScaler" : "Game";
+        ini.SetValue("XeMFG", "Source", sourceStr);
         ini.SetValue("XeMFG", "MaxInterpolatedFrames",
                      GetIntValue(Instance()->XeMfgMaxFrames.value_for_config()).c_str());
         ini.SetValue("XeMFG", "ExtraPacing", GetBoolValue(Instance()->XeMfgExtraPacing.value_for_config()).c_str());
-    }
-
-    // XeMFG-SR Injector
-    {
-        ini.SetValue("XeMFG-SR", "Enable", GetBoolValue(Instance()->XeMfgSrEnable.value_for_config()).c_str());
-        ini.SetValue("XeMFG-SR", "GeneratedFrames",
-                     GetIntValue(Instance()->XeMfgSrGeneratedFrames.value_for_config()).c_str());
-        ini.SetValue("XeMFG-SR", "ForceBorderless",
+        ini.SetValue("XeMFG", "ForceBorderless",
                      GetBoolValue(Instance()->FGXeFGForceBorderless.value_for_config()).c_str());
     }
 
