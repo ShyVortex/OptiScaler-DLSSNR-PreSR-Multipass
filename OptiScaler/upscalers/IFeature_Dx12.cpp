@@ -321,12 +321,16 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     if (diagnoseNr)
         NeuralRendering->DiagnosePipeline(0, InCommandList, InParameters, originalColor, GetFeatureFlags(),
                                           rayReconstruction);
+    bool ordinaryNrInputPrepared = false;
     if (nrBeforeUpscale)
     {
         LOG_DEBUG("IFeature_Dx12: Evaluating DLSS-NR pre-SR input preparation");
         if (auto* nrInput = PrepareDlssNrInput(*NeuralRendering, Device, InCommandList, InParameters, GetFeatureFlags(),
                                                timingQueue, interop, rayReconstruction, submissionEpoch))
+        {
             SetUpscalerResource_Dx12(InParameters, NVSDK_NGX_Parameter_Color, nrInput);
+            ordinaryNrInputPrepared = true;
+        }
         else
             LOG_WARN("IFeature_Dx12: PrepareDlssNrInput returned nullptr; continuing with original color");
     }
@@ -340,7 +344,7 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
     const int denoiseGameRoute =
         denoiseHandoff.color || denoiseHandoff.replaceOutput
             ? std::clamp(Config::Instance()->DlssNrDenoiseFirstStep.value_or_default(), 0, 2) + 1
-            : 0;
+            : (ordinaryNrInputPrepared ? 4 : 0);
     const bool resetGameHistory = denoiseGameRoute != _denoiseGameRoute;
     const bool evalResult = [&]
     {

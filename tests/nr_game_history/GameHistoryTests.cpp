@@ -93,7 +93,7 @@ struct Feature
         observedY = p->y;
         return nextSuccess;
     }
-    bool Frame(NVSDK_NGX_Parameter* InParameters, Handoff denoiseHandoff)
+    bool Frame(NVSDK_NGX_Parameter* InParameters, Handoff denoiseHandoff, bool ordinaryNrInputPrepared = false)
     {
         ID3D12GraphicsCommandList command;
         auto* InCommandList = &command;
@@ -165,6 +165,50 @@ int main()
     absentResetFeature.Frame(&absentReset, Handoff { &edited });
     Check(absentResetFeature.observedReset == 1 && absentReset.reset.value_or(0) == 0,
           "previously unset Reset restores semantic zero after route transition");
+    Feature ordinary;
+    struct OrdinaryCase
+    {
+        const char* name;
+        bool edited, success;
+        unsigned wantReset;
+    };
+    const OrdinaryCase ordinaryCases[] {
+        { "initial raw input retains history", false, true, 0 },
+        { "ordinary edited input resets game history", true, true, 1 },
+        { "stable ordinary edited input retains history", true, true, 0 },
+        { "rejected raw fallback resets without committing", false, false, 1 },
+        { "raw fallback retry repeats reset", false, true, 1 },
+        { "stable raw fallback retains history", false, true, 0 },
+        { "rejected ordinary entry resets without committing", true, false, 1 },
+        { "ordinary entry retry repeats reset", true, true, 1 },
+        { "stable ordinary entry retains history", true, true, 0 },
+    };
+    for (const auto& test : ordinaryCases)
+    {
+        NVSDK_NGX_Parameter params;
+        params.reset = 0;
+        ordinary.nextSuccess = test.success;
+        const auto accepted = ordinary.Frame(&params, {}, test.edited);
+        Check(accepted == test.success && ordinary.observedReset == test.wantReset, test.name);
+        Check(params.reset == 0u && params.x == .25f && params.y == -.375f && ordinary.observedX == params.x &&
+                  ordinary.observedY == params.y,
+              "ordinary route preserves raw game jitter and restores caller Reset");
+    }
+    for (int step = 0; step != 3; ++step)
+    {
+        Config::Instance()->DlssNrDenoiseFirstStep = step;
+        NVSDK_NGX_Parameter params;
+        params.reset = 0;
+        ordinary.Frame(&params, step == 1 ? Handoff { nullptr, true } : Handoff { &edited });
+        Check(ordinary.observedReset == 1, "ordinary-to-private transition resets history");
+        ordinary.Frame(&params, {}, true);
+        Check(ordinary.observedReset == 1, "private-to-ordinary transition resets history");
+    }
+    NVSDK_NGX_Parameter ordinaryCallerReset;
+    ordinaryCallerReset.reset = 1;
+    ordinary.Frame(&ordinaryCallerReset, {}, true);
+    Check(ordinary.observedReset == 1 && ordinaryCallerReset.reset == 1u,
+          "stable ordinary input preserves caller requested Reset");
     std::printf("%u assertion failure(s)\n", failures);
     return failures ? 1 : 0;
 }

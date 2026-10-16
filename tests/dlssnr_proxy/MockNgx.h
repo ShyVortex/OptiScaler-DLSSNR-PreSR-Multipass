@@ -6,6 +6,7 @@
 #include <variant>
 #include <nvsdk_ngx_params.h>
 
+#ifndef NR_PROXY_REAL_LIFETIME
 struct ID3D12Device
 {
 };
@@ -22,6 +23,7 @@ struct ID3D12CommandQueue
 struct ID3D12Resource
 {
 };
+#endif
 
 #define LOG_INFO(...) ((void) 0)
 #define LOG_ERROR(...) ((void) 0)
