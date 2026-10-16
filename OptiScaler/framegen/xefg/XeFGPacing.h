@@ -286,12 +286,21 @@ inline void NoteFrame(uint64_t index, uint64_t count, int64_t nowQpc)
         return;
 
     if (g_lastBurstQpc != 0)
-        PushPeriod(NsFromQpc(nowQpc - g_lastBurstQpc));
+    {
+        const int64_t totalDeltaNs = NsFromQpc(nowQpc - g_lastBurstQpc);
 
-    // Feed the stable 15-sample median cycle period so TagFrameConstants does not flip-flop
-    // between 25 ms and 4 ms on alternating frames when background worker waits are subtracted.
-    if (g_periodNs > 0)
-        g_renderTimeNs = g_periodNs;
+        if (totalDeltaNs >= 1000000LL && totalDeltaNs <= 500000000LL)
+        {
+            const int64_t blockNs = NsFromQpc(g_burstBlockQpc);
+
+            // Subtract presentation wait duration from total burst delta BEFORE median filtering
+            // so g_renderTimeNs reflects pure unblocked engine render + GPU interpolation time,
+            // completely eliminating the self-referential wait inflation feedback loop.
+            const int64_t pureNs = (totalDeltaNs > blockNs + 2000000LL) ? (totalDeltaNs - blockNs) : 2000000LL;
+            PushPeriod(pureNs);
+            g_renderTimeNs = g_periodNs;
+        }
+    }
 
     g_burstBlockQpc = 0;
     g_lastBurstQpc = nowQpc;
@@ -371,6 +380,30 @@ inline void PaceFrame(uint64_t index, uint64_t count)
     RecordGap(end.QuadPart);
 }
 
+inline bool SchedForwarder(void* ctx, void* burst, uint8_t gate, void* timing, uint32_t index)
+{
+    if (g_schedNative == nullptr)
+        return false;
+
+    LARGE_INTEGER before;
+    QueryPerformanceCounter(&before);
+
+    const bool scheduled = g_schedNative(ctx, burst, gate, timing, index);
+
+    LARGE_INTEGER after;
+    QueryPerformanceCounter(&after);
+
+    const int64_t waitQpc = after.QuadPart - before.QuadPart;
+    g_schedCalls++;
+    g_schedWaitQpc += waitQpc;
+    g_burstBlockQpc += waitQpc;
+
+    if (!scheduled)
+        g_schedRefused++;
+
+    return scheduled;
+}
+
 inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
 {
     if (g_schedNative == nullptr || g_ringSnapshot == nullptr)
@@ -389,19 +422,12 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
 
     NoteFrame(index, count, before.QuadPart);
 
-    const bool scheduled = g_schedNative(ctx, burst, gate, timing, static_cast<uint32_t>(index));
+    const bool scheduled = SchedForwarder(ctx, burst, gate, timing, static_cast<uint32_t>(index));
 
     LARGE_INTEGER after;
     QueryPerformanceCounter(&after);
 
-    g_schedCalls++;
-
-    if (!scheduled)
-        g_schedRefused++;
-
     const int64_t waitQpc = after.QuadPart - before.QuadPart;
-    g_schedWaitQpc += waitQpc;
-    g_burstBlockQpc += waitQpc;
 
     if (g_diagSeq > 0)
     {
@@ -425,8 +451,6 @@ inline void ScheduleFrame(void* ctx, uint8_t* burst, uint64_t index)
                  reinterpret_cast<uint8_t*>(ctx)[SchedEnableOffset], *reinterpret_cast<uint64_t*>(timing),
                  *reinterpret_cast<uint64_t*>(timing + 8));
     }
-
-    RecordGap(after.QuadPart);
 }
 
 inline bool ProviderPacesLastFrame(void* ctx, const uint8_t* burst, uint64_t count)
@@ -496,17 +520,42 @@ inline int64_t Detour(void* ctx, uint32_t a2, uint32_t a3, uint64_t a4, void* ar
         auto* caller = reinterpret_cast<uint8_t*>(XE_RETURN_ADDRESS());
 
         if (caller == g_base + PacedCallerRva)
+        {
             TryPace(ctx, arg5, arg6, arg7, false);
+        }
         else if (caller == g_base + LastFrameCallerRva)
+        {
             TryPace(ctx, arg5, arg6, arg7, true);
+        }
+        else if (g_lastMultiplier >= 2 && g_burstStepNs > 0 && g_lastPacedQpc != 0)
+        {
+            // Caller is the Base Frame present at 0x220A52 / 0x220DAD.
+            // Wait one g_burstStepNs from the presentation of Frame count so that Frame count
+            // stays on screen for a full step rather than being overwritten in 0.3 ms!
+            const int64_t targetQpc = g_lastPacedQpc + QpcFromNs(g_burstStepNs);
+            LARGE_INTEGER before;
+            QueryPerformanceCounter(&before);
+
+            if (before.QuadPart < targetQpc)
+            {
+                WaitUntil(targetQpc);
+                LARGE_INTEGER after;
+                QueryPerformanceCounter(&after);
+                g_burstBlockQpc += (after.QuadPart - before.QuadPart);
+            }
+        }
     }
 
-    return g_native(ctx, a2, a3, a4, arg5, arg6, arg7);
-}
+    const int64_t res = g_native(ctx, a2, a3, a4, arg5, arg6, arg7);
 
-inline bool SchedForwarder(void* ctx, void* burst, uint8_t gate, void* timing, uint32_t index)
-{
-    return g_schedNative != nullptr && g_schedNative(ctx, burst, gate, timing, index);
+    if (g_enabled)
+    {
+        LARGE_INTEGER end;
+        QueryPerformanceCounter(&end);
+        RecordGap(end.QuadPart);
+    }
+
+    return res;
 }
 
 inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32_t index, uint32_t countPlus1)
@@ -518,9 +567,12 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 
     const int64_t nativeOut = *out;
     const int64_t median = *reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(timing) + 8);
-    const int64_t unit = median / static_cast<int64_t>(countPlus1);
 
-    if (unit <= 0)
+    // Calculate target step duration based on pure unblocked render time if available, or ring median
+    const int64_t refNs = (g_renderTimeNs > 0) ? g_renderTimeNs : median;
+    const int64_t stepNs = std::clamp(refNs / static_cast<int64_t>(countPlus1), 1000000LL, 20000000LL);
+
+    if (stepNs <= 0)
         return result;
 
     g_tsCalls++;
@@ -533,8 +585,6 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
 
     if (fresh)
     {
-        int64_t nativeUnit = unit;
-
         if (g_ring != nullptr)
         {
             float f = *reinterpret_cast<const float*>(g_ring + RingMeasuredOffset);
@@ -545,43 +595,21 @@ inline void* TsDetour(void* a1, int64_t* out, void* lookup, void* timing, uint32
             const int64_t fNs = static_cast<int64_t>(f * 1000000.0f);
             const int64_t clampedUnit = fNs / static_cast<int64_t>(countPlus1);
 
-            if (clampedUnit < nativeUnit)
-            {
-                nativeUnit = clampedUnit;
+            if (clampedUnit < stepNs)
                 g_tsClamped++;
-            }
         }
 
-        // Reconstruct the burst's true anchor timestamp (T_0) before Intel's 2X-biased step,
-        // then partition uniformly by 'unit' (T_cycle / countPlus1).
-        int64_t candidateNs = *out + static_cast<int64_t>(index) * (unit - nativeUnit);
-
-        if (nowNs > 0)
-        {
-            // 1. Cap Frame 1 wait to at most 1 * unit (e.g. 5.11 ms at 4X instead of 10.02 ms)
-            //    so Frame 1 never consumes 50% of the cycle or triggers the resonant lock.
-            if (candidateNs > nowNs + unit)
-                candidateNs = nowNs + unit;
-
-            // 2. Floor Frame 1 deadline at nowNs so if GPU interpolation took longer than 1 * unit,
-            //    Frame 1 presents immediately AND Frame 2 (g_nextDeadlineNs + unit) is still spaced
-            //    by a full 'unit' (5.11 ms) after Frame 1 instead of expiring in 0.002 ms!
-            if (candidateNs < nowNs)
-                candidateNs = nowNs;
-        }
-
-        g_nextDeadlineNs = candidateNs;
-        g_burstStepNs = unit;
+        // Frame 1 presents immediately when GPU interpolation finishes (0 wait!),
+        // because the display was already occupied by the Base Frame during the preceding
+        // CPU submission + GPU interpolation window (~16 ms).
+        g_nextDeadlineNs = nowNs;
+        g_burstStepNs = stepNs;
         g_tsRebased++;
     }
     else
     {
-        g_nextDeadlineNs += g_burstStepNs;
-
-        // If a previous frame's presentation took longer than expected, ensure the next
-        // generated frame still steps forward from the current time rather than dumping in 0 ms.
-        if (nowNs > 0 && g_nextDeadlineNs < nowNs + (g_burstStepNs / 2))
-            g_nextDeadlineNs = nowNs + g_burstStepNs;
+        // Subsequent generated frames advance uniformly by stepNs
+        g_nextDeadlineNs = std::max(g_nextDeadlineNs + g_burstStepNs, nowNs + g_burstStepNs);
     }
 
     g_lastTsIndex = index;
