@@ -247,24 +247,28 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
         validRouter = "Auto";
 
     std::string validPreset = preset;
-    if (validPreset != "A" && validPreset != "B" && validPreset != "a" && validPreset != "b")
+    if (validPreset != "A" && validPreset != "B" && validPreset != "C" && validPreset != "a" && validPreset != "b" &&
+        validPreset != "c")
         validPreset = "Auto";
     else if (validPreset == "a")
         validPreset = "A";
     else if (validPreset == "b")
         validPreset = "B";
+    else if (validPreset == "c")
+        validPreset = "C";
 
     int validOptimized = (optimized >= 0 && optimized <= 3) ? optimized : 1;
     int validHwBilinear = (hwBilinear == 1) ? 1 : 0;
     int validLogLevel = (logLevel >= 0 && logLevel <= 3) ? logLevel : 1;
 
     std::ostringstream ss;
-    ss << "; DLSSG SM86 0.3.x configuration. Restart the game after changing this file.\n";
+    ss << "; DLSSG SM86 configuration. Restart the game after changing this file.\n";
     ss << "[General]\n";
     ss << "Enabled=1\n\n";
     ss << "[FrameGeneration]\n";
     ss << "Optimized=" << validOptimized << "\n";
     ss << "MaxGeneratedFrames=" << maxFrames << "\n";
+    ss << "Engine=DLSS\n";
     if (dynamicMfg)
     {
         ss << "DynamicMFG=1\n";
@@ -277,6 +281,9 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
         ss << "DynamicTargetFPS=0\n";
     }
     ss << "\n";
+    ss << "[DLSSG]\n";
+    ss << "Optimized=" << validOptimized << "\n";
+    ss << "Preset=" << validPreset << "\n\n";
     ss << "[Compatibility]\n";
     ss << "Preset=" << validPreset << "\n";
     ss << "Router=" << validRouter << "\n";

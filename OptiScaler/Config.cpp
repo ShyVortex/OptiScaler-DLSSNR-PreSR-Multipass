@@ -124,6 +124,8 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGDLSSGAmpereMfgPreset.set_from_config("A");
                 else if (lstrcmpiA(amperePreset.value().c_str(), "b") == 0)
                     FGDLSSGAmpereMfgPreset.set_from_config("B");
+                else if (lstrcmpiA(amperePreset.value().c_str(), "c") == 0)
+                    FGDLSSGAmpereMfgPreset.set_from_config("C");
                 else
                     FGDLSSGAmpereMfgPreset.set_from_config("Auto");
             }

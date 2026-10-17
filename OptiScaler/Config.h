@@ -674,7 +674,8 @@ class Config
         1
     }; // 0.3.2-0.3.5 consistency tiers: 0=stock, 1=bit-identical (recommended default), 2=fast lossy (>50 dB),
        // 3=fastest lossy
-    CustomOptional<std::string, NoDefault> FGDLSSGAmpereMfgPreset; // 0.3.0: UI recomposition preset: Auto / A / B
+    CustomOptional<std::string, NoDefault>
+        FGDLSSGAmpereMfgPreset; // 0.4.0+: UI recomposition / FG Lite preset: Auto / A / B / C
     CustomOptional<std::string, NoDefault>
         FGDLSSGAmpereMfgSpoofArchToGame; // 0.3.3: Streamline/Game arch spoofing: auto / 1 / 0
     CustomOptional<int> FGDLSSGAmpereMfgLogLevel {
