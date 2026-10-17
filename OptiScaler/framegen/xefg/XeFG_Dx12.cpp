@@ -221,6 +221,32 @@ xefg_swapchain_d3d12_resource_data_t XeFG_Dx12::GetResourceData(FG_ResourceType 
     resourceParam.pResource = fResource->GetResource();
     resourceParam.incomingState = fResource->state;
 
+    // Dimension mismatch protection & subrect decoupling for HUD-less and UI textures
+    const uint32_t targetWidth = _width > 0 ? _width : _constants.displayWidth;
+    const uint32_t targetHeight = _height > 0 ? _height : _constants.displayHeight;
+
+    if (targetWidth > 0 && targetHeight > 0)
+    {
+        if (type == FG_ResourceType::HudlessColor || type == FG_ResourceType::UIColor)
+        {
+            if (resourceParam.resourceSize.width != targetWidth || resourceParam.resourceSize.height != targetHeight)
+            {
+                static bool loggedHudlessMismatch = false;
+                static bool loggedUiMismatch = false;
+                bool& logged = (type == FG_ResourceType::HudlessColor) ? loggedHudlessMismatch : loggedUiMismatch;
+                if (!logged)
+                {
+                    LOG_WARN("Resource {} dimension mismatch: {}x{} != target {}x{}; omitting optional plane to avoid "
+                             "XeFG -12 abort",
+                             magic_enum::enum_name(type), resourceParam.resourceSize.width,
+                             resourceParam.resourceSize.height, targetWidth, targetHeight);
+                    logged = true;
+                }
+                return xefg_swapchain_d3d12_resource_data_t {};
+            }
+        }
+    }
+
     switch (type)
     {
     case FG_ResourceType::Depth:
@@ -277,6 +303,8 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
 
             if (result)
             {
+                _width = desc->BufferDesc.Width;
+                _height = desc->BufferDesc.Height;
                 *swapChain = State::Instance().currentFGSwapchain;
                 return true;
             }
@@ -522,6 +550,8 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
 
             if (result)
             {
+                _width = desc->Width;
+                _height = desc->Height;
                 *swapChain = (IDXGISwapChain1*) State::Instance().currentFGSwapchain;
                 return true;
             }
