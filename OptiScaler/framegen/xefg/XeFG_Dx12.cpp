@@ -249,6 +249,23 @@ xefg_swapchain_d3d12_resource_data_t XeFG_Dx12::GetResourceData(FG_ResourceType 
 bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQueue, DXGI_SWAP_CHAIN_DESC* desc,
                                 IDXGISwapChain** swapChain, bool readyToRelease)
 {
+    if (desc != nullptr)
+    {
+        if (desc->BufferDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
+            desc->BufferDesc.Format == DXGI_FORMAT_R16G16B16A16_TYPELESS)
+        {
+            State::Instance().xefgHdrFormatUnsupported = true;
+            LOG_WARN("Swapchain backbuffer uses 16-bit float format ({}); Intel XeSS-FG optical flow pipeline does not "
+                     "support R16G16B16A16_FLOAT! Recommend setting HDR format to 10-bit (R10G10B10A2) or 8-bit SDR to "
+                     "avoid black screens or driver aborts.",
+                     magic_enum::enum_name(desc->BufferDesc.Format));
+        }
+        else
+        {
+            State::Instance().xefgHdrFormatUnsupported = false;
+        }
+    }
+
     if (State::Instance().currentFGSwapchain != nullptr && _hwnd == desc->OutputWindow)
     {
         if (Config::Instance()->FGPreserveSwapChain.value_or_default())
@@ -479,6 +496,22 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
                                  DXGI_SWAP_CHAIN_DESC1* desc, DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
                                  IDXGISwapChain1** swapChain, bool readyToRelease)
 {
+    if (desc != nullptr)
+    {
+        if (desc->Format == DXGI_FORMAT_R16G16B16A16_FLOAT || desc->Format == DXGI_FORMAT_R16G16B16A16_TYPELESS)
+        {
+            State::Instance().xefgHdrFormatUnsupported = true;
+            LOG_WARN("Swapchain backbuffer uses 16-bit float format ({}); Intel XeSS-FG optical flow pipeline does not "
+                     "support R16G16B16A16_FLOAT! Recommend setting HDR format to 10-bit (R10G10B10A2) or 8-bit SDR to "
+                     "avoid black screens or driver aborts.",
+                     magic_enum::enum_name(desc->Format));
+        }
+        else
+        {
+            State::Instance().xefgHdrFormatUnsupported = false;
+        }
+    }
+
     if (State::Instance().currentFGSwapchain != nullptr && _hwnd == hwnd)
     {
         if (Config::Instance()->FGPreserveSwapChain.value_or_default())

@@ -272,6 +272,7 @@ class State
     float lastMipBiasMax = -100.0f;
 
     bool WAR_xefgRequestFGToggle = false;
+    bool xefgHdrFormatUnsupported = false;
 
     bool dlssgGameDMFGSupported = false;
     sl::DLSSGMode dlssgLastSetMode = sl::DLSSGMode::eOff;

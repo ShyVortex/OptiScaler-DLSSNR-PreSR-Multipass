@@ -3869,6 +3869,14 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                    "Note: Save Settings and restart the game to initialize the XeFG SwapChain.");
             }
 
+            if (state.xefgHdrFormatUnsupported)
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.35f, 0.35f, 1.0f)),
+                                   "Warning: Backbuffer uses 16-bit float (RGBA16F). Intel XeSS-FG optical flow "
+                                   "pipeline does not support R16G16B16A16_FLOAT. Switch display mode to 10-bit HDR "
+                                   "(R10G10B10A2) or 8-bit SDR.");
+            }
+
             if (status.HasPresentTelemetry)
             {
                 if (status.LastFrameGenResult == 0)
@@ -5077,6 +5085,14 @@ void MenuCommon::RenderFrameGenerationRuntimeSettings(RenderMenuContext& ctx)
         {
             ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.8f, 0.f, 1.f)),
                                "Restart the game to apply correct XeFG settings!");
+        }
+
+        if (state.xefgHdrFormatUnsupported)
+        {
+            ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.35f, 0.35f, 1.0f)),
+                               "Warning: Backbuffer uses 16-bit float (RGBA16F). Intel XeSS-FG optical flow "
+                               "pipeline does not support R16G16B16A16_FLOAT. Switch display mode to 10-bit HDR "
+                               "(R10G10B10A2) or 8-bit SDR.");
         }
         else
         {
