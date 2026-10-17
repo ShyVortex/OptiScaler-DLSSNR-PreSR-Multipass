@@ -3488,23 +3488,26 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "3 - Fastest lossy: All lossy accelerations enabled, including texture-unit bilinear sampling.\n"
                 "Save Settings and restart to apply.");
 
-            // UI Recomposition Preset combo (0.3.0)
+            // UI Recomposition / FG Lite Preset combo (0.3.0 - 0.4.0)
             const char* presetOptions[] = { "Auto (Game / Profile default)", "Preset A (Force UI recomposition off)",
-                                            "Preset B (Force UI recomposition on)" };
+                                            "Preset B (Force UI recomposition on)",
+                                            "Preset C (FG Lite: fast / 30-50% less GPU time)" };
             std::string currentPreset = config->FGDLSSGAmpereMfgPreset.value_or("Auto");
             int presetIdx = (currentPreset == "A" || currentPreset == "a")   ? 1
                             : (currentPreset == "B" || currentPreset == "b") ? 2
+                            : (currentPreset == "C" || currentPreset == "c") ? 3
                                                                              : 0;
-            if (ImGui::Combo("UI Recomposition Preset##sm86", &presetIdx, presetOptions, 3))
+            if (ImGui::Combo("UI Recomposition Preset##sm86", &presetIdx, presetOptions, 4))
             {
-                const char* storedPresetOptions[] = { "Auto", "A", "B" };
+                const char* storedPresetOptions[] = { "Auto", "A", "B", "C" };
                 config->FGDLSSGAmpereMfgPreset = std::string(storedPresetOptions[presetIdx]);
             }
-            ShowHelpMarker("Preset for UI / HUD recomposition on 310.9 runtime:\n"
+            ShowHelpMarker("Preset for UI / HUD recomposition / FG Lite:\n"
                            "Auto: Let the game or driver profile decide (default).\n"
                            "A: Force UI recomposition off.\n"
                            "B: Force UI recomposition on for cleaner HUD inside generated frames (only takes effect if "
                            "game provides HUD-less plane).\n"
+                           "C: FG Lite: 30-50% faster kernel execution with lighter candidate blending.\n"
                            "Save Settings and restart to apply.");
 
             // KernelImage combo
