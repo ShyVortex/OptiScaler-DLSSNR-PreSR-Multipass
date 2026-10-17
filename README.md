@@ -1,11 +1,10 @@
-# OptiScaler: Next-Gen Neural Rendering & Multi-Frame Generation Suite
+# OptiScaler: NR & MFG Suite
 
 [![GitHub Release](https://img.shields.io/github/v/release/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass?style=flat-square&color=blue)](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/releases)
 [![Build & Test CI](https://img.shields.io/github/actions/workflow/status/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/build.yml?branch=main&style=flat-square&label=Build%20CI)](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/actions)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg?style=flat-square)](LICENSE)
 [![C++20](https://img.shields.io/badge/Standard-C%2B%2B20-darkblue.svg?style=flat-square)](https://en.cppreference.com/w/cpp/20)
 [![DirectX 12](https://img.shields.io/badge/DirectX-12%20%7C%2011%20%7C%20Vulkan-orange.svg?style=flat-square)](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass)
-[![Discord](https://img.shields.io/discord/1110911762111868948?color=5865F2&label=OptiScaler%20Discord&style=flat-square)](https://discord.gg/wEyd9w4hG5)
 
 A high-performance, next-generation AI image reconstruction, neural processing, and **Multi-Frame Generation (up to 6X FG)** middleware suite.
 
