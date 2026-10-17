@@ -313,26 +313,26 @@ if ($HybridAssetsDirectory) {
 if ($IncludeAmpereMfg) {
     $sm86Src = "$root\dlssg_for_sm86"
     $sm86Dll = "$sm86Src\version.dll"
-    if (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\SilyNoMeta\version.dll")) {
-        $sm86Src = "$sm86Src\SilyNoMeta"
-        $sm86Dll = "$sm86Src\version.dll"
-    } elseif (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\sdli1995\version.dll")) {
+    if (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\sdli1995\version.dll")) {
         $sm86Src = "$sm86Src\sdli1995"
+        $sm86Dll = "$sm86Src\version.dll"
+    } elseif (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\SilyNoMeta\version.dll")) {
+        $sm86Src = "$sm86Src\SilyNoMeta"
         $sm86Dll = "$sm86Src\version.dll"
     }
     if ($UpdateAmpereMfg -or (-not (Test-Path -LiteralPath $sm86Dll))) {
-        Write-Host "Acquiring verified SM75/SM86 0.3.5-5 runtime from SilyNoMeta fork..."
+        Write-Host "Acquiring verified SM75/SM86 0.4.0 runtime from sdli1995 repository..."
         if (-not (Test-Path -LiteralPath $sm86Src)) {
             New-Item -ItemType Directory -Force -Path $sm86Src | Out-Null
         }
         if (-not (Test-Path -LiteralPath "$sm86Src\.git")) {
             git init $sm86Src
-            git -C $sm86Src remote add origin https://github.com/SilyNoMeta/dlssg_for_sm86.git
+            git -C $sm86Src remote add origin https://github.com/sdli1995/dlssg_for_sm86.git
         } else {
-            git -C $sm86Src remote set-url origin https://github.com/SilyNoMeta/dlssg_for_sm86.git
+            git -C $sm86Src remote set-url origin https://github.com/sdli1995/dlssg_for_sm86.git
         }
-        git -C $sm86Src fetch --depth 1 origin tags/v0.3.5-5
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.3.5-5 runtime from SilyNoMeta fork' }
+        git -C $sm86Src fetch --depth 1 origin tags/0.4.0
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.0 runtime from sdli1995 repository' }
         git -C $sm86Src checkout --detach FETCH_HEAD
     }
     if (-not (Test-Path -LiteralPath $sm86Dll)) {
@@ -349,6 +349,10 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $sm86ReshadeIni) {
         Copy-Item -LiteralPath $sm86ReshadeIni -Destination "$sm86DestDir\ReShade.ini"
     }
+    $sm86RuntimeDir = "$sm86Src\dlssg_sm86"
+    if (Test-Path -LiteralPath $sm86RuntimeDir) {
+        Copy-Item -LiteralPath $sm86RuntimeDir -Destination "$sm86DestDir\dlssg_sm86" -Recurse -Force
+    }
     $sm863101Dll = "$sm86Src\310.1\version.dll"
     if (Test-Path -LiteralPath $sm863101Dll) {
         $sm863101DestDir = "$sm86DestDir\310.1"
@@ -363,11 +367,23 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $readme) {
         Copy-Item -LiteralPath $readme -Destination "$sm86DestDir\README.en.md"
     }
+    $manualEn = "$sm86Src\MANUAL.en.html"
+    if (Test-Path -LiteralPath $manualEn) {
+        Copy-Item -LiteralPath $manualEn -Destination "$sm86DestDir\MANUAL.en.html"
+    }
+    $manifest = "$sm86Src\manifest.json"
+    if (Test-Path -LiteralPath $manifest) {
+        Copy-Item -LiteralPath $manifest -Destination "$sm86DestDir\manifest.json"
+    }
+    $validation = "$sm86Src\validation.json"
+    if (Test-Path -LiteralPath $validation) {
+        Copy-Item -LiteralPath $validation -Destination "$sm86DestDir\validation.json"
+    }
     $docs = "$sm86Src\docs"
     if (Test-Path -LiteralPath $docs) {
         Copy-Item -LiteralPath $docs -Destination "$sm86DestDir\docs" -Recurse -Force
     }
-    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, 310.1 runtime (if present), documentation, and notices staged"
+    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, modular dlssg_sm86 folder, 310.1 runtime (if present), documentation, and notices staged"
 }
 
 if ($IncludeNVSmooth30) {
