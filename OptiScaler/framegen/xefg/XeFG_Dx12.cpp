@@ -305,6 +305,7 @@ bool XeFG_Dx12::CreateSwapchain(IDXGIFactory* factory, ID3D12CommandQueue* cmdQu
             {
                 _width = desc->BufferDesc.Width;
                 _height = desc->BufferDesc.Height;
+                _lastResetFrame = 0;
                 *swapChain = State::Instance().currentFGSwapchain;
                 return true;
             }
@@ -552,6 +553,7 @@ bool XeFG_Dx12::CreateSwapchain1(IDXGIFactory* factory, ID3D12CommandQueue* cmdQ
             {
                 _width = desc->Width;
                 _height = desc->Height;
+                _lastResetFrame = 0;
                 *swapChain = (IDXGISwapChain1*) State::Instance().currentFGSwapchain;
                 return true;
             }
@@ -822,6 +824,7 @@ void XeFG_Dx12::Deactivate()
         _actuallyDispatchedFrame = 0;
         _waitingNewFrameData = false;
         _needResetHistory = true;
+        _lastResetFrame = 0;
         ClearAllResourceReady();
 
         LOG_INFO("SetEnabled: false, result: {} ({})", magic_enum::enum_name(result), (UINT) result);
@@ -1056,9 +1059,33 @@ bool XeFG_Dx12::Dispatch()
     constData.motionVectorScaleY = (_mvScaleY[fIndex] != 0.0f) ? _mvScaleY[fIndex] : 1.0f;
 
     if (!Config::Instance()->FGSkipReset.value_or_default())
-        constData.resetHistory = (_reset[fIndex] || _needResetHistory);
+    {
+        bool requestedReset = (_reset[fIndex] || _needResetHistory);
+        if (requestedReset)
+        {
+            // Debounce consecutive resets: if a reset was already executed within the last 3 frames
+            // and neither dimensions nor swapchain recreated, suppress redundant optical flow purging.
+            if (_lastResetFrame > 0 && (_frameCount - _lastResetFrame) < 3)
+            {
+                LOG_DEBUG("Debouncing rapid consecutive XeFG resetHistory (frame {}, last reset {})", _frameCount,
+                          _lastResetFrame);
+                constData.resetHistory = false;
+            }
+            else
+            {
+                constData.resetHistory = true;
+                _lastResetFrame = _frameCount;
+            }
+        }
+        else
+        {
+            constData.resetHistory = false;
+        }
+    }
     else
+    {
         constData.resetHistory = false;
+    }
 
     _needResetHistory = false;
 

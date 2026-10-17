@@ -26,6 +26,7 @@ class XeFG_Dx12 : public virtual IFGFeature_Dx12
     bool _uiComposition = false;
     bool _passthrough = false;
     bool _needResetHistory = false;
+    uint64_t _lastResetFrame = 0;
 
     std::unique_ptr<DI_Dx12> _depthInvert;
 
