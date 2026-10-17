@@ -618,8 +618,7 @@ bool Config::Reload(std::filesystem::path iniPath)
             for (unsigned int i = 0; i < std::size(DlssNrPassOverrides); ++i)
             {
                 auto& pass = DlssNrPassOverrides[i];
-                if (i < 2)
-                    pass.preset.set_from_config(readUInt("DlssNr", std::format("Pass{}Preset", i + 2).c_str()));
+                pass.preset.set_from_config(readUInt("DlssNr", std::format("Pass{}Preset", i + 2).c_str()));
                 pass.style.set_from_config(readUInt("DlssNr", std::format("Pass{}Style", i + 2).c_str()));
                 pass.intensity.set_from_config(readFloat("DlssNr", std::format("Pass{}Intensity", i + 2).c_str()));
                 pass.structure.set_from_config(readFloat("DlssNr", std::format("Pass{}LocalStructure", i + 2).c_str()));
@@ -1638,7 +1637,7 @@ bool Config::SaveIni(std::filesystem::path destination)
         for (unsigned int i = 0; i < std::size(Instance()->DlssNrPassOverrides); ++i)
         {
             auto& pass = Instance()->DlssNrPassOverrides[i];
-            if (i < 2)
+            if (pass.preset.has_value() || i < 2)
                 ini.SetValue("DlssNr", std::format("Pass{}Preset", i + 2).c_str(),
                              GetIntValue(pass.preset.value_for_config()).c_str());
             ini.SetValue("DlssNr", std::format("Pass{}Style", i + 2).c_str(),

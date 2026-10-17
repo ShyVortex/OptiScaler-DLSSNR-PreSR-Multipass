@@ -18,8 +18,7 @@ inline ModelSettings PassSettings(const Config& cfg, unsigned int pass)
     if (pass > 0 && pass <= std::size(cfg.DlssNrPassOverrides))
     {
         const auto& extra = cfg.DlssNrPassOverrides[pass - 1];
-        if (pass <= 2) // Only the legacy pass 2/3 keys have a preset override.
-            result.preset = extra.preset.value_or(result.preset);
+        result.preset = extra.preset.value_or(result.preset);
         result.style = extra.style.value_or(result.style);
         result.intensity = extra.intensity.value_or(result.intensity);
         result.localStructure = extra.structure.value_or(result.localStructure);

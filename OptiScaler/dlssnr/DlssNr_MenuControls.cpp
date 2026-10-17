@@ -329,10 +329,23 @@ void RenderModel(Config* config)
         }
         HelpMarker("Model-based skin selection.");
     };
+    static const char* presets[] = { "Auto (Performance / Small FP8)", "Quality (Honest Tench)",
+                                     "Performance (Crazy Cuckoo Small FP8, +40% FPS)" };
+    static const char* inheritedPresets[] = { "Auto (inherit Pass 1)", "Quality (Honest Tench)",
+                                              "Performance (Crazy Cuckoo Small FP8)" };
     static const char* styles[] = { "Standard", "Natural", "Cinematic" };
     static const char* inheritedStyles[] = { "Auto", "Standard", "Natural", "Cinematic" };
     if (selectedPass == 0)
     {
+        int preset = (int) std::min(config->DlssNrPreset.value_or_default(), 2u);
+        if (ImGui::Combo("Model preset", &preset, presets, IM_ARRAYSIZE(presets)))
+            config->DlssNrPreset = (uint32_t) preset;
+        HelpMarker(
+            "Neural Rendering weights preset:\n"
+            "- Auto: Uses runtime default (Performance / Crazy Cuckoo Small FP8)\n"
+            "- Quality (Honest Tench): Full-precision teacher quantized model for maximum visual fidelity\n"
+            "- Performance (Crazy Cuckoo Small FP8): Lightweight FP8 Tensor Core model, up to 40% faster inference");
+
         int style = (int) std::min(config->DlssNrStyle.value_or_default(), 2u);
         if (ImGui::Combo("Style", &style, styles, IM_ARRAYSIZE(styles)))
             config->DlssNrStyle = (uint32_t) style;
@@ -342,6 +355,14 @@ void RenderModel(Config* config)
     else
     {
         auto& pass = config->DlssNrPassOverrides[selectedPass - 1];
+        int preset = pass.preset.has_value() ? std::clamp((int) pass.preset.value(), 0, 2) + 1 : 0;
+        if (ImGui::Combo("Model preset", &preset, inheritedPresets, IM_ARRAYSIZE(inheritedPresets)))
+            pass.preset = preset ? std::optional<uint32_t>(preset - 1) : std::nullopt;
+        HelpMarker("Neural Rendering weights preset for this pass:\n"
+                   "- Auto: Inherits Pass 1 model preset\n"
+                   "- Quality (Honest Tench): Full-precision teacher quantized model\n"
+                   "- Performance (Crazy Cuckoo Small FP8): Lightweight FP8 Tensor Core model");
+
         int style = pass.style.has_value() ? std::clamp((int) pass.style.value(), 0, 2) + 1 : 0;
         if (ImGui::Combo("Style", &style, inheritedStyles, IM_ARRAYSIZE(inheritedStyles)))
             pass.style = style ? std::optional<uint32_t>(style - 1) : std::nullopt;
