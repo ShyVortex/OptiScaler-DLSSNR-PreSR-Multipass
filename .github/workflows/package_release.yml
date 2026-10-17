@@ -55,19 +55,41 @@ jobs:
       if: ${{ inputs.include_ampere_mfg }}
       shell: powershell
       run: |
-        if (-not (Test-Path "dlssg_for_sm86\version.dll")) {
-            Write-Host "dlssg_for_sm86 not found in working copy; cloning from sdli1995/dlssg_for_sm86..."
-            git init dlssg_for_sm86
-            git -C dlssg_for_sm86 remote add origin https://github.com/sdli1995/dlssg_for_sm86.git
+        $requiredFiles = @(
+            "dlssg_for_sm86\version.dll",
+            "dlssg_for_sm86\dlssg_sm86\backend\sm86_backend.dll",
+            "dlssg_for_sm86\dlssg_sm86\kernels\fg_kernels.dll",
+            "dlssg_for_sm86\dlssg_sm86\runtime\nvngx_dlssg.dll"
+        )
+        $needsAcquire = $false
+        foreach ($file in $requiredFiles) {
+            if (-not (Test-Path $file)) {
+                $needsAcquire = $true
+                break
+            }
+        }
+        if ($needsAcquire) {
+            Write-Host "dlssg_for_sm86 0.4.0 modular files not complete in working copy; cloning from sdli1995/dlssg_for_sm86..."
+            if (-not (Test-Path "dlssg_for_sm86")) {
+                New-Item -ItemType Directory -Force -Path "dlssg_for_sm86" | Out-Null
+            }
+            if (-not (Test-Path "dlssg_for_sm86\.git")) {
+                git init dlssg_for_sm86
+                git -C dlssg_for_sm86 remote add origin https://github.com/sdli1995/dlssg_for_sm86.git
+            } else {
+                git -C dlssg_for_sm86 remote set-url origin https://github.com/sdli1995/dlssg_for_sm86.git
+            }
             git -C dlssg_for_sm86 fetch --depth 1 origin tags/0.4.0
             if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.0 runtime' }
             git -C dlssg_for_sm86 checkout --detach FETCH_HEAD
         }
-        if (-not (Test-Path "dlssg_for_sm86\version.dll")) {
-            Write-Error "Failed to acquire dlssg_for_sm86\version.dll"
-            exit 1
+        foreach ($file in $requiredFiles) {
+            if (-not (Test-Path $file)) {
+                Write-Error "Failed to acquire required dlssg_for_sm86 0.4.0 file: $file"
+                exit 1
+            }
         }
-        Write-Host "dlssg_for_sm86 ready."
+        Write-Host "dlssg_for_sm86 0.4.0 modular files verified."
 
     - name: Ensure NVSmooth30 files are present
       if: ${{ inputs.include_nvsmooth30 }}

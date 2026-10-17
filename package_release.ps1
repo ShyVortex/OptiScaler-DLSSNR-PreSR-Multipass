@@ -316,9 +316,6 @@ if ($IncludeAmpereMfg) {
     if (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\sdli1995\version.dll")) {
         $sm86Src = "$sm86Src\sdli1995"
         $sm86Dll = "$sm86Src\version.dll"
-    } elseif (-not (Test-Path -LiteralPath $sm86Dll) -and (Test-Path -LiteralPath "$sm86Src\SilyNoMeta\version.dll")) {
-        $sm86Src = "$sm86Src\SilyNoMeta"
-        $sm86Dll = "$sm86Src\version.dll"
     }
     if ($UpdateAmpereMfg -or (-not (Test-Path -LiteralPath $sm86Dll))) {
         Write-Host "Acquiring verified SM75/SM86 0.4.0 runtime from sdli1995 repository..."
@@ -334,6 +331,7 @@ if ($IncludeAmpereMfg) {
         git -C $sm86Src fetch --depth 1 origin tags/0.4.0
         if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.0 runtime from sdli1995 repository' }
         git -C $sm86Src checkout --detach FETCH_HEAD
+        $sm86Dll = "$sm86Src\version.dll"
     }
     if (-not (Test-Path -LiteralPath $sm86Dll)) {
         throw "Ampere/Turing SM86/SM75 binary not found at $sm86Dll"
@@ -349,10 +347,29 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $sm86ReshadeIni) {
         Copy-Item -LiteralPath $sm86ReshadeIni -Destination "$sm86DestDir\ReShade.ini"
     }
+
+    # Modular dlssg_sm86 layout (backend, kernels, runtime required; sr and xefg excluded)
     $sm86RuntimeDir = "$sm86Src\dlssg_sm86"
+    $targetModularDir = "$sm86DestDir\dlssg_sm86"
     if (Test-Path -LiteralPath $sm86RuntimeDir) {
-        Copy-Item -LiteralPath $sm86RuntimeDir -Destination "$sm86DestDir\dlssg_sm86" -Recurse -Force
+        New-Item -ItemType Directory -Force -Path $targetModularDir | Out-Null
+        $components = @('backend', 'kernels', 'runtime')
+        foreach ($comp in $components) {
+            $srcComp = Join-Path $sm86RuntimeDir $comp
+            $destComp = Join-Path $targetModularDir $comp
+            if (Test-Path -LiteralPath $srcComp) {
+                if (Test-Path -LiteralPath $destComp) { Remove-Item -LiteralPath $destComp -Recurse -Force }
+                Copy-Item -LiteralPath $srcComp -Destination $targetModularDir -Recurse -Force
+            }
+        }
+        foreach ($ex in @('sr', 'xefg')) {
+            $exDir = Join-Path $targetModularDir $ex
+            if (Test-Path -LiteralPath $exDir) {
+                Remove-Item -LiteralPath $exDir -Recurse -Force
+            }
+        }
     }
+
     $sm863101Dll = "$sm86Src\310.1\version.dll"
     if (Test-Path -LiteralPath $sm863101Dll) {
         $sm863101DestDir = "$sm86DestDir\310.1"
@@ -383,7 +400,25 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $docs) {
         Copy-Item -LiteralPath $docs -Destination "$sm86DestDir\docs" -Recurse -Force
     }
-    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, modular dlssg_sm86 folder, 310.1 runtime (if present), documentation, and notices staged"
+
+    # Strict v0.4.0 modular verification
+    $requiredModularFiles = @(
+        "$targetModularDir\backend\sm86_backend.dll",
+        "$targetModularDir\kernels\fg_kernels.dll",
+        "$targetModularDir\runtime\nvngx_dlssg.dll"
+    )
+    foreach ($req in $requiredModularFiles) {
+        if (-not (Test-Path -LiteralPath $req)) {
+            throw "Ampere/Turing SM86/SM75 0.4.0 required modular binary not found: $req"
+        }
+    }
+    foreach ($ex in @('sr', 'xefg')) {
+        if (Test-Path -LiteralPath "$targetModularDir\$ex") {
+            throw "Ampere/Turing SM86/SM75 excluded component '$ex' unexpectedly present in staging: $targetModularDir\$ex"
+        }
+    }
+
+    Write-Host "RTX 20/30 (SM75/SM86) MFG: dlssg_sm86.dll, dlssg_sm86.ini, modular dlssg_sm86 folder (backend, kernels, runtime; sr/xefg excluded), 310.1 runtime (if present), documentation, and notices staged"
 }
 
 if ($IncludeNVSmooth30) {
