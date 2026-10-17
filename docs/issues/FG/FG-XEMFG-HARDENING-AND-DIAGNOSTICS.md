@@ -67,7 +67,7 @@ A comprehensive reverse engineering inspection of Intel XeSS-FG integration patt
   {
       if (type == FG_ResourceType::HudlessColor || type == FG_ResourceType::UIColor)
       {
-          if (resourceParam.resourceSize.width != targetWidth || resourceParam.resourceSize.height != targetHeight)
+          if (resourceParam.resourceSize.x != targetWidth || resourceParam.resourceSize.y != targetHeight)
           {
               static bool loggedHudlessMismatch = false;
               static bool loggedUiMismatch = false;
@@ -76,8 +76,8 @@ A comprehensive reverse engineering inspection of Intel XeSS-FG integration patt
               {
                   LOG_WARN("Resource {} dimension mismatch: {}x{} != target {}x{}; omitting optional plane to avoid "
                            "XeFG -12 abort",
-                           magic_enum::enum_name(type), resourceParam.resourceSize.width,
-                           resourceParam.resourceSize.height, targetWidth, targetHeight);
+                           magic_enum::enum_name(type), resourceParam.resourceSize.x,
+                           resourceParam.resourceSize.y, targetWidth, targetHeight);
                   logged = true;
               }
               return xefg_swapchain_d3d12_resource_data_t {};

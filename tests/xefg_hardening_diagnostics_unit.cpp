@@ -31,11 +31,16 @@ enum class FG_ResourceType : uint32_t
     Distortion,
 };
 
+struct xefg_swapchain_2d_t
+{
+    uint32_t x = 0;
+    uint32_t y = 0;
+};
+
 struct ResourceData
 {
     void* pResource = nullptr;
-    uint32_t width = 0;
-    uint32_t height = 0;
+    xefg_swapchain_2d_t resourceSize {};
     bool valid = false;
 };
 
@@ -85,8 +90,7 @@ struct MockXeFG
     {
         ResourceData result {};
         result.pResource = mockPtr;
-        result.width = resWidth;
-        result.height = resHeight;
+        result.resourceSize = { resWidth, resHeight };
         result.valid = (mockPtr != nullptr);
 
         const uint32_t targetWidth = _width;
@@ -96,7 +100,7 @@ struct MockXeFG
         {
             if (type == FG_ResourceType::HudlessColor || type == FG_ResourceType::UIColor)
             {
-                if (result.width != targetWidth || result.height != targetHeight)
+                if (result.resourceSize.x != targetWidth || result.resourceSize.y != targetHeight)
                 {
                     // Decouple mismatched optional planes to prevent Intel XeSS-FG -12 abort
                     return ResourceData {};
@@ -191,7 +195,7 @@ int main()
         // Matching UI and HUD-less textures pass through
         auto resUiMatch = fg.GetResourceData(FG_ResourceType::UIColor, 3840, 2160, dummyResource);
         assert(resUiMatch.pResource == dummyResource);
-        assert(resUiMatch.width == 3840 && resUiMatch.height == 2160);
+        assert(resUiMatch.resourceSize.x == 3840 && resUiMatch.resourceSize.y == 2160);
         assert(resUiMatch.valid == true);
 
         auto resHudlessMatch = fg.GetResourceData(FG_ResourceType::HudlessColor, 3840, 2160, dummyResource);
@@ -201,7 +205,7 @@ int main()
         // Mismatched dynamic resolution subrects on UI (e.g. 2560x1440 UI on 4K backbuffer)
         auto resUiMismatch = fg.GetResourceData(FG_ResourceType::UIColor, 2560, 1440, dummyResource);
         assert(resUiMismatch.pResource == nullptr);
-        assert(resUiMismatch.width == 0 && resUiMismatch.height == 0);
+        assert(resUiMismatch.resourceSize.x == 0 && resUiMismatch.resourceSize.y == 0);
         assert(resUiMismatch.valid == false);
 
         // Mismatched dynamic resolution subrects on HUD-less texture
