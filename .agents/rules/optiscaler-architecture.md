@@ -41,7 +41,9 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - When running on 310.9 runtime, `ResolveRouter` must output `Router=Auto` on Turing (never `Router=SM75`) to avoid runtime backend abort.
         - Generate 0.3.0 companion INI format (`[General] Enabled=1`, `[FrameGeneration] Optimized=1`, `MaxGeneratedFrames=5`, `[Compatibility] Preset=Auto`).
       - Packaging and build integration (`OptiScaler.vcxproj`, `OptiScaler.vcxproj.filters`, `package_release.ps1`, workflows):
-        - `package_release.ps1` must stage both root 310.9 DLL and `310.1/dlssg_sm86.dll`.
+        - `package_release.ps1` must stage both root 310.9 DLL, `310.1/dlssg_sm86.dll`, and modular 0.4.0 components (`backend/`, `kernels/`, `runtime/`) while strictly pruning `sr/` (~180 MB) and `xefg/` (5.4 MB) to prevent release bloat and conflict with native XeMFG.
+        - Mandatory post-staging modular integrity assertions in packaging script and workflow pre-checks (`version.dll`, `sm86_backend.dll`, `fg_kernels.dll`, `nvngx_dlssg.dll`).
+        - Dual-compatibility INI formatting supporting both 0.3.x (`[General]`, `[FrameGeneration]`) and 0.4.0 (`[DLSSG]`, `Engine=DLSS`, `Preset=C` FG Lite).
       - Associated tests:
         - `tests/dlssg_sm86_ini_smoke.cpp`
         - `tests/kernel_hooks_nvngx_dlssg_unit.cpp`
@@ -116,6 +118,17 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp`: `PrepareRunModels` must strictly limit `altSurfaces` invalidation to genuine resolution or placement changes (`resolutionChanged || placementChanged`).
        - Documentation: `docs/issues/NR/NR-FF7-REBIRTH.md`.
        - Associated test: `tests/nr_format_bouncing_unit.cpp`.
+     - **DLSS 5 Lightweight Model ("Crazy Cuckoo Small FP8") Support & Preset Integration**:
+       - `Config.h`: `DlssNrPreset` (defaults to `0` / Auto) and per-pass `NrPassOverrides::preset`.
+       - `OptiScaler/dlssnr/DlssNr_MenuControls.cpp`: In-game ImGui `Model preset` combo selector:
+         - Pass 1: Auto (`0`, maps to Performance / Small FP8 in 310.9), Quality (`1`, "Honest Tench", full-precision teacher model), Performance (`2`, "Crazy Cuckoo Small FP8", lightweight FP8 Tensor Core model with up to +40% faster inference).
+         - Pass 2..10: Inherited combo (Auto / inherit Pass 1, Quality, Performance).
+       - `OptiScaler/dlssnr/PassProfiles.h`: Generalized `extra.preset` inheritance across all passes without legacy clamping to `pass <= 2`.
+       - `OptiScaler/Config.cpp`: Generalized `Pass{}Preset` loading and saving across multi-pass layers.
+       - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp`: `TuningMatchesFeature` using `operator==` on `ModelSettings` to detect preset changes and trigger guarded context recreation.
+       - `OptiScaler.ini`: Documented `Preset`, `Pass2Preset`, `Pass3Preset` with reverse-engineered model weights and performance characteristics.
+       - Documentation: `docs/issues/NR/NR-LIGHTWEIGHT-MODEL-PRESET-SUPPORT.md`.
+       - Associated test: `tests/nr_model_preset_unit.cpp`.
 
 7. **Preservation of NVSmooth30 (RTX 30 Smooth Motion Unlocker) Integration Across Upstream Merges**:
    - Upstream author (`wilsjo2`) does not maintain the NVSmooth30 proxy integration.
@@ -203,7 +216,15 @@ description: Architecture, frame generation, and safety rules for OptiScaler
          - Dynamic slider `Max Interpolated Frames##xemfg` (1 to 5 / 2X to 6X FG).
          - Corner debug markers, Only Interpolated Frames, Display VBlank Sync, and Force Borderless Window.
        - When `XeMfgLoader::EnabledForSession()` is active, redundant `Frame Generation (XeFG)` and `Frame Generation (OptiFG)` sections are completely hidden, eliminating clutter and verbose warnings.
-     - **Associated Automated Unit Tests**:
+     - **HDR RGBA16F Format Diagnostic Warning (`XeFG_Dx12.cpp`)**:
+       - Backbuffer format check for `DXGI_FORMAT_R16G16B16A16_FLOAT` / `TYPELESS`, setting `state.xefgHdrFormatUnsupported = true` and logging diagnostic instructions to switch to 10-bit HDR (`R10G10B10A2`) or 8-bit SDR.
+     - **Resource Dimension Mismatch Protection & Subrect Decoupling (`XeFG_Dx12.cpp`)**:
+       - In `GetResourceData(type, index)`, compare `resourceSize` against backbuffer dimensions `_targetWidth` and `_targetHeight` for `HudlessColor` and `UIColor`. Mismatched auxiliary planes are decoupled/omitted with `LOG_WARN_ONCE`, avoiding error `-12` (`INVALID_ARGUMENT`) in Intel's optical flow runner.
+     - **Model Reset Anti-Thrashing Debounce (`XeFG_Dx12.h`, `XeFG_Dx12.cpp`)**:
+       - `_lastResetFrame` tracks history resets, debouncing redundant consecutive resets within 3 frames unless swapchain dimensions changed, preventing optical flow collapse and micro-stutter.
+     - **Documentation & Associated Automated Unit Tests**:
+       - Documentation: `docs/issues/FG/FG-XEMFG-HARDENING-AND-DIAGNOSTICS.md`
+       - `tests/xefg_hardening_diagnostics_unit.cpp`
        - `tests/xemfg_loader_unit.cpp` (Tests 1–12)
        - `tests/xemfg_menu_exclusion_unit.cpp` (Tests 1–5)
        - `tests/xefg_diagnostic_ring_unit.cpp` (Tests 1–6)
