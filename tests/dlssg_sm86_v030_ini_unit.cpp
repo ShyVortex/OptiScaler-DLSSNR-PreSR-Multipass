@@ -94,10 +94,18 @@ int main()
         std::string pbLower = FormatIniContent030(5, 1, "b");
         assert(pbLower.find("Preset=B\n") != std::string::npos);
 
+        std::string pC = FormatIniContent030(5, 1, "C");
+        assert(pC.find("Preset=C\n") != std::string::npos);
+        assert(pC.find("[DLSSG]\nOptimized=1\nPreset=C\n") != std::string::npos);
+
+        std::string pcLower = FormatIniContent030(5, 1, "c");
+        assert(pcLower.find("Preset=C\n") != std::string::npos);
+        assert(pcLower.find("[DLSSG]\nOptimized=1\nPreset=C\n") != std::string::npos);
+
         std::string pInvalid = FormatIniContent030(5, 1, "invalid");
         assert(pInvalid.find("Preset=Auto\n") != std::string::npos);
 
-        std::printf("  [PASS] Case 4: UI Recomposition Preset validation (Auto, A, B) verified\n");
+        std::printf("  [PASS] Case 4: UI Recomposition / FG Lite Preset validation (Auto, A, B, C) verified\n");
     }
 
     // Test 5: ResolveMaxGeneratedFrames with variable runtime ceiling
@@ -351,6 +359,23 @@ int main()
         std::printf("  [PASS] Case 15: Non-destructive merging into existing ReShade.ini verified\n");
     }
 
-    std::printf("=== All DLSSG SM86 0.3.x INI & Configuration Unit Tests PASSED! ===\n");
+    // Test 16: sdli1995 0.4.0 dual compatibility ([DLSSG] + legacy sections, Preset C, Optimized 2)
+    {
+        std::string ini040 = FormatIniContent030(3, 2, "C", "Auto", 0, "Auto", 1);
+
+        // Verify 0.4.0 relocated [DLSSG] section
+        assert(ini040.find("[DLSSG]\nOptimized=2\nPreset=C\n") != std::string::npos);
+
+        // Verify Engine=DLSS in [FrameGeneration]
+        assert(ini040.find("[FrameGeneration]\nOptimized=2\nMaxGeneratedFrames=3\nEngine=DLSS\n") != std::string::npos);
+
+        // Verify backward compatibility [Compatibility] section with Preset C
+        assert(ini040.find("[Compatibility]\nPreset=C\nRouter=Auto\nKernelImage=Auto\nHardwareBilinear=0\n") !=
+               std::string::npos);
+
+        std::printf("  [PASS] Case 16: sdli1995 0.4.0 dual compatibility ([DLSSG], Engine=DLSS, Preset C) verified\n");
+    }
+
+    std::printf("=== All DLSSG SM86 0.3.x / 0.4.0 INI & Configuration Unit Tests PASSED! ===\n");
     return 0;
 }

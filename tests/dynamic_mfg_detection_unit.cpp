@@ -248,6 +248,21 @@ int main()
 
                 std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s, mod: %s)\n",
                             realSdliDll.string().c_str(), sdliName.c_str());
+
+                // Verify modular 0.4.0 subdirectory layout
+                auto baseDir = realSdliDll.parent_path();
+                if (std::filesystem::exists(baseDir / "dlssg_sm86"))
+                {
+                    assert(std::filesystem::exists(baseDir / "dlssg_sm86" / "backend" / "sm86_backend.dll") &&
+                           "0.4.0 modular layout must contain backend/sm86_backend.dll");
+                    assert(std::filesystem::exists(baseDir / "dlssg_sm86" / "kernels" / "fg_kernels.dll") &&
+                           "0.4.0 modular layout must contain kernels/fg_kernels.dll");
+                    assert(std::filesystem::exists(baseDir / "dlssg_sm86" / "runtime" / "nvngx_dlssg.dll") &&
+                           "0.4.0 modular layout must contain runtime/nvngx_dlssg.dll");
+                    std::printf(
+                        "  [PASS] Case 9c: Real sdli1995 0.4.0 modular directory structure verified (%s/dlssg_sm86)\n",
+                        baseDir.string().c_str());
+                }
                 break;
             }
         }
