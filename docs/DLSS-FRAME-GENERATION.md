@@ -56,15 +56,15 @@ If you changed `[Libraries] OptiDllPath`, use its `streamline` subfolder instead
 ## Manual download without the helper
 
 1. Read the [NVIDIA licences](#licences-and-distribution), then download
-   [streamline-sdk-v2.14.1.zip directly from NVIDIA](https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.1/streamline-sdk-v2.14.1.zip).
+   [streamline-sdk-v2.14.16.zip directly from NVIDIA](https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.16/streamline-sdk-v2.14.16.zip).
    Choose that release asset, **not** GitHub's "Source code (zip)"; the latter does not contain the DLLs.
 2. Check the SDK ZIP before extracting it:
 
    ```powershell
-   Get-FileHash -Algorithm SHA256 -LiteralPath 'C:\Downloads\streamline-sdk-v2.14.1.zip'
+   Get-FileHash -Algorithm SHA256 -LiteralPath 'C:\Downloads\streamline-sdk-v2.14.16.zip'
    ```
 
-   Expected SHA-256: `92C4D954631A1710DA86CA3FA8D5034F2B9503838C95FC4AE977AE149319781B`.
+   Expected SHA-256: `32041E51DB0CAB709A271B72A352281B690C2ABBD669A827809401A5DD23956B`.
 3. Extract the SDK to a separate folder. With the game closed and its setup backed up, copy only
    these six files from the SDK's **`bin/x64`** folder into the game's **`OptiScaler/streamline`**:
    `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll`, `nvngx_dlssg.dll`.

@@ -1,49 +1,49 @@
 {
-  "version": "2.14.1",
-  "releaseUrl": "https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.14.1",
-  "archiveUrl": "https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.1/streamline-sdk-v2.14.1.zip",
-  "archiveSha256": "92C4D954631A1710DA86CA3FA8D5034F2B9503838C95FC4AE977AE149319781B",
+  "version": "2.14.16",
+  "releaseUrl": "https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.14.16",
+  "archiveUrl": "https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.14.16/streamline-sdk-v2.14.16.zip",
+  "archiveSha256": "32041E51DB0CAB709A271B72A352281B690C2ABBD669A827809401A5DD23956B",
   "files": [
     {
       "entry": "bin/x64/sl.interposer.dll",
       "name": "sl.interposer.dll",
-      "version": "2.14.1.0",
-      "sha256": "8C87C9499461DA561EDD529AA9BF7831D67D7B94EBB1C1A5ED54EF4934E1EA4C",
+      "version": "2.14.16.0",
+      "sha256": "B1D7395AEBD7B9722841D64DCF7433680020B6A8E421F851C16D5BA0C2182EDF",
       "signerThumbprint": "B66776FC8E70C58ED98199E8391264C827AAC534"
     },
     {
       "entry": "bin/x64/sl.common.dll",
       "name": "sl.common.dll",
-      "version": "2.14.1.0",
-      "sha256": "82924A8954DD671E09351C5DE0EB87AD0EB25B944CC9F9AB955CA1D9950DE15D",
+      "version": "2.14.16.0",
+      "sha256": "38EEA3B4209AFC455636EA372B5933D65FCC13BECEC6C84D101DCFC4D8648F75",
       "signerThumbprint": "B66776FC8E70C58ED98199E8391264C827AAC534"
     },
     {
       "entry": "bin/x64/sl.dlss_g.dll",
       "name": "sl.dlss_g.dll",
-      "version": "2.14.1.0",
-      "sha256": "F4A6B2B14DCC0B1485989E430D3B4E3A44AC1800B92BA1AD74F476E64FB2B09C",
+      "version": "2.14.16.0",
+      "sha256": "3ED9538DF724993BEA8A050195A6A78B9C8C8A566D5B05ADE477AAB3C390E90F",
       "signerThumbprint": "B66776FC8E70C58ED98199E8391264C827AAC534"
     },
     {
       "entry": "bin/x64/sl.reflex.dll",
       "name": "sl.reflex.dll",
-      "version": "2.14.1.0",
-      "sha256": "0CE9725E3E03EA9E7F81D008B57F33EE365973D2E349131C8B1C3E3378FE2DB0",
+      "version": "2.14.16.0",
+      "sha256": "443577E869352436FF7EC8F4D9C90418D3E95368436CE219261E0F4F07A38122",
       "signerThumbprint": "B66776FC8E70C58ED98199E8391264C827AAC534"
     },
     {
       "entry": "bin/x64/sl.pcl.dll",
       "name": "sl.pcl.dll",
-      "version": "2.14.1.0",
-      "sha256": "F13D51CFA05F4CD514DF2026049E2DB8ADF359221713170AD386FD499915B582",
+      "version": "2.14.16.0",
+      "sha256": "5698C38E722318681F215C9FE68E45B9BEDD51378ACC699D8EEE26E961E57770",
       "signerThumbprint": "B66776FC8E70C58ED98199E8391264C827AAC534"
     },
     {
       "entry": "bin/x64/nvngx_dlssg.dll",
       "name": "nvngx_dlssg.dll",
-      "version": "310.9.1.0",
-      "sha256": "FF6E90EB78B827927DFF5B4ECC6B1C870C2E9BCA29ED9F48C7D348CC9E170B82",
+      "version": "310.9.16.0",
+      "sha256": "8D59D49B36410DD6B62FEF2503A5871D347415BD85D943FA0848563A95DD50C7",
       "signerThumbprint": "7B7B0B6697AFB438CF6F65A155F00E86676FB186"
     },
     {
