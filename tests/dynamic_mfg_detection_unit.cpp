@@ -175,7 +175,7 @@ int main()
         std::filesystem::remove_all(tempDir);
     }
 
-    // Test 8: Companion dlssg_sm86.ini detection fallback
+    // Test 8: Immunity to companion dlssg_sm86.ini and ReShade.ini pollution
     {
         auto tempDir = std::filesystem::temp_directory_path() / "optiscaler_dmfg_test";
         std::filesystem::create_directories(tempDir);
@@ -190,7 +190,7 @@ int main()
         // Without companion INI, returns false
         assert(!HasDynamicMfgSupport(opaqueDll) && "Opaque binary alone must return false");
 
-        // Now place SilyNoMeta's companion dlssg_sm86.ini beside it
+        // Now place a companion dlssg_sm86.ini beside it with DynamicMFG=0
         auto iniPath = tempDir / "dlssg_sm86.ini";
         {
             std::ofstream f(iniPath);
@@ -199,9 +199,22 @@ int main()
             f << "DynamicTargetFPS=0\n";
         }
 
-        assert(HasDynamicMfgSupport(opaqueDll) && "Companion dlssg_sm86.ini with DynamicMFG must be recognized");
-        std::printf("  [PASS] Case 8: Companion dlssg_sm86.ini detection fallback verified\n");
+        // Must still return false because INI presence must not grant dynamic capability to an unsupported binary
+        assert(!HasDynamicMfgSupport(opaqueDll) && "Opaque binary must NOT report Dynamic MFG support from INI files");
 
+        // Place a companion ReShade.ini beside it
+        auto reshadePath = tempDir / "ReShade.ini";
+        {
+            std::ofstream f(reshadePath);
+            f << "[DLSSG-SM86-75-COMPANION]\n";
+            f << "Dynamic=0\n";
+        }
+
+        assert(!HasDynamicMfgSupport(opaqueDll) &&
+               "Opaque binary must NOT report Dynamic MFG support from ReShade.ini");
+        std::printf("  [PASS] Case 8: Immunity to companion dlssg_sm86.ini / ReShade.ini pollution verified\n");
+
+        std::filesystem::remove(reshadePath);
         std::filesystem::remove(iniPath);
         std::filesystem::remove(opaqueDll);
         std::filesystem::remove_all(tempDir);
@@ -244,7 +257,8 @@ int main()
                 ModVariant sdliVariant = DetectModVariant(realSdliDll, &sdliName);
                 assert(sdliVariant == ModVariant::Sdli1995 &&
                        "Real sdli1995 version.dll must detect ModVariant::Sdli1995");
-                assert(sdliName == "sdli1995" && "Detected mod name must be sdli1995");
+                assert((sdliName == "sdli1995 v0.4.0" || sdliName == "sdli1995") &&
+                       "Detected mod name must be sdli1995 or sdli1995 v0.4.0");
 
                 std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s, mod: %s)\n",
                             realSdliDll.string().c_str(), sdliName.c_str());
@@ -298,6 +312,35 @@ int main()
         assert(DetectModVariant(sdliSynthDll, &name) == ModVariant::Sdli1995);
         assert(name == "sdli1995");
 
+        // 10d: Synthetic sdli1995 v0.4.0 binary signatures
+        auto sdli040Dll = tempDir / "sdli_040.dll";
+        {
+            std::ofstream f(sdli040Dll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Auto was removed in 0.4.0 and sm86_backend.dll is next to the proxy";
+        }
+        assert(DetectModVariant(sdli040Dll, &name) == ModVariant::Sdli1995);
+        assert(name == "sdli1995 v0.4.0");
+        assert(!HasDynamicMfgSupport(sdli040Dll));
+
+        // 10e: sdli1995 v0.4.0 with ReShade.ini and dlssg_sm86.ini companion files must remain sdli1995 v0.4.0
+        auto dummyIni = tempDir / "dlssg_sm86.ini";
+        {
+            std::ofstream f(dummyIni);
+            f << "[FrameGeneration]\nDynamicMFG=0\n";
+        }
+        auto dummyReshade = tempDir / "ReShade.ini";
+        {
+            std::ofstream f(dummyReshade);
+            f << "[DLSSG-SM86-75-COMPANION]\nDynamic=0\n";
+        }
+        assert(DetectModVariant(sdli040Dll, &name) == ModVariant::Sdli1995);
+        assert(name == "sdli1995 v0.4.0");
+        assert(!HasDynamicMfgSupport(sdli040Dll));
+
+        std::filesystem::remove(dummyReshade);
+        std::filesystem::remove(dummyIni);
+        std::filesystem::remove(sdli040Dll);
         std::filesystem::remove(silyV0355Dll);
         std::filesystem::remove(sdliSynthDll);
         std::filesystem::remove_all(tempDir);

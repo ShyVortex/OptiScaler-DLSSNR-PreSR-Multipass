@@ -615,52 +615,14 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
         }
     }
 
-    // Also check companion dlssg_sm86.ini or ReShade.ini if present beside the DLL
-    std::error_code ec;
-    std::filesystem::path iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
-    if (std::filesystem::exists(iniPath, ec))
-    {
-        std::ifstream iniFile(iniPath);
-        if (iniFile.is_open())
-        {
-            std::string line;
-            while (std::getline(iniFile, line))
-            {
-                if (line.find(needleDynamicMfg) != std::string::npos ||
-                    line.find(needleDynamicTarget) != std::string::npos ||
-                    line.find(needleActivateMfg) != std::string::npos)
-                {
-                    return true;
-                }
-            }
-        }
-    }
-
-    std::filesystem::path reshadeIniPath = dllPath.parent_path() / L"ReShade.ini";
-    if (std::filesystem::exists(reshadeIniPath, ec))
-    {
-        std::ifstream reshadeFile(reshadeIniPath);
-        if (reshadeFile.is_open())
-        {
-            std::string line;
-            while (std::getline(reshadeFile, line))
-            {
-                if (line.find("DLSSG-SM86-75-COMPANION") != std::string::npos ||
-                    line.find("Dynamic=") != std::string::npos || line.find("TargetFPS=") != std::string::npos)
-                {
-                    return true;
-                }
-            }
-        }
-    }
-
     return false;
 }
 
 /// Detects which mod variant/fork a dlssg_sm86 binary represents (sdli1995 vs SilyNoMeta).
 inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::string* outModName = nullptr)
 {
-    if (dllPath.empty())
+    std::error_code ec;
+    if (dllPath.empty() || !std::filesystem::exists(dllPath, ec))
     {
         if (outModName)
             *outModName = "Unknown";
@@ -678,6 +640,15 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
         }
         return out;
     };
+
+    // First check for sdli1995 v0.4.0 modular layout beside the DLL
+    auto parentDir = dllPath.parent_path();
+    bool hasModular040 = (std::filesystem::exists(parentDir / L"dlssg_sm86" / L"backend" / L"sm86_backend.dll", ec) ||
+                          std::filesystem::exists(parentDir / L"backend" / L"sm86_backend.dll", ec));
+
+    const std::string needleSdli040_1 = "Auto was removed in 0.4.0";
+    const std::string needleSdli040_2 = "sm86_backend.dll is next to the proxy";
+    const std::string needleSdli040_3 = "DlssgMod_GetInfo";
 
     const std::string needleEngineV0354 = "Control engine v0.3.5-5";
     const std::string needleEngineV0354_16 = makeUtf16Le(needleEngineV0354);
@@ -698,15 +669,16 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
     const std::string needleGetControlStatus = "DLSSG_GetControlStatus";
     const std::string needleGetProxyRole = "DLSSG_GetProxyRole";
     const std::string needleRuntimeAnchor = "DLSSG_RuntimeAnchor";
-    const std::string needleCompanion16 = makeUtf16Le("DLSSG-SM86-75-COMPANION");
 
     const std::string needleSdliProxyName = "DlssgProxy_Name";
     const std::string needleSdliProxyRole = "DlssgProxy_Role";
     const std::string needleSdliNoSm75 = "The 310.9 backend has no SM75";
+    const std::string needleSm75Slots = "DLSSG_SM75_SLOTS";
 
     bool isSily = false;
     bool isSdli = false;
-    std::string detectedName = "Unknown";
+    bool isSdli040 = hasModular040;
+    std::string detectedName = hasModular040 ? "sdli1995 v0.4.0" : "Unknown";
 
     std::ifstream file(dllPath, std::ios::binary);
     if (file.is_open())
@@ -720,6 +692,15 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
             size_t bytesRead = file.gcount();
             std::string chunk = overlap + std::string(buffer.data(), bytesRead);
 
+            if (chunk.find(needleSdli040_1) != std::string::npos || chunk.find(needleSdli040_2) != std::string::npos ||
+                chunk.find(needleSdli040_3) != std::string::npos)
+            {
+                isSdli = true;
+                isSdli040 = true;
+                detectedName = "sdli1995 v0.4.0";
+                break;
+            }
+
             if (chunk.find(needleEngineV0354) != std::string::npos ||
                 chunk.find(needleEngineV0354_16) != std::string::npos)
             {
@@ -732,6 +713,7 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
             {
                 isSily = true;
                 detectedName = "SilyNoMeta v0.3.5";
+                break;
             }
             else if (!isSily && (chunk.find(needleControlEngine) != std::string::npos ||
                                  chunk.find(needleControlEngine16) != std::string::npos ||
@@ -745,16 +727,16 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
                                  chunk.find(needleDynamicTarget) != std::string::npos ||
                                  chunk.find(needleDynamicTarget16) != std::string::npos ||
                                  chunk.find(needleSilyNoMeta) != std::string::npos ||
-                                 chunk.find(needleSilyNoMeta16) != std::string::npos ||
-                                 chunk.find(needleCompanion16) != std::string::npos))
+                                 chunk.find(needleSilyNoMeta16) != std::string::npos))
             {
                 isSily = true;
                 detectedName = "SilyNoMeta";
             }
 
-            if (!isSily && (chunk.find(needleSdliProxyName) != std::string::npos ||
-                            chunk.find(needleSdliProxyRole) != std::string::npos ||
-                            chunk.find(needleSdliNoSm75) != std::string::npos))
+            if (!isSily && (chunk.find(needleSm75Slots) != std::string::npos ||
+                            chunk.find(needleSdliNoSm75) != std::string::npos ||
+                            chunk.find(needleSdliProxyName) != std::string::npos ||
+                            chunk.find(needleSdliProxyRole) != std::string::npos))
             {
                 isSdli = true;
             }
@@ -767,6 +749,13 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
         }
     }
 
+    if (isSdli040)
+    {
+        if (outModName)
+            *outModName = "sdli1995 v0.4.0";
+        return ModVariant::Sdli1995;
+    }
+
     if (isSily)
     {
         if (outModName)
@@ -774,41 +763,19 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
         return ModVariant::SilyNoMeta;
     }
 
-    // Check directory path hints if file inspection didn't resolve conclusively
     const std::string pathStr = dllPath.string();
+    if (isSdli || pathStr.find("sdli1995") != std::string::npos)
+    {
+        if (outModName)
+            *outModName = detectedName.empty() || detectedName == "Unknown" ? "sdli1995" : detectedName;
+        return ModVariant::Sdli1995;
+    }
+
     if (pathStr.find("SilyNoMeta") != std::string::npos)
     {
         if (outModName)
             *outModName = "SilyNoMeta";
         return ModVariant::SilyNoMeta;
-    }
-
-    // Check companion files for SilyNoMeta markers
-    std::error_code ec;
-    std::filesystem::path reshadeIni = dllPath.parent_path() / L"ReShade.ini";
-    if (std::filesystem::exists(reshadeIni, ec))
-    {
-        std::ifstream rf(reshadeIni);
-        if (rf.is_open())
-        {
-            std::string line;
-            while (std::getline(rf, line))
-            {
-                if (line.find("DLSSG-SM86-75-COMPANION") != std::string::npos)
-                {
-                    if (outModName)
-                        *outModName = "SilyNoMeta";
-                    return ModVariant::SilyNoMeta;
-                }
-            }
-        }
-    }
-
-    if (isSdli || pathStr.find("sdli1995") != std::string::npos)
-    {
-        if (outModName)
-            *outModName = "sdli1995";
-        return ModVariant::Sdli1995;
     }
 
     if (outModName)

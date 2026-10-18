@@ -343,10 +343,6 @@ if ($IncludeAmpereMfg) {
     if (Test-Path -LiteralPath $sm86Ini) {
         Copy-Item -LiteralPath $sm86Ini -Destination "$sm86DestDir\dlssg_sm86.ini"
     }
-    $sm86ReshadeIni = "$sm86Src\ReShade.ini"
-    if (Test-Path -LiteralPath $sm86ReshadeIni) {
-        Copy-Item -LiteralPath $sm86ReshadeIni -Destination "$sm86DestDir\ReShade.ini"
-    }
 
     # Modular dlssg_sm86 layout (backend, kernels, runtime required; sr and xefg excluded)
     $sm86RuntimeDir = "$sm86Src\dlssg_sm86"

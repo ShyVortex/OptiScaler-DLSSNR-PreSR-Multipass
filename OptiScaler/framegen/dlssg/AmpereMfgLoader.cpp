@@ -63,16 +63,16 @@ Status ProbeCandidate(bool forceRefresh)
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"version.dll",
         mainOverride.empty() ? std::filesystem::path()
-                             : mainOverride / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
-        mainOverride.empty() ? std::filesystem::path()
                              : mainOverride / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_for_sm86" / L"version.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"version.dll",
         basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86" / L"version.dll",
-        basePath / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
         basePath / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
         basePath / L"dlssg_for_sm86" / L"version.dll",
         basePath / L"dlssg_for_sm86" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86.dll",
@@ -151,7 +151,7 @@ Status ProbeCandidate(bool forceRefresh)
         s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
         s_status.Is3101Runtime = Is3101Runtime(dllPath);
         s_status.Variant = DetectModVariant(dllPath, &s_status.ModName);
-        s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) || HasDynamicMfgSupport(dllPath);
+        s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) && HasDynamicMfgSupport(dllPath);
         s_status.LiveControlSupported = (s_status.Variant == ModVariant::SilyNoMeta);
     }
     else
@@ -525,16 +525,16 @@ void TrySetup()
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"dlssg_sm86.dll",
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_sm86" / L"version.dll",
         mainOverride.empty() ? std::filesystem::path()
-                             : mainOverride / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
-        mainOverride.empty() ? std::filesystem::path()
                              : mainOverride / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        mainOverride.empty() ? std::filesystem::path()
+                             : mainOverride / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
         mainOverride.empty() ? std::filesystem::path() : mainOverride / L"dlssg_for_sm86" / L"version.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"dlssg_sm86.dll",
         basePath / L"OptiScaler" / L"dlssg_sm86" / L"version.dll",
         basePath / L"dlssg_sm86" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86" / L"version.dll",
-        basePath / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
         basePath / L"dlssg_for_sm86" / L"sdli1995" / L"version.dll",
+        basePath / L"dlssg_for_sm86" / L"SilyNoMeta" / L"version.dll",
         basePath / L"dlssg_for_sm86" / L"version.dll",
         basePath / L"dlssg_for_sm86" / L"dlssg_sm86.dll",
         basePath / L"dlssg_sm86.dll",
@@ -632,7 +632,8 @@ void TrySetup()
     s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
     s_status.Is3101Runtime = Is3101Runtime(dllPath);
     s_status.Variant = DetectModVariant(dllPath, &s_status.ModName);
-    s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) || HasDynamicMfgSupport(dllPath);
+    s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) && HasDynamicMfgSupport(dllPath);
+    s_status.LiveControlSupported = (s_status.Variant == ModVariant::SilyNoMeta);
 
     LOG_INFO("AmpereMfgLoader: Located binary at {}, Mod: {} (Variant: {}), HasSm75Support: {}, Is3101Runtime: {}, "
              "HasDynamicMfgSupport: {}",
@@ -751,7 +752,8 @@ void TrySetup()
         reinterpret_cast<PFN_DLSSG_SetDisplayTarget>(GetProcAddress(hMod, "DLSSG_SetDisplayTarget"));
     s_pfnRequestUI = reinterpret_cast<PFN_DLSSG_RequestUI>(GetProcAddress(hMod, "DLSSG_RequestUI"));
 
-    if (s_pfnRequestControl != nullptr || s_pfnSetDisplayTarget != nullptr)
+    if (s_status.Variant == ModVariant::SilyNoMeta &&
+        (s_pfnRequestControl != nullptr || s_pfnSetDisplayTarget != nullptr))
     {
         s_status.LiveControlSupported = true;
         LOG_INFO("AmpereMfgLoader: Live programmatic control exports resolved (RequestControl: {}, SetDisplayTarget: "
