@@ -1,4 +1,4 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include "DLSSDFeature_Dx12.h"
 #include <dxgi1_4.h>
 #include <Config.h>
@@ -41,6 +41,8 @@ bool DLSSDFeatureDx12::InitDLSSD(ID3D12GraphicsCommandList* InCommandList, NVSDK
 
     if (NVNGXProxy::D3D12_CreateFeature() != nullptr)
     {
+        ScopedNgxDimensionRestoration restoreDimensions(InParameters);
+
         ProcessInitParams(InParameters);
 
         _p_dlssdHandle = &_dlssdHandle;

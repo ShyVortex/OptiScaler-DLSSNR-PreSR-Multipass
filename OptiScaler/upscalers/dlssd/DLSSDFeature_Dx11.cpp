@@ -1,4 +1,4 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include "DLSSDFeature_Dx11.h"
 #include <dxgi.h>
 #include <Config.h>
@@ -40,6 +40,8 @@ bool DLSSDFeatureDx11::InitInternal(ID3D11DeviceContext* InContext, NVSDK_NGX_Pa
 
         if (NVNGXProxy::D3D11_CreateFeature() != nullptr)
         {
+            ScopedNgxDimensionRestoration restoreDimensions(InParameters);
+
             ProcessInitParams(InParameters);
 
             _p_dlssdHandle = &_dlssdHandle;

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 #include <nvsdk_ngx.h>
+#include <nvsdk_ngx_defs.h>
 
 inline ID3D12Resource* GetUpscalerResource_Dx12(NVSDK_NGX_Parameter* parameters, const char* name)
 {
@@ -72,6 +73,14 @@ class RestoreUpscalerResources_Dx12
     ID3D12Resource* _output = nullptr;
     bool _untypedColor = false;
     bool _untypedOutput = false;
+    unsigned int _width = 0;
+    unsigned int _height = 0;
+    unsigned int _outWidth = 0;
+    unsigned int _outHeight = 0;
+    bool _hasWidth = false;
+    bool _hasHeight = false;
+    bool _hasOutWidth = false;
+    bool _hasOutHeight = false;
 
   public:
     explicit RestoreUpscalerResources_Dx12(NVSDK_NGX_Parameter* parameters) : _parameters(parameters)
@@ -82,6 +91,11 @@ class RestoreUpscalerResources_Dx12
         _untypedOutput = _output == nullptr;
         _color = GetUpscalerResource_Dx12(parameters, NVSDK_NGX_Parameter_Color);
         _output = GetUpscalerResource_Dx12(parameters, NVSDK_NGX_Parameter_Output);
+
+        _hasWidth = parameters->Get(NVSDK_NGX_Parameter_Width, &_width) == NVSDK_NGX_Result_Success;
+        _hasHeight = parameters->Get(NVSDK_NGX_Parameter_Height, &_height) == NVSDK_NGX_Result_Success;
+        _hasOutWidth = parameters->Get(NVSDK_NGX_Parameter_OutWidth, &_outWidth) == NVSDK_NGX_Result_Success;
+        _hasOutHeight = parameters->Get(NVSDK_NGX_Parameter_OutHeight, &_outHeight) == NVSDK_NGX_Result_Success;
     }
     ~RestoreUpscalerResources_Dx12()
     {
@@ -93,5 +107,14 @@ class RestoreUpscalerResources_Dx12
             _parameters->Set(NVSDK_NGX_Parameter_Output, static_cast<void*>(_output));
         else
             _parameters->Set(NVSDK_NGX_Parameter_Output, _output);
+
+        if (_hasWidth)
+            _parameters->Set(NVSDK_NGX_Parameter_Width, _width);
+        if (_hasHeight)
+            _parameters->Set(NVSDK_NGX_Parameter_Height, _height);
+        if (_hasOutWidth)
+            _parameters->Set(NVSDK_NGX_Parameter_OutWidth, _outWidth);
+        if (_hasOutHeight)
+            _parameters->Set(NVSDK_NGX_Parameter_OutHeight, _outHeight);
     }
 };

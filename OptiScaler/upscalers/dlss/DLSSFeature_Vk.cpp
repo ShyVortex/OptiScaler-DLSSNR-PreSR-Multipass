@@ -1,4 +1,4 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include <Config.h>
 #include <Logger.h>
 
@@ -42,6 +42,8 @@ bool DLSSFeatureVk::InitInternal(VkCommandBuffer InCmdList, NVSDK_NGX_Parameter*
 
         if (NVNGXProxy::VULKAN_CreateFeature() != nullptr)
         {
+            ScopedNgxDimensionRestoration restoreDimensions(InParameters);
+
             ProcessInitParams(InParameters);
 
             _p_dlssHandle = &_dlssHandle;

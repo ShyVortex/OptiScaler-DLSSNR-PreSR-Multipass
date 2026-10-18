@@ -1,4 +1,4 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include "DLSSFeature_Dx11.h"
 #include <Config.h>
 
@@ -41,6 +41,8 @@ bool DLSSFeatureDx11::InitInternal(ID3D11DeviceContext* InContext, NVSDK_NGX_Par
 
         if (NVNGXProxy::D3D11_CreateFeature() != nullptr)
         {
+            ScopedNgxDimensionRestoration restoreDimensions(InParameters);
+
             ProcessInitParams(InParameters);
 
             _p_dlssHandle = &_dlssHandle;
