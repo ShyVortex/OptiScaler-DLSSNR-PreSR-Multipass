@@ -73,7 +73,7 @@ static bool inputFG = false;
 static bool inputFps = false;
 static bool inputFpsCycle = false;
 static uint64_t lastInputTick = 0;
-constexpr uint64_t debounceThreshold = 1000;
+constexpr uint64_t debounceThreshold = 500;
 
 static bool hasGamepad = false;
 static bool ffxInitTried = false;
@@ -267,6 +267,8 @@ void MenuCommon::UpdateManualInput(HWND targetHwnd)
     OptiInput::BeginFrame(targetHwnd);
 
     const auto config = Config::Instance();
+    const auto currentTick = GetTickCount64();
+    const bool canAcceptInputs = lastInputTick + debounceThreshold < currentTick;
 
     auto CheckShortcut =
         [&](int vk, bool& inputFlag, const char* logMessage, bool requireCtrl = false, bool requireAlt = false)
@@ -298,12 +300,10 @@ void MenuCommon::UpdateManualInput(HWND targetHwnd)
             lastKey = vk;
             // receivingWmInputs = false;
             inputFlag = true;
+            lastInputTick = currentTick;
             LOG_DEBUG("{}", logMessage);
         }
     };
-
-    const auto currentTick = GetTickCount64();
-    const bool canAcceptInputs = lastInputTick + debounceThreshold < currentTick;
 
     if (!capturingKey && canAcceptInputs)
     {
