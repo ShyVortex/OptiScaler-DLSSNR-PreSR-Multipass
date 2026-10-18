@@ -848,13 +848,41 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_CreateFeature(ID3D12GraphicsComma
     const State& state = State::Instance();
     const Config& cfg = *Config::Instance();
 
+    NVSDK_NGX_Parameter* effectiveParameters = InParameters;
+    std::optional<DlssgParameterSanitizer> dlssgSanitizer;
+    if (InFeatureID == NVSDK_NGX_Feature_FrameGeneration)
+    {
+        unsigned int fallbackDisplayWidth = 0;
+        unsigned int fallbackDisplayHeight = 0;
+        if (state.currentFeature != nullptr)
+        {
+            fallbackDisplayWidth = state.currentFeature->DisplayWidth();
+            fallbackDisplayHeight = state.currentFeature->DisplayHeight();
+        }
+        else if (state.screenWidth > 0 && state.screenHeight > 0)
+        {
+            fallbackDisplayWidth = static_cast<unsigned int>(state.screenWidth);
+            fallbackDisplayHeight = static_cast<unsigned int>(state.screenHeight);
+        }
+
+        const auto sanitization = ResolveDlssgSanitization(InParameters, fallbackDisplayWidth, fallbackDisplayHeight);
+        if (sanitization.NeedsSanitization())
+        {
+            LOG_INFO("DLSSG CreateFeature: parameter sanitization active (filterReal: {}, forcedExtent: {}x{})",
+                     sanitization.filterOutputReal, sanitization.forcedWidth, sanitization.forcedHeight);
+            dlssgSanitizer.emplace(InParameters, sanitization.filterOutputReal, sanitization.forcedWidth,
+                                   sanitization.forcedHeight);
+            effectiveParameters = &dlssgSanitizer.value();
+        }
+    }
+
     // DLSSG replacements passthrough
     if (State::Instance().activeFgNvngx != FGNvngxReplacement::None && Nvngx_FG::isDx12Available() &&
         InFeatureID == NVSDK_NGX_Feature_FrameGeneration)
     {
         LOG_INFO("Passthrough to DLSSG Replacement's CreateFeature for FrameGeneration");
 
-        NVSDK_NGX_Result res = Nvngx_FG::D3D12_CreateFeature(InCmdList, InFeatureID, InParameters, OutHandle);
+        NVSDK_NGX_Result res = Nvngx_FG::D3D12_CreateFeature(InCmdList, InFeatureID, effectiveParameters, OutHandle);
 
         if (res == NVSDK_NGX_Result_Success && *OutHandle)
         {
@@ -873,7 +901,8 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_CreateFeature(ID3D12GraphicsComma
         {
             LOG_INFO("Passthrough to native NGX CreateFeature for feature {}", (int) InFeatureID);
 
-            NVSDK_NGX_Result res = NVNGXProxy::D3D12_CreateFeature()(InCmdList, InFeatureID, InParameters, OutHandle);
+            NVSDK_NGX_Result res =
+                NVNGXProxy::D3D12_CreateFeature()(InCmdList, InFeatureID, effectiveParameters, OutHandle);
 
             if (res == NVSDK_NGX_Result_Success && *OutHandle)
             {
@@ -1297,11 +1326,43 @@ NVSDK_NGX_API NVSDK_NGX_Result NVSDK_NGX_D3D12_EvaluateFeature(ID3D12GraphicsCom
 
     NVSDK_NGX_Parameter* effectiveParameters = InParameters;
     std::optional<DlssgParameterSanitizer> dlssgSanitizer;
-    if (feature == NVSDK_NGX_Feature_FrameGeneration && ShouldFilterDlssgOutputReal(InParameters))
+    if (feature == NVSDK_NGX_Feature_FrameGeneration)
     {
-        LOG_DEBUG("DLSSG evaluation: intermediate subframe with null DLSSG.OutputReal detected; sanitizing parameter");
-        dlssgSanitizer.emplace(InParameters, true);
-        effectiveParameters = &dlssgSanitizer.value();
+        unsigned int fallbackDisplayWidth = 0;
+        unsigned int fallbackDisplayHeight = 0;
+
+        ID3D12Resource* backbuffer = nullptr;
+        if (InParameters != nullptr && InParameters->Get("DLSSG.Backbuffer", &backbuffer) == NVSDK_NGX_Result_Success &&
+            backbuffer != nullptr)
+        {
+            const auto desc = backbuffer->GetDesc();
+            if (desc.Width > 0 && desc.Height > 0)
+            {
+                fallbackDisplayWidth = static_cast<unsigned int>(desc.Width);
+                fallbackDisplayHeight = static_cast<unsigned int>(desc.Height);
+            }
+        }
+
+        if (fallbackDisplayWidth == 0 && state.currentFeature != nullptr)
+        {
+            fallbackDisplayWidth = state.currentFeature->DisplayWidth();
+            fallbackDisplayHeight = state.currentFeature->DisplayHeight();
+        }
+        else if (fallbackDisplayWidth == 0 && state.screenWidth > 0 && state.screenHeight > 0)
+        {
+            fallbackDisplayWidth = static_cast<unsigned int>(state.screenWidth);
+            fallbackDisplayHeight = static_cast<unsigned int>(state.screenHeight);
+        }
+
+        const auto sanitization = ResolveDlssgSanitization(InParameters, fallbackDisplayWidth, fallbackDisplayHeight);
+        if (sanitization.NeedsSanitization())
+        {
+            LOG_DEBUG("DLSSG evaluation: parameter sanitization active (filterReal: {}, forcedExtent: {}x{})",
+                      sanitization.filterOutputReal, sanitization.forcedWidth, sanitization.forcedHeight);
+            dlssgSanitizer.emplace(InParameters, sanitization.filterOutputReal, sanitization.forcedWidth,
+                                   sanitization.forcedHeight);
+            effectiveParameters = &dlssgSanitizer.value();
+        }
     }
 
     // Native DLSS passthrough
