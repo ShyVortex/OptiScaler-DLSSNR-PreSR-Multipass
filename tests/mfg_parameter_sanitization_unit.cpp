@@ -8,6 +8,8 @@
 
 #include <nvsdk_ngx_params.h>
 #include <inputs/FG/DlssgParameterSanitizer.h>
+#include <upscalers/ScopedNgxDimensionRestoration.h>
+#include <framegen/dlssg/AmpereMfgLoader.h>
 
 // Concrete Mock NVSDK_NGX_Parameter implementation for testing
 class MockNgxParameters : public NVSDK_NGX_Parameter
@@ -381,6 +383,159 @@ void Test_Simulation_Streamline_MultiPass_MFG()
     std::printf("  [PASS] Test_Simulation_Streamline_MultiPass_MFG\n");
 }
 
+void Test_ResolveDlssgSanitization_UpscalerDimensionMismatch()
+{
+    // Shared parameters contaminated by DLSS Super Resolution (e.g., 1080p display with 720p render resolution)
+    MockNgxParameters params;
+    params.Set("Width", 1280u);
+    params.Set("Height", 720u);
+    params.Set("OutWidth", 1920u);
+    params.Set("OutHeight", 1080u);
+
+    // Resolve sanitization with no explicit fallback display extent
+    DlssgSanitizationParams sanitization = ResolveDlssgSanitization(&params, 0, 0);
+    assert(sanitization.NeedsSanitization());
+    assert(sanitization.forcedWidth == 1920u);
+    assert(sanitization.forcedHeight == 1080u);
+
+    DlssgParameterSanitizer sanitizer(&params, sanitization.filterOutputReal, sanitization.forcedWidth,
+                                      sanitization.forcedHeight);
+
+    // Assert that queries for Width and Height return the sanitized target extent across multiple types
+    unsigned int uWidth = 0, uHeight = 0;
+    assert(sanitizer.Get("Width", &uWidth) == NVSDK_NGX_Result_Success && uWidth == 1920u);
+    assert(sanitizer.Get("Height", &uHeight) == NVSDK_NGX_Result_Success && uHeight == 1080u);
+
+    int iWidth = 0, iHeight = 0;
+    assert(sanitizer.Get("Width", &iWidth) == NVSDK_NGX_Result_Success && iWidth == 1920);
+    assert(sanitizer.Get("Height", &iHeight) == NVSDK_NGX_Result_Success && iHeight == 1080);
+
+    float fWidth = 0.0f, fHeight = 0.0f;
+    assert(sanitizer.Get("Width", &fWidth) == NVSDK_NGX_Result_Success && fWidth == 1920.0f);
+    assert(sanitizer.Get("Height", &fHeight) == NVSDK_NGX_Result_Success && fHeight == 1080.0f);
+
+    double dWidth = 0.0, dHeight = 0.0;
+    assert(sanitizer.Get("Width", &dWidth) == NVSDK_NGX_Result_Success && dWidth == 1920.0);
+    assert(sanitizer.Get("Height", &dHeight) == NVSDK_NGX_Result_Success && dHeight == 1080.0);
+
+    unsigned long long ullWidth = 0, ullHeight = 0;
+    assert(sanitizer.Get("Width", &ullWidth) == NVSDK_NGX_Result_Success && ullWidth == 1920ull);
+    assert(sanitizer.Get("Height", &ullHeight) == NVSDK_NGX_Result_Success && ullHeight == 1080ull);
+
+    // Assert that the underlying dictionary retains its original values without in-place mutation
+    unsigned int rawWidth = 0, rawHeight = 0;
+    params.Get("Width", &rawWidth);
+    params.Get("Height", &rawHeight);
+    assert(rawWidth == 1280u);
+    assert(rawHeight == 720u);
+
+    std::printf("  [PASS] Test_ResolveDlssgSanitization_UpscalerDimensionMismatch\n");
+}
+
+void Test_ResolveDlssgSanitization_DirectNgxBackbufferFallback()
+{
+    // Direct NGX Feature 11 evaluation without OutWidth/OutHeight set in parameters
+    MockNgxParameters params;
+    params.Set("Width", 1280u);
+    params.Set("Height", 720u);
+
+    // Fallback extent supplied from DLSSG.Backbuffer descriptor (1920x1080)
+    DlssgSanitizationParams sanitization = ResolveDlssgSanitization(&params, 1920u, 1080u);
+    assert(sanitization.NeedsSanitization());
+    assert(sanitization.forcedWidth == 1920u);
+    assert(sanitization.forcedHeight == 1080u);
+
+    DlssgParameterSanitizer sanitizer(&params, sanitization.filterOutputReal, sanitization.forcedWidth,
+                                      sanitization.forcedHeight);
+
+    unsigned int uWidth = 0, uHeight = 0;
+    assert(sanitizer.Get("Width", &uWidth) == NVSDK_NGX_Result_Success && uWidth == 1920u);
+    assert(sanitizer.Get("Height", &uHeight) == NVSDK_NGX_Result_Success && uHeight == 1080u);
+
+    std::printf("  [PASS] Test_ResolveDlssgSanitization_DirectNgxBackbufferFallback\n");
+}
+
+void Test_ResolveDlssgSanitization_DlaaNoMismatch()
+{
+    // Native DLAA: Render dimensions equal display dimensions (1920x1080)
+    MockNgxParameters params;
+    params.Set("Width", 1920u);
+    params.Set("Height", 1080u);
+    params.Set("OutWidth", 1920u);
+    params.Set("OutHeight", 1080u);
+
+    DlssgSanitizationParams sanitization = ResolveDlssgSanitization(&params, 1920u, 1080u);
+    assert(!sanitization.NeedsSanitization());
+    assert(sanitization.forcedWidth == 0);
+    assert(sanitization.forcedHeight == 0);
+
+    std::printf("  [PASS] Test_ResolveDlssgSanitization_DlaaNoMismatch\n");
+}
+
+void Test_ScopedNgxDimensionRestoration_Isolation()
+{
+    // Simulates shared parameter map shared between DLSS and DLSSG
+    MockNgxParameters params;
+    params.Set("Width", 1920u);
+    params.Set("Height", 1080u);
+    params.Set("OutWidth", 1920u);
+    params.Set("OutHeight", 1080u);
+
+    {
+        // Entering DLSS creation / initialization scope
+        ScopedNgxDimensionRestoration restorer(&params);
+
+        // DLSSFeature mutates InParameters with render dimensions
+        params.Set("Width", 1280u);
+        params.Set("Height", 720u);
+
+        unsigned int inScopeWidth = 0;
+        params.Get("Width", &inScopeWidth);
+        assert(inScopeWidth == 1280u);
+    } // restorer destructor runs here
+
+    // Exiting DLSS creation: original caller dimensions must be restored
+    unsigned int restoredWidth = 0, restoredHeight = 0;
+    params.Get("Width", &restoredWidth);
+    params.Get("Height", &restoredHeight);
+    assert(restoredWidth == 1920u);
+    assert(restoredHeight == 1080u);
+
+    std::printf("  [PASS] Test_ScopedNgxDimensionRestoration_Isolation\n");
+}
+
+void Test_AmpereMfgLoader_TuringSpoofArchResolution()
+{
+    using AmpereMfgLoader::FormatIniContent030;
+
+    // Turing GPU (0x160): auto/absent SpoofArchToGame must resolve to 0
+    std::string iniTuringAuto =
+        FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, false, false, 0x160);
+    assert(iniTuringAuto.find("SpoofArchToGame=0\n") != std::string::npos);
+
+    // Turing GPU (0x160): explicit user override "1" must be respected as an escape hatch
+    std::string iniTuringExplicit =
+        FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "1", false, 0.0f, false, false, 0x160);
+    assert(iniTuringExplicit.find("SpoofArchToGame=1\n") != std::string::npos);
+
+    // Ampere GPU (0x170): auto SpoofArchToGame is omitted to preserve factory convention
+    std::string iniAmpereAuto =
+        FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, false, false, 0x170);
+    assert(iniAmpereAuto.find("SpoofArchToGame") == std::string::npos);
+
+    // Ada GPU (0x190): auto SpoofArchToGame is omitted
+    std::string iniAdaAuto =
+        FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, false, false, 0x190);
+    assert(iniAdaAuto.find("SpoofArchToGame") == std::string::npos);
+
+    // Internal mode active: always emits SpoofArchToGame=0 regardless of GPU
+    std::string iniInternalMode =
+        FormatIniContent030(5, 1, "Auto", "Auto", 0, "Auto", 1, "Auto", false, 0.0f, false, true, 0x170);
+    assert(iniInternalMode.find("SpoofArchToGame=0\n") != std::string::npos);
+
+    std::printf("  [PASS] Test_AmpereMfgLoader_TuringSpoofArchResolution\n");
+}
+
 int main()
 {
     std::printf("=== Running DLSS-G Parameter Sanitization Unit Tests ===\n");
@@ -393,6 +548,12 @@ int main()
     Test_DlssgParameterSanitizer_UnfilteredGet();
     Test_DlssgParameterSanitizer_SetForwarding();
     Test_Simulation_Streamline_MultiPass_MFG();
+
+    Test_ResolveDlssgSanitization_UpscalerDimensionMismatch();
+    Test_ResolveDlssgSanitization_DirectNgxBackbufferFallback();
+    Test_ResolveDlssgSanitization_DlaaNoMismatch();
+    Test_ScopedNgxDimensionRestoration_Isolation();
+    Test_AmpereMfgLoader_TuringSpoofArchResolution();
 
     std::printf("=== All DLSS-G Parameter Sanitization Unit Tests PASSED! ===\n");
     return 0;
