@@ -13,10 +13,6 @@
 #include <sstream>
 #include <mutex>
 
-#ifndef NV_GPU_ARCHITECTURE_GA100
-#define NV_GPU_ARCHITECTURE_GA100 0x00000170
-#endif
-
 namespace AmpereMfgLoader
 {
 namespace

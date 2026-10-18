@@ -23,19 +23,6 @@
 
 #pragma intrinsic(_ReturnAddress)
 
-#ifndef NV_GPU_ARCHITECTURE_TU100
-#define NV_GPU_ARCHITECTURE_TU100 0x00000160
-#endif
-#ifndef NV_GPU_ARCHITECTURE_GA100
-#define NV_GPU_ARCHITECTURE_GA100 0x00000170
-#endif
-#ifndef NV_GPU_ARCHITECTURE_AD100
-#define NV_GPU_ARCHITECTURE_AD100 0x00000190
-#endif
-#ifndef NV_GPU_ARCHITECTURE_GB200
-#define NV_GPU_ARCHITECTURE_GB200 0x000001b0
-#endif
-
 NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle hPhysicalGpu,
                                                            NV_GPU_ARCH_INFO* pGpuArchInfo)
 {

@@ -79,6 +79,12 @@ bool ApplyDisplayTargetLive(uint32_t targetFps);
 /// Dynamically updates UI recomposition mode in the running SilyNoMeta module (0 = FollowGame, 1 = Auto, 2 = Force).
 bool ApplyUIModeLive(uint32_t uiMode);
 
+/// Checks if an architecture ID represents Turing (SM75).
+inline bool IsTuringArch(uint32_t archId) { return (archId == 0x00000160) || ((archId & 0xFFF0) == 0x0160); }
+
+/// Checks if an architecture ID represents Ampere (SM86).
+inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }
+
 /// Resolves the companion INI MaxGeneratedFrames setting.
 /// MaxFrames is clamped to [1, maxCeiling] (preserving 1 for 2X FG, up to maxCeiling).
 /// With NvAPI_D3D12_SetFlipConfig stubbed on Linux, both Windows and Linux cleanly
@@ -222,10 +228,6 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     return ss.str();
 }
 
-#ifndef NV_GPU_ARCHITECTURE_TU100
-#define NV_GPU_ARCHITECTURE_TU100 0x00000160
-#endif
-
 /// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3,
 /// MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame, DynamicMFG/DynamicTargetFPS).
 /// In internal mode (internalModeActive) or on Turing hardware (realArch == 0x160), auto/absent
@@ -294,7 +296,7 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     ss << "Router=" << validRouter << "\n";
     ss << "KernelImage=" << validKernel << "\n";
     ss << "HardwareBilinear=" << validHwBilinear << "\n";
-    const bool isTuring = (realArch == NV_GPU_ARCHITECTURE_TU100);
+    const bool isTuring = IsTuringArch(realArch);
     if (spoofArch == "1" || spoofArch == "true")
         ss << "SpoofArchToGame=1\n";
     else if (spoofArch == "0" || spoofArch == "false")
@@ -439,12 +441,6 @@ inline std::string MergeReshadeCompanionContent(const std::string& existingConte
 
     return outStream.str();
 }
-
-/// Checks if an architecture ID represents Turing (SM75).
-inline bool IsTuringArch(uint32_t archId) { return (archId == 0x00000160) || ((archId & 0xFFF0) == 0x0160); }
-
-/// Checks if an architecture ID represents Ampere (SM86).
-inline bool IsAmpereArch(uint32_t archId) { return (archId == 0x00000170) || ((archId & 0xFFF0) == 0x0170); }
 
 /// Detects if a dlssg_sm86 binary contains the SM75 kernel family (310.1 build or 0.3.1+ unified 310.9 build).
 inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
