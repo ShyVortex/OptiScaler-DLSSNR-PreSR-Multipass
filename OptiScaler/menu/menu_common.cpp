@@ -3441,16 +3441,21 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             if (ampereInternalConfigured != (state.ampereMfgMode == AmpereMfgMode::Internal))
                 ImGui::TextWrapped("Save Settings and restart to apply this change.");
 
-            // MaxGeneratedFrames slider
+            // Max Multiplier Ceiling slider
             if (dmfgActive)
                 ImGui::BeginDisabled();
 
             int maxFrames = config->FGDLSSGAmpereMfgMaxFrames.value_or_default();
-            const char* frameLabels[] = { "Factory default (4X)", "1 (2X)", "2 (3X)", "3 (4X)", "4 (5X)", "5 (6X)" };
-            const char* currentLabel =
-                dmfgActive ? "Dynamic (Up to 6X)"
-                           : ((maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames] : "Factory default (4X)");
-            if (ImGui::SliderInt("Max Generated Frames##sm86", &maxFrames, 0, 5, currentLabel))
+            const char* frameLabels[] = { "Factory default (up to 4X)",
+                                          "1 (up to 2X only)",
+                                          "2 (up to 3X)",
+                                          "3 (up to 4X)",
+                                          "4 (up to 5X)",
+                                          "5 (up to 6X)" };
+            const char* currentLabel = dmfgActive ? "Dynamic (Up to 6X)"
+                                                  : ((maxFrames >= 0 && maxFrames <= 5) ? frameLabels[maxFrames]
+                                                                                        : "Factory default (up to 4X)");
+            if (ImGui::SliderInt("Max Multiplier Ceiling##sm86", &maxFrames, 0, 5, currentLabel))
                 config->FGDLSSGAmpereMfgMaxFrames = maxFrames;
 
             if (dmfgActive)
@@ -3461,10 +3466,23 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else
             {
-                ShowHelpMarker("Advertised maximum (1=2X, 2=3X, 3=4X, 4=5X, 5=6X). The game chooses the actual count.\n"
-                               "0 = Factory default limit (4X / 3 generated frames). Up to 6X (5 generated frames) can "
-                               "be selected.\n"
-                               "Save Settings and restart to apply.");
+                ShowHelpMarker(
+                    "Maximum multiplier capability advertised to the game engine (1=2X, 2=3X, 3=4X, 4=5X, 5=6X).\n"
+                    "The game's graphics settings menu chooses the actual active multiplier.\n\n"
+                    "Important: Setting this to 1 (up to 2X only) tells the game engine that Multi-Frame Generation "
+                    "(3X/4X) "
+                    "is not supported. Games with in-engine multiplier selectors (e.g. Where Winds Meet, Black Myth: "
+                    "Wukong, "
+                    "Final Fantasy) will hide their 2x/3x selection dropdowns and lock to standard 2X.\n"
+                    "Keep this at Factory default (4X) or higher so in-game menus remain accessible.\n\n"
+                    "Save Settings and restart to apply.");
+            }
+
+            if (!dmfgActive && maxFrames == 1)
+            {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                    "Notice: Ceiling set to 2X. In-game 2x/3x multiplier menus will be hidden by the game engine.");
             }
 
             // Optimized Kernels combo (0.3.2)
