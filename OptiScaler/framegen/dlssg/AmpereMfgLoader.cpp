@@ -308,7 +308,8 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
 
     return FormatIniContent030(maxFrames, optimized, preset, kernelImg, hwBilinear, router, logLevel, spoofArch,
                                dynamicMfg, dynamicTargetFps, hasDynamicMfgSupport,
-                               State::Instance().ampereMfgInternalActive);
+                               State::Instance().ampereMfgInternalActive,
+                               static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id));
 }
 
 std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime)

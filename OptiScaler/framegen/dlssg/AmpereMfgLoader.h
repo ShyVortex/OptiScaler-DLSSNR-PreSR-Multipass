@@ -222,17 +222,22 @@ inline std::string FormatIniContent(int maxFrames, const std::string& kernelImg,
     return ss.str();
 }
 
+#ifndef NV_GPU_ARCHITECTURE_TU100
+#define NV_GPU_ARCHITECTURE_TU100 0x00000160
+#endif
+
 /// Formats dlssg_sm86.ini content with 0.3.x specification ([General], [FrameGeneration] Optimized 0-3,
 /// MaxGeneratedFrames up to 5, [Compatibility] Preset, SpoofArchToGame, DynamicMFG/DynamicTargetFPS).
-/// In internal mode (internalModeActive), auto/absent SpoofArchToGame resolves to 0: OptiScaler's own
-/// caller-scoped NvAPI GetArchInfo spoof owns the Streamline plugin-eviction gate; explicit 1/0 is
+/// In internal mode (internalModeActive) or on Turing hardware (realArch == 0x160), auto/absent
+/// SpoofArchToGame resolves to 0: prevents dlssg_sm86.dll from spoofing architecture to Ada for direct
+/// NGX Super Resolution models (which crashes with illegal instruction CTD on SM75). Explicit 1/0 is
 /// still written as-is (escape hatch).
 inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const std::string& preset = "Auto",
                                        const std::string& kernelImg = "Auto", int hwBilinear = 0,
                                        const std::string& router = "Auto", int logLevel = 1,
                                        const std::string& spoofArch = "Auto", bool dynamicMfg = false,
                                        float dynamicTargetFps = 0.0f, bool hasDynamicMfgSupport = false,
-                                       bool internalModeActive = false)
+                                       bool internalModeActive = false, uint32_t realArch = 0)
 {
     // Clamping of MaxGeneratedFrames for 0.3.x: 1 to 5 (5 = 6X)
     if (maxFrames <= 0 || maxFrames > 5)
@@ -289,11 +294,12 @@ inline std::string FormatIniContent030(int maxFrames, int optimized = 1, const s
     ss << "Router=" << validRouter << "\n";
     ss << "KernelImage=" << validKernel << "\n";
     ss << "HardwareBilinear=" << validHwBilinear << "\n";
+    const bool isTuring = (realArch == NV_GPU_ARCHITECTURE_TU100);
     if (spoofArch == "1" || spoofArch == "true")
         ss << "SpoofArchToGame=1\n";
     else if (spoofArch == "0" || spoofArch == "false")
         ss << "SpoofArchToGame=0\n";
-    else if (internalModeActive)
+    else if (internalModeActive || isTuring)
         ss << "SpoofArchToGame=0\n";
     ss << "\n";
     ss << "[Logging]\n";

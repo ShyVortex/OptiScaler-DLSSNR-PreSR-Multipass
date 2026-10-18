@@ -23,6 +23,9 @@
 
 #pragma intrinsic(_ReturnAddress)
 
+#ifndef NV_GPU_ARCHITECTURE_TU100
+#define NV_GPU_ARCHITECTURE_TU100 0x00000160
+#endif
 #ifndef NV_GPU_ARCHITECTURE_GA100
 #define NV_GPU_ARCHITECTURE_GA100 0x00000170
 #endif
@@ -82,13 +85,19 @@ NvAPI_Status __stdcall NvApiHooks::hkNvAPI_GPU_GetArchInfo(NvPhysicalGpuHandle h
                 (callerLower.find("nvngx_dlss.") != std::string::npos ||
                  callerLower.find("nvngx_dlssd") != std::string::npos || callerLower.ends_with(".exe"));
 
-            const bool isFgCaller = !isExplicitNonFgCaller &&
-                                    (callerLower.find("sl.common") != std::string::npos ||
-                                     callerLower.find("sl.dlss_g") != std::string::npos ||
-                                     callerLower.find("sl.interposer") != std::string::npos ||
-                                     callerLower.find("dlssg") != std::string::npos ||
-                                     callerLower.find("version") != std::string::npos || callerLower == "_nvngx.dll" ||
-                                     callerLower == "nvngx.dll" || callerLower.find("_nvngx") != std::string::npos);
+            const bool isNvngxCaller = (callerLower == "_nvngx.dll" || callerLower == "nvngx.dll" ||
+                                        callerLower.find("_nvngx") != std::string::npos);
+
+            // On Turing (SM75), never spoof _nvngx.dll to Ada because direct NGX DLSS Super Resolution
+            // will attempt to load Ada cubins that execute unsupported instructions on SM75 hardware.
+            const bool allowNvngxSpoof = (realArch != NV_GPU_ARCHITECTURE_TU100);
+
+            const bool isFgCaller = !isExplicitNonFgCaller && (callerLower.find("sl.common") != std::string::npos ||
+                                                               callerLower.find("sl.dlss_g") != std::string::npos ||
+                                                               callerLower.find("sl.interposer") != std::string::npos ||
+                                                               callerLower.find("dlssg") != std::string::npos ||
+                                                               callerLower.find("version") != std::string::npos ||
+                                                               (isNvngxCaller && allowNvngxSpoof));
 
             const bool mfgUnlock = Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default();
 
