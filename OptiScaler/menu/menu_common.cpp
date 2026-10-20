@@ -3714,17 +3714,26 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
         bool xeUnlock = config->XeMfgUnlock.value_or_default();
 
-        // Mutual exclusion: disable if Ada or Ampere is already active
+        const bool isVulkan = (state.swapchainApi == API::Vulkan || state.api == API::Vulkan);
+
+        // Mutual exclusion: disable if Ada or Ampere is already active, or if running under Vulkan
         const bool adaActive = config->FGDLSSGAdaMfgUnlock.value_or_default();
         const bool externalActive = config->ExternalFrameGeneration.value_or_default();
-        const bool disableXeMfg = !xeUnlock && (adaActive || ampereActive || externalActive);
+        const bool disableXeMfg = !xeUnlock && (adaActive || ampereActive || externalActive || isVulkan);
 
         if (disableXeMfg)
         {
             ImGui::BeginDisabled();
             ImGui::Checkbox("Enable XeMFG Unlocker (Multi-Frame Generation; restart)##xemfg", &xeUnlock);
             ImGui::EndDisabled();
-            if (adaActive)
+            if (isVulkan)
+            {
+                ShowHelpMarker("Disabled because the game is running under the Vulkan API.\n"
+                               "Intel XeSS Frame Generation (XeFG) strictly requires DirectX 12.\n"
+                               "If the game supports DirectX 12, switch the Graphics API to DirectX 12 in the game "
+                               "settings and restart.");
+            }
+            else if (adaActive)
             {
                 ShowHelpMarker("Disabled because the Ada (RTX 40) MFG unlock is active.\n"
                                "Disable AdaMfgUnlock first, Save Settings and restart.");
@@ -3881,7 +3890,15 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                                    patchStr.c_str(), pacingStr.c_str());
             }
 
-            if (config->XeMfgSourceValue() == XeMfgSource::OptiScaler && state.currentFGSwapchain == nullptr)
+            if (isVulkan)
+            {
+                ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.35f, 0.35f, 1.0f)),
+                                   "Error: Game is running in Vulkan mode. Intel XeSS Frame Generation (XeFG) only "
+                                   "supports DirectX 12.\n"
+                                   "If the game supports DirectX 12, switch the Graphics API to DirectX 12 in the game "
+                                   "settings and restart.");
+            }
+            else if (config->XeMfgSourceValue() == XeMfgSource::OptiScaler && state.currentFGSwapchain == nullptr)
             {
                 ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
                                    "Note: Save Settings and restart the game to initialize the XeFG SwapChain.");
@@ -3933,8 +3950,21 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             if (liveMultiplier > 0)
             {
-                ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
-                                   liveMultiplier + 1);
+                if (isVulkan)
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.35f, 0.35f, 1.0f)),
+                                       "In-Game Multiplier: %dX (Inactive - DirectX 12 Required)", liveMultiplier + 1);
+                }
+                else if (state.currentFGSwapchain == nullptr)
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(1.0f, 0.6f, 0.2f, 1.0f)),
+                                       "In-Game Multiplier: %dX (Pending SwapChain)", liveMultiplier + 1);
+                }
+                else
+                {
+                    ImGui::TextColored(toneMapColor(ImVec4(0.2f, 0.9f, 0.2f, 1.0f)), "In-Game Multiplier: %dX (Active)",
+                                       liveMultiplier + 1);
+                }
                 ShowHelpMarker(
                     "Multiplier selected by the game engine, Streamline options call, or OptiScaler injection.");
             }
