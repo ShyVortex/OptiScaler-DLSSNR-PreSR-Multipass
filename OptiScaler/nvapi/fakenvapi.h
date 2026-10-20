@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <dxgi.h>
 #include <d3d12.h>
@@ -16,7 +16,7 @@ class fakenvapi
     inline static bool _usingFakenvapiAsMainNvapi = false;
     inline static bool _usingOnNvidia = false;
     inline static void* _lowLatencyTechContext = nullptr;
-    inline static LowLatencyMode _lowLatencyMode = LowLatencyMode::LatencyFlex;
+    inline static LowLatencyMode _lowLatencyMode = LowLatencyMode::None;
     inline static HMODULE _dllForNvidia = nullptr;
 
     static std::unordered_map<NvU32, void*> idToFuncMapping;

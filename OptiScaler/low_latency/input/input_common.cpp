@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include <misc/IdentifyGpu.h>
 
@@ -191,8 +191,8 @@ bool InputCommon::update_low_latency_tech(IUnknown* pDevice, std::optional<LowLa
             desiredMode = LowLatencyMode::XeLL;
         else if (vendorId == VendorId::AMD)
             desiredMode = LowLatencyMode::AntiLag2;
-        // else if (vendorId == VendorId::Nvidia)
-        //     desiredMode = LowLatencyMode::Reflex; // TODO: not supported yet
+        else if (vendorId == VendorId::Nvidia)
+            desiredMode = LowLatencyMode::None;
         else
             desiredMode = LowLatencyMode::LatencyFlex;
     }

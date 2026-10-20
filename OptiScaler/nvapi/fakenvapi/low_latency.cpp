@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "low_latency.h"
 
 // private
@@ -54,17 +54,26 @@ bool LowLatency::get_low_latency_tech_context(void** low_latency_context, LowLat
 {
     if (auto current_tech = currently_active_tech.load())
     {
-        if (!current_tech || !low_latency_context || !low_latency_tech)
+        if (!low_latency_context || !low_latency_tech)
             return false;
 
         *low_latency_context = current_tech->get_tech_context();
         *low_latency_tech = current_tech->get_mode();
     }
+    else
+    {
+        if (low_latency_context)
+            *low_latency_context = nullptr;
+        if (low_latency_tech)
+            *low_latency_tech = LowLatencyMode::None;
+        return false;
+    }
 
     // We are during deinit, don't let app use the context
     if (delay_deinit > 0)
     {
-        *low_latency_context = nullptr;
+        if (low_latency_context)
+            *low_latency_context = nullptr;
         delay_deinit = 1;
     }
 

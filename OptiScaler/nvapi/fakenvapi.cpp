@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "proxies/FfxApi_Proxy.h"
 #include <unordered_map>
@@ -205,13 +205,20 @@ bool fakenvapi::updateModeAndContext()
         if (_usingFakenvapiAsMainNvapi)
             LOG_ERROR("Couldn't get low latency context");
 
+        _lowLatencyTechContext = nullptr;
+        _lowLatencyMode = LowLatencyMode::None;
         return false;
     }
 
     auto result = lowLatencyCtx->get_low_latency_tech_context(&_lowLatencyTechContext, &_lowLatencyMode);
 
     if (!result)
-        LOG_TRACE_FAKENVAPI("Can't get Low Latency context from fakenvapi");
+    {
+        _lowLatencyTechContext = nullptr;
+        _lowLatencyMode = LowLatencyMode::None;
+        if (_usingFakenvapiAsMainNvapi)
+            LOG_TRACE_FAKENVAPI("Can't get Low Latency context from fakenvapi");
+    }
 
     return result;
 }
