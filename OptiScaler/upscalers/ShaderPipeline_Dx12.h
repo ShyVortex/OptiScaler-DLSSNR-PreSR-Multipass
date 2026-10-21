@@ -97,6 +97,12 @@ class RestoreUpscalerResources_Dx12
         _hasOutWidth = parameters->Get(NVSDK_NGX_Parameter_OutWidth, &_outWidth) == NVSDK_NGX_Result_Success;
         _hasOutHeight = parameters->Get(NVSDK_NGX_Parameter_OutHeight, &_outHeight) == NVSDK_NGX_Result_Success;
     }
+
+    bool HasWidth() const { return _hasWidth; }
+    bool HasHeight() const { return _hasHeight; }
+    bool HasOutWidth() const { return _hasOutWidth; }
+    bool HasOutHeight() const { return _hasOutHeight; }
+
     ~RestoreUpscalerResources_Dx12()
     {
         if (_untypedColor)

@@ -50,12 +50,20 @@ void ResolveNrRenderDimensions(NVSDK_NGX_Parameter* parameters, unsigned int& wi
 {
     width = 0;
     height = 0;
-    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
-    parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
-    if (width == 0 || height == 0)
+    if (parameters != nullptr)
     {
-        parameters->Get(NVSDK_NGX_Parameter_Width, &width);
-        parameters->Get(NVSDK_NGX_Parameter_Height, &height);
+        parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
+        parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
+        if (width == 0 || height == 0)
+        {
+            parameters->Get(NVSDK_NGX_Parameter_Width, &width);
+            parameters->Get(NVSDK_NGX_Parameter_Height, &height);
+        }
+    }
+    if ((width == 0 || height == 0) && State::Instance().currentFeature != nullptr)
+    {
+        width = State::Instance().currentFeature->RenderWidth();
+        height = State::Instance().currentFeature->RenderHeight();
     }
 }
 

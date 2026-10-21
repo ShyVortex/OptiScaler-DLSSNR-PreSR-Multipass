@@ -141,6 +141,18 @@ bool IFeature_Dx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_NGX
 
     RestoreUpscalerResources_Dx12 restoreResources(InParameters);
 
+    unsigned int evaluateRenderW = 0;
+    unsigned int evaluateRenderH = 0;
+    GetRenderResolution(InParameters, &evaluateRenderW, &evaluateRenderH);
+    if (!restoreResources.HasWidth())
+        InParameters->Set(NVSDK_NGX_Parameter_Width, evaluateRenderW);
+    if (!restoreResources.HasHeight())
+        InParameters->Set(NVSDK_NGX_Parameter_Height, evaluateRenderH);
+    if (!restoreResources.HasOutWidth())
+        InParameters->Set(NVSDK_NGX_Parameter_OutWidth, TargetWidth());
+    if (!restoreResources.HasOutHeight())
+        InParameters->Set(NVSDK_NGX_Parameter_OutHeight, TargetHeight());
+
     const bool rayReconstruction = sourceRayReconstruction || upscaler == Upscaler::DLSSD;
     // Specialized schedules own the two seams but keep the same per-feature shader/history lifetime.
     const bool specializedNr =

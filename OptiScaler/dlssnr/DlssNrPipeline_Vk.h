@@ -2,6 +2,7 @@
 
 #include <upscalers/ShaderPipeline_Vk.h>
 #include <shaders/dlssnr/DlssNr_Vk.h>
+#include <State.h>
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_vk.h>
 
@@ -52,6 +53,11 @@ inline bool HasSupportedSubrects(NVSDK_NGX_Parameter* parameters, bool beforeUps
             parameters->Get(NVSDK_NGX_Parameter_Width, &width);
             parameters->Get(NVSDK_NGX_Parameter_Height, &height);
         }
+        if ((width == 0 || height == 0) && State::Instance().currentFeature != nullptr)
+        {
+            width = State::Instance().currentFeature->RenderWidth();
+            height = State::Instance().currentFeature->RenderHeight();
+        }
         return colour.Image && ((width == 0) == (height == 0)) && width <= colour.Width && height <= colour.Height;
     }
     return true;
@@ -84,6 +90,12 @@ inline DlssNrFrameInfo_Vk FrameInfo(NVSDK_NGX_Parameter* parameters, bool before
     {
         parameters->Get(NVSDK_NGX_Parameter_Width, &frame.RenderSubrectWidth);
         parameters->Get(NVSDK_NGX_Parameter_Height, &frame.RenderSubrectHeight);
+    }
+    if ((frame.RenderSubrectWidth == 0 || frame.RenderSubrectHeight == 0) &&
+        State::Instance().currentFeature != nullptr)
+    {
+        frame.RenderSubrectWidth = State::Instance().currentFeature->RenderWidth();
+        frame.RenderSubrectHeight = State::Instance().currentFeature->RenderHeight();
     }
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, &frame.ColorSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, &frame.ColorSubrectBaseY);
