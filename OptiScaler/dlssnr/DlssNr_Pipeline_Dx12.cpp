@@ -167,7 +167,7 @@ ShaderPass_Dx12 MakeDlssNrPass(DlssNr_Dx12& shader, ID3D12Device* device, ID3D12
     frame.ExposureState = states.exposure;
     if (frame.PreExposure <= 1e-6f)
         frame.PreExposure = 1.0f;
-    ResolveNrRenderDimensions(parameters, frame.RenderSubrectWidth, frame.RenderSubrectHeight);
+    DlssNr::ResolveNrRenderDimensions(parameters, frame.RenderSubrectWidth, frame.RenderSubrectHeight);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, &frame.DepthSubrectBaseY);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &frame.MotionSubrectBaseX);
