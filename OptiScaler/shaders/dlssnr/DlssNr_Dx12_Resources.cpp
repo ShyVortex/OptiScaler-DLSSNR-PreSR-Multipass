@@ -175,6 +175,7 @@ auto DlssNr_Dx12::State::CreateGuideClone(ID3D12Device* device, ID3D12Resource* 
     D3D12_RESOURCE_DESC desc = source->GetDesc();
     desc.Format = TypedGuideFormat(desc.Format);
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    desc.MipLevels = 1;
 
     D3D12_HEAP_PROPERTIES heap {};
     heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -218,7 +219,26 @@ auto DlssNr_Dx12::State::ReadableGuide(ID3D12Device* device, ID3D12GraphicsComma
     }
 
     Barrier(cmdList, source, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    cmdList->CopyResource(*clone, source);
+    if ((*clone)->GetDesc().MipLevels == source->GetDesc().MipLevels)
+    {
+        cmdList->CopyResource(*clone, source);
+    }
+    else
+    {
+        D3D12_TEXTURE_COPY_LOCATION dstLoc {};
+        dstLoc.pResource = *clone;
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = 0;
+
+        D3D12_TEXTURE_COPY_LOCATION srcLoc {};
+        srcLoc.pResource = source;
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLoc.SubresourceIndex = 0;
+
+        const auto d = (*clone)->GetDesc();
+        D3D12_BOX box { 0, 0, 0, static_cast<UINT>(d.Width), static_cast<UINT>(d.Height), 1 };
+        cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &box);
+    }
     Barrier(cmdList, source, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     Barrier(cmdList, *clone, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     return *clone;

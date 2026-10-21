@@ -1,4 +1,4 @@
-// Included inside namespace DlssNr. All entry points share g_nrMutex.
+﻿// Included inside namespace DlssNr. All entry points share g_nrMutex.
 namespace Late
 {
 using Microsoft::WRL::ComPtr;
@@ -19,7 +19,9 @@ uint64_t serial = 0, successes = 0;
 std::string status = "Waiting for a finished picture.";
 bool reset = true;
 std::atomic<bool> tracking { false };
-inline constexpr GUID colorSpaceKey = { 0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 } };
+inline constexpr GUID colorSpaceKey = {
+    0x34a31e7b, 0x84c5, 0x44ef, { 0xa7, 0x4d, 0x6b, 0xd3, 0x60, 0x8c, 0xe5, 0x22 }
+};
 
 void Say(const char* message)
 {
@@ -32,8 +34,8 @@ void Say(const char* message)
 
 bool Finished(const Slot& slot)
 {
-    return !slot.fence || (slot.fence->GetCompletedValue() != UINT64_MAX &&
-                          slot.fence->GetCompletedValue() >= slot.done);
+    return !slot.fence ||
+           (slot.fence->GetCompletedValue() != UINT64_MAX && slot.fence->GetCompletedValue() >= slot.done);
 }
 
 void Cancel()
@@ -49,13 +51,12 @@ bool Clone(ComPtr<ID3D12Resource>& copy, ID3D12Resource* source)
 {
     const auto want = source->GetDesc();
     if (want.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || want.SampleDesc.Count != 1 ||
-        want.DepthOrArraySize != 1 || want.MipLevels != 1)
+        want.DepthOrArraySize != 1)
         return false;
     if (copy)
     {
         const auto have = copy->GetDesc();
-        if (have.Width != want.Width || have.Height != want.Height ||
-            have.Format != TypedGuideFormat(want.Format))
+        if (have.Width != want.Width || have.Height != want.Height || have.Format != TypedGuideFormat(want.Format))
             copy.Reset(); // caller checked the previous GPU fence
     }
     if (!copy)
@@ -66,7 +67,10 @@ bool Clone(ComPtr<ID3D12Resource>& copy, ID3D12Resource* source)
 Slot* Acquire(ID3D12GraphicsCommandList* cmd)
 {
     if (!cmd || State::Instance().swapchainInteropApi != SwapchainInteropApi::None)
-    { Say("This option needs a native DirectX 12 game."); return nullptr; }
+    {
+        Say("This option needs a native DirectX 12 game.");
+        return nullptr;
+    }
     ComPtr<ID3D12Device> currentDevice;
     if (FAILED(cmd->GetDevice(IID_PPV_ARGS(&currentDevice))))
         return nullptr;
@@ -81,7 +85,11 @@ Slot* Acquire(ID3D12GraphicsCommandList* cmd)
     ResTrack_Dx12::HookLateNrQueue(device.Get());
     Slot* next = nullptr;
     for (auto& slot : slots)
-        if (!slot.pending && Finished(slot)) { next = &slot; break; }
+        if (!slot.pending && Finished(slot))
+        {
+            next = &slot;
+            break;
+        }
     if (!next)
     {
         Say("Waiting for the previous picture to finish.");
@@ -93,9 +101,12 @@ Slot* Acquire(ID3D12GraphicsCommandList* cmd)
         if (FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&slot.fence))) ||
             FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&slot.allocator))) ||
             FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, slot.allocator.Get(), nullptr,
-                                            IID_PPV_ARGS(&slot.commands))) || FAILED(slot.commands->Close()))
+                                             IID_PPV_ARGS(&slot.commands))) ||
+            FAILED(slot.commands->Close()))
         {
-            slot.commands.Reset(); slot.allocator.Reset(); slot.fence.Reset();
+            slot.commands.Reset();
+            slot.allocator.Reset();
+            slot.fence.Reset();
             Say("Could not prepare the finished-picture option.");
             return nullptr;
         }
@@ -107,7 +118,8 @@ void Arm(Slot& slot, ID3D12GraphicsCommandList* cmd)
 {
     slot.producer = cmd;
     ID3D12GraphicsCommandList* real = nullptr;
-    if (Util::CheckForRealObject(__FUNCTION__, cmd, (IUnknown**) &real)) slot.producer = real;
+    if (Util::CheckForRealObject(__FUNCTION__, cmd, (IUnknown**) &real))
+        slot.producer = real;
     slot.serial = ++serial;
     slot.ready = slot.done + 1;
     slot.done = slot.ready;
@@ -117,24 +129,52 @@ void Arm(Slot& slot, ID3D12GraphicsCommandList* cmd)
 
 void Capture(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, bool rr)
 {
-    if (!params) return;
+    if (!params)
+        return;
     auto* depth = GetResource(params, NVSDK_NGX_Parameter_Depth, "DLSSD.Depth");
     auto* motion = GetResource(params, NVSDK_NGX_Parameter_MotionVectors, "DLSSD.MotionVectors");
     auto* output = GetResource(params, NVSDK_NGX_Parameter_Output, "DLSSD.Output");
     if (!depth || !motion || !output)
-    { Cancel(); Say("Waiting for the game's depth and movement data."); return; }
+    {
+        Cancel();
+        Say("Waiting for the game's depth and movement data.");
+        return;
+    }
     auto* next = Acquire(cmd);
-    if (!next) return;
+    if (!next)
+        return;
     auto& slot = *next;
     if (!Clone(slot.depth, depth) || !Clone(slot.motion, motion))
-    { Say("The game's depth or movement data is not supported."); return; }
+    {
+        Say("The game's depth or movement data is not supported.");
+        return;
+    }
     slot.residualOnly = false;
     // Copy at the NGX seam, where guide states and lifetimes are defined. Keep typed,
     // shader-readable copies until both the producing queue and NR have finished.
     for (auto pair : { std::pair { depth, slot.depth.Get() }, std::pair { motion, slot.motion.Get() } })
     {
         Barrier(cmd, pair.first, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        cmd->CopyResource(pair.second, pair.first);
+        if (pair.first->GetDesc().MipLevels == pair.second->GetDesc().MipLevels)
+        {
+            cmd->CopyResource(pair.second, pair.first);
+        }
+        else
+        {
+            D3D12_TEXTURE_COPY_LOCATION dstLoc {};
+            dstLoc.pResource = pair.second;
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = 0;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc {};
+            srcLoc.pResource = pair.first;
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            srcLoc.SubresourceIndex = 0;
+
+            const auto d = pair.second->GetDesc();
+            D3D12_BOX box { 0, 0, 0, static_cast<UINT>(d.Width), static_cast<UINT>(d.Height), 1 };
+            cmd->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &box);
+        }
         Barrier(cmd, pair.first, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         // The copy returns to COPY_DEST after the late dispatch.
     }
@@ -151,6 +191,17 @@ void Capture(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, bool r
     frame.OutputHeight = output->GetDesc().Height;
     params->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &frame.RenderSubrectWidth);
     params->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &frame.RenderSubrectHeight);
+    if (frame.RenderSubrectWidth == 0 || frame.RenderSubrectHeight == 0)
+    {
+        params->Get(NVSDK_NGX_Parameter_Width, &frame.RenderSubrectWidth);
+        params->Get(NVSDK_NGX_Parameter_Height, &frame.RenderSubrectHeight);
+    }
+    if ((frame.RenderSubrectWidth == 0 || frame.RenderSubrectHeight == 0) &&
+        State::Instance().currentFeature != nullptr)
+    {
+        frame.RenderSubrectWidth = State::Instance().currentFeature->RenderWidth();
+        frame.RenderSubrectHeight = State::Instance().currentFeature->RenderHeight();
+    }
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, &frame.DepthSubrectBaseY);
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &frame.MotionSubrectBaseX);
@@ -165,14 +216,18 @@ void Capture(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params, bool r
     Arm(slot, cmd);
 }
 
-bool CaptureResidual(ID3D12GraphicsCommandList* cmd, ID3D12Resource* clean, ID3D12Resource* residual,
-                     float scale, bool sceneLinear)
+bool CaptureResidual(ID3D12GraphicsCommandList* cmd, ID3D12Resource* clean, ID3D12Resource* residual, float scale,
+                     bool sceneLinear)
 {
     auto* next = Acquire(cmd);
-    if (!next) return false;
+    if (!next)
+        return false;
     auto& slot = *next;
     if (!Clone(slot.residual, residual))
-    { Say("The upscaled changes could not be saved."); return false; }
+    {
+        Say("The upscaled changes could not be saved.");
+        return false;
+    }
     Barrier(cmd, residual, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
     cmd->CopyResource(slot.residual.Get(), residual);
     Barrier(cmd, residual, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -192,9 +247,12 @@ bool CaptureResidual(ID3D12GraphicsCommandList* cmd, ID3D12Resource* clean, ID3D
 void FinishedPictureResetCommandList(ID3D12CommandList* cmd)
 {
     std::lock_guard<std::recursive_mutex> lock(g_nrMutex);
-    if (g_gpuTime) g_gpuTime->ResetRecording(cmd);
-    if (g_ngxTime) g_ngxTime->ResetRecording(cmd);
-    if (!Late::tracking.load()) return;
+    if (g_gpuTime)
+        g_gpuTime->ResetRecording(cmd);
+    if (g_ngxTime)
+        g_ngxTime->ResetRecording(cmd);
+    if (!Late::tracking.load())
+        return;
     for (auto& slot : Late::slots)
         if (slot.pending && !slot.submitted && slot.producer == cmd)
         {
@@ -206,18 +264,22 @@ void FinishedPictureResetCommandList(ID3D12CommandList* cmd)
 
 bool WaitForFinishedPicture()
 {
-    if (!Late::tracking.load()) return true;
+    if (!Late::tracking.load())
+        return true;
     std::lock_guard<std::recursive_mutex> lock(g_nrMutex);
     Late::Cancel();
     for (auto& slot : Late::slots)
     {
-        if (!slot.submitted || Late::Finished(slot)) continue;
+        if (!slot.submitted || Late::Finished(slot))
+            continue;
         HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (!event) return false;
+        if (!event)
+            return false;
         const auto hr = slot.fence->SetEventOnCompletion(slot.done, event);
         const bool finished = SUCCEEDED(hr) && WaitForSingleObject(event, 5000) == WAIT_OBJECT_0;
         CloseHandle(event);
-        if (!finished) return false;
+        if (!finished)
+            return false;
     }
     return true;
 }
@@ -231,9 +293,12 @@ std::string FinishedPictureStatus()
 void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
     std::lock_guard<std::recursive_mutex> lock(g_nrMutex);
-    if (g_gpuTime) g_gpuTime->Submitted(queue, count, lists);
-    if (g_ngxTime) g_ngxTime->Submitted(queue, count, lists);
-    if (!Late::tracking.load()) return;
+    if (g_gpuTime)
+        g_gpuTime->Submitted(queue, count, lists);
+    if (g_ngxTime)
+        g_ngxTime->Submitted(queue, count, lists);
+    if (!Late::tracking.load())
+        return;
     for (auto& slot : Late::slots)
         if (slot.pending && !slot.submitted)
             for (UINT i = 0; i < count; ++i)
@@ -276,15 +341,14 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
         FAILED(queue->GetDevice(IID_PPV_ARGS(&currentDevice))) || currentDevice != Late::device)
         return;
     const auto desc = color->GetDesc();
-    auto colorSpace = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT
-        ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    auto colorSpace = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
+                                                                    : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     UINT colorSpaceSize = sizeof(colorSpace);
     swapchain->GetPrivateData(Late::colorSpaceKey, &colorSpaceSize, &colorSpace);
     const bool pq = colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
     const bool scrgb = colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
     const bool sdr = colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-    if ((!sdr && !pq && !scrgb) ||
-        (scrgb && desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) ||
+    if ((!sdr && !pq && !scrgb) || (scrgb && desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) ||
         (!scrgb && desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM && desc.Format != DXGI_FORMAT_R10G10B10A2_UNORM))
     {
         Late::Cancel();
@@ -305,8 +369,8 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
             Late::reset = true;
             continue;
         }
-        if (slot.residualOnly == residualOnly && slot.frame.OutputWidth == desc.Width && slot.frame.OutputHeight == desc.Height &&
-            (!latest || slot.serial > latest->serial))
+        if (slot.residualOnly == residualOnly && slot.frame.OutputWidth == desc.Width &&
+            slot.frame.OutputHeight == desc.Height && (!latest || slot.serial > latest->serial))
             latest = &slot;
     }
     if (!latest)
@@ -330,33 +394,41 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
     bool appliedResidual = false;
     if (slot.residualOnly)
     {
-        if (slot.encoded && (slot.encoded->GetDesc().Width != desc.Width ||
-            slot.encoded->GetDesc().Height != desc.Height || slot.encoded->GetDesc().Format != desc.Format))
+        if (slot.encoded &&
+            (slot.encoded->GetDesc().Width != desc.Width || slot.encoded->GetDesc().Height != desc.Height ||
+             slot.encoded->GetDesc().Format != desc.Format))
             slot.encoded.Reset();
         if (!slot.encoded)
             slot.encoded.Attach(CreateScratch(Late::device.Get(), desc.Format, (unsigned) desc.Width, desc.Height));
         if (slot.encoded && Config::Instance()->DlssNrApplyModel.value_or_default())
         {
-            Barrier(cmd, slot.residual.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            Barrier(cmd, slot.residual.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             DlssNrConstants apply {};
             apply.Mode = pq ? 4 : scrgb ? 3 : 2;
-            apply.Width = (unsigned) desc.Width; apply.Height = desc.Height;
+            apply.Width = (unsigned) desc.Width;
+            apply.Height = desc.Height;
             apply.WhitePoint = slot.frame.PreExposure;
             apply.TransferStrength = slot.sceneLinear ? 1.0f : 0.0f;
             apply.MaxRatio = std::clamp(Config::Instance()->DlssNrMaxRatio.value_or_default(), 1.0f, 8.0f);
-            appliedResidual = g_compose->DispatchResidualPass(cmd, apply, color.Get(), nullptr,
-                slot.residual.Get(), nullptr, slot.encoded.Get(), true);
+            appliedResidual = g_compose->DispatchResidualPass(cmd, apply, color.Get(), nullptr, slot.residual.Get(),
+                                                              nullptr, slot.encoded.Get(), true);
             if (appliedResidual)
             {
-                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
-                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE);
+                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
                 cmd->CopyResource(color.Get(), slot.encoded.Get());
-                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             }
             Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PRESENT);
-            Barrier(cmd, slot.residual.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+            Barrier(cmd, slot.residual.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_COPY_DEST);
         }
     }
     else
@@ -376,10 +448,13 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
         conversion.Height = desc.Height;
         if (pq)
         {
-            auto ensure = [&](Late::ComPtr<ID3D12Resource>& resource, DXGI_FORMAT format) {
+            auto ensure = [&](Late::ComPtr<ID3D12Resource>& resource, DXGI_FORMAT format)
+            {
                 if (resource && (resource->GetDesc().Width != desc.Width || resource->GetDesc().Height != desc.Height ||
-                                 resource->GetDesc().Format != format)) resource.Reset();
-                if (!resource) resource.Attach(CreateScratch(Late::device.Get(), format, (unsigned) desc.Width, desc.Height));
+                                 resource->GetDesc().Format != format))
+                    resource.Reset();
+                if (!resource)
+                    resource.Attach(CreateScratch(Late::device.Get(), format, (unsigned) desc.Width, desc.Height));
                 return resource != nullptr;
             };
             colorReady = ensure(slot.linear, DXGI_FORMAT_R16G16B16A16_FLOAT) && ensure(slot.encoded, desc.Format);
@@ -387,7 +462,7 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
             {
                 Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 colorReady = g_compose->DispatchResidualPass(cmd, conversion, color.Get(), nullptr, nullptr, nullptr,
-                                                           slot.linear.Get(), true);
+                                                             slot.linear.Get(), true);
                 Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PRESENT);
                 // Dispatch reads the converted colour; its transition out of UAV orders the conversion.
                 nrColor = slot.linear.Get();
@@ -396,22 +471,29 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
         }
         if (colorReady)
             g_compose->Dispatch(cmd, nrColor, slot.depth.Get(), slot.motion.Get(), nrColor, frame, queue);
-        if (pq && colorReady && g_nr.successfulDispatches > before && Config::Instance()->DlssNrApplyModel.value_or_default())
+        if (pq && colorReady && g_nr.successfulDispatches > before &&
+            Config::Instance()->DlssNrApplyModel.value_or_default())
         {
             conversion.Mode = 1;
-            Barrier(cmd, slot.linear.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            Barrier(cmd, slot.linear.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             if (g_compose->DispatchResidualPass(cmd, conversion, slot.linear.Get(), nullptr, color.Get(), nullptr,
-                                               slot.encoded.Get(), true))
+                                                slot.encoded.Get(), true))
             {
-                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
-                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE);
+                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
                 cmd->CopyResource(color.Get(), slot.encoded.Get());
-                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                Barrier(cmd, slot.encoded.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             }
             Barrier(cmd, color.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_PRESENT);
-            Barrier(cmd, slot.linear.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            Barrier(cmd, slot.linear.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
         Barrier(cmd, slot.motion.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
         Barrier(cmd, slot.depth.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -433,11 +515,12 @@ void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue
     }
     const bool ran = slot.residualOnly ? appliedResidual : g_nr.successfulDispatches > before;
     Late::reset = !ran;
-    Late::Say(!Config::Instance()->DlssNrApplyModel.value_or_default() ? "NR changes are hidden." :
-        ran ? (slot.residualOnly ? "Applying the pre-SR changes to the finished picture." :
-        "Applying NR to the finished picture.") : "Preparing NR for the finished picture.");
+    Late::Say(!Config::Instance()->DlssNrApplyModel.value_or_default() ? "NR changes are hidden."
+              : ran ? (slot.residualOnly ? "Applying the pre-SR changes to the finished picture."
+                                         : "Applying NR to the finished picture.")
+                    : "Preparing NR for the finished picture.");
     if (ran && (++Late::successes == 1 || Late::successes % 300 == 0))
-        LOG_INFO("DLSS-NR finished picture: {} frames, {}x{}, FG {}", Late::successes,
-                 desc.Width, desc.Height, State::Instance().currentFG &&
-                 State::Instance().currentFG->IsActive() && !State::Instance().currentFG->IsPaused());
+        LOG_INFO("DLSS-NR finished picture: {} frames, {}x{}, FG {}", Late::successes, desc.Width, desc.Height,
+                 State::Instance().currentFG && State::Instance().currentFG->IsActive() &&
+                     !State::Instance().currentFG->IsPaused());
 }

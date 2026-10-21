@@ -46,7 +46,9 @@ void NrBarrier(ID3D12GraphicsCommandList* commandList, ID3D12Resource* resource,
     commandList->ResourceBarrier(1, &barrier);
 }
 
-void ResolveNrRenderDimensions(NVSDK_NGX_Parameter* parameters, unsigned int& width, unsigned int& height)
+} // namespace
+
+void DlssNr::ResolveNrRenderDimensions(NVSDK_NGX_Parameter* parameters, unsigned int& width, unsigned int& height)
 {
     width = 0;
     height = 0;
@@ -66,8 +68,6 @@ void ResolveNrRenderDimensions(NVSDK_NGX_Parameter* parameters, unsigned int& wi
         height = State::Instance().currentFeature->RenderHeight();
     }
 }
-
-} // namespace
 
 bool DlssNr::CanRunBeforeUpscale_Dx12(NVSDK_NGX_Parameter* parameters)
 {

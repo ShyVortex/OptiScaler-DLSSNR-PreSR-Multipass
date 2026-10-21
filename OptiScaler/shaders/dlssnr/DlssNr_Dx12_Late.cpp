@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
+#include <dlssnr/DlssNr_Pipeline_Dx12.h>
 
 auto DlssNr_Dx12::State::LateContext::Say(const char* message) -> void
 {
@@ -54,7 +55,7 @@ auto DlssNr_Dx12::State::LateContext::Clone(ComPtr<ID3D12Resource>& copy, ID3D12
 {
     const auto want = source->GetDesc();
     if (want.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || want.SampleDesc.Count != 1 ||
-        want.DepthOrArraySize != 1 || want.MipLevels != 1)
+        want.DepthOrArraySize != 1)
         return false;
     if (copy)
     {
@@ -175,7 +176,26 @@ auto DlssNr_Dx12::State::LateContext::Capture(ID3D12GraphicsCommandList* cmd, NV
     {
         owner.Barrier(cmd, pair.first, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
                       D3D12_RESOURCE_STATE_COPY_SOURCE);
-        cmd->CopyResource(pair.second, pair.first);
+        if (pair.first->GetDesc().MipLevels == pair.second->GetDesc().MipLevels)
+        {
+            cmd->CopyResource(pair.second, pair.first);
+        }
+        else
+        {
+            D3D12_TEXTURE_COPY_LOCATION dstLoc {};
+            dstLoc.pResource = pair.second;
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = 0;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLoc {};
+            srcLoc.pResource = pair.first;
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            srcLoc.SubresourceIndex = 0;
+
+            const auto d = pair.second->GetDesc();
+            D3D12_BOX box { 0, 0, 0, static_cast<UINT>(d.Width), static_cast<UINT>(d.Height), 1 };
+            cmd->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, &box);
+        }
         owner.Barrier(cmd, pair.first, D3D12_RESOURCE_STATE_COPY_SOURCE,
                       D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         // The copy returns to COPY_DEST after the late dispatch.
@@ -192,8 +212,7 @@ auto DlssNr_Dx12::State::LateContext::Capture(ID3D12GraphicsCommandList* cmd, NV
     frame.RayReconstruction = rr;
     frame.OutputWidth = (unsigned) output->GetDesc().Width;
     frame.OutputHeight = output->GetDesc().Height;
-    params->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &frame.RenderSubrectWidth);
-    params->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &frame.RenderSubrectHeight);
+    DlssNr::ResolveNrRenderDimensions(params, frame.RenderSubrectWidth, frame.RenderSubrectHeight);
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, &frame.DepthSubrectBaseY);
     params->Get(NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X, &frame.MotionSubrectBaseX);
