@@ -114,6 +114,10 @@ static const QuirkEntry quirkTable[] = {
     // Silent Hill f
     QUIRK_ENTRY_UE(shf, GameQuirk::AlwaysCaptureFSRFGSwapchain),
 
+    // Silent Hill Townfall
+    // Skip XeFG pre-init checks so FG can activate (MVs/UI not matching init heuristics); also capture FSR-FG swapchain
+    QUIRK_ENTRY_UE(townfall, GameQuirk::DisableXeFGChecks, GameQuirk::AlwaysCaptureFSRFGSwapchain),
+
     // Beast of Reincarnation
     QUIRK_ENTRY_UE(beastofreincarnation, GameQuirk::DisableFSR2Inputs, GameQuirk::DisableFSR3Inputs,
                    GameQuirk::AlwaysCaptureFSRFGSwapchain),
