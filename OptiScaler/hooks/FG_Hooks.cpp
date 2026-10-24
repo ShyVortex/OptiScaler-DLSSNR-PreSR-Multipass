@@ -46,7 +46,8 @@ static bool CheckForFGStatus()
     // In that case OptiScaler must not attempt to instantiate its internal FG swapchain.
     if (State::Instance().externalFrameGeneration)
     {
-        LOG_INFO("External frame generation active; skipping OptiScaler internal FG swapchain creation while the game or external unlocker owns FG.");
+        LOG_INFO("External frame generation active; skipping OptiScaler internal FG swapchain creation "
+                 "while the game or external unlocker owns FG.");
         return false;
     }
 
