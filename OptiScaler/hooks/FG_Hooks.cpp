@@ -42,6 +42,20 @@ static bool CheckForFGStatus()
     // if (!Config::Instance()->OverlayMenu.value_or_default())
     //    return false;
 
+    // External FG mode passes ownership of frame generation to the game or an external unlocker.
+    // In that case OptiScaler must not attempt to instantiate its internal FG swapchain.
+    if (State::Instance().externalFrameGeneration)
+    {
+        LOG_INFO("External frame generation active; skipping OptiScaler internal FG swapchain creation while the game or external unlocker owns FG.");
+        return false;
+    }
+
+    if (State::Instance().activeFgOutput == FGOutput::NoFG)
+    {
+        LOG_DEBUG("No internal FG output selected; skipping OptiScaler internal FG swapchain creation.");
+        return false;
+    }
+
     if (State::Instance().activeFgInput == FGInput::NoFG || State::Instance().activeFgInput == FGInput::NvngxFG)
         return false;
 
@@ -83,7 +97,7 @@ static bool CheckForFGStatus()
 
     if (State::Instance().activeFgOutput == FGOutput::NoFG)
     {
-        LOG_WARN("FGOutput doesn't have any FG active");
+        LOG_DEBUG("FGOutput doesn't have any FG active; leaving internal FG creation disabled.");
         return false;
     }
 
