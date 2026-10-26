@@ -28,3 +28,11 @@ description: C++ and MSVC compilation standards for OptiScaler
      clang-format --dry-run --Werror <modified_files>
      ```
    - Always ensure `clang-format -i` did not strip the UTF-8 BOM; restore the BOM immediately if removed.
+
+## Mandatory Pre-Commit / Pre-Push Gate
+
+Before every `git commit` and `git push`, run:
+```bash
+clang-format --dry-run --Werror <staged-or-modified C++ files>
+```
+A commit or push with any clang-format violation is not allowed. Fix formatting first.
