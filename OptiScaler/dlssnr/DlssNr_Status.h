@@ -42,4 +42,5 @@ void RenderMenu(::Config* config, float menuResScale);
 void RetryAfterFailure();
 std::optional<double> LastGpuTime();
 void RequestCapture(unsigned int frames);
+void RequestHistoryReset();
 } // namespace DlssNr
