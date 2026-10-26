@@ -33,6 +33,7 @@ description: Implementation planning, task progression, testing, and explicit ap
 
 3. **Mandatory Dedicated Implementation Plan File in Brain**:
    - Every implementation plan MUST be written to and maintained in a dedicated file in the agent's brain directory (`<appDataDir>/brain/<conversation-id>/`, e.g., `implementation_plan.md` or a descriptive task plan file) before execution begins.
+   - **OpenCode / non-Antigravity environments**: when no Antigravity brain directory is available, use `<repo>/.opencode/plans/<session-id>/implementation_plan.md` (or the session scratch directory) and ensure `.opencode/plans/` is gitignored. The same task-scoping, sequential, and update requirements apply.
    - The agent MUST keep this plan file continuously updated, marking tasks as completed (`[x]`) as work progresses, so that the agent and user can always reference it across turns, model changes, and context compactions without losing execution state or confusing ongoing initiatives.
 
 4. **Mandatory Issue Triage & Validity Documentation**:

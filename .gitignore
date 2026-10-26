@@ -456,3 +456,6 @@ nvsmooth30/
 
 # XeMFG test files
 XeMFG/
+
+# OpenCode local plans
+.opencode/plans/
