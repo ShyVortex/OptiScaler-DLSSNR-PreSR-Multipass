@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "XeFG_Dx12.h"
+#include "OwnedMutex.h"
 #include "XeMfgLoader.h"
 #include "XeFGPacing.h"
 #include <hudfix/Hudfix_Dx12.h>
@@ -1226,6 +1227,11 @@ XeFG_Dx12::~XeFG_Dx12() { Shutdown(); }
 
 bool XeFG_Dx12::SetInterpolatedFrameCount(UINT interpolatedFrameCount)
 {
+    // Serialize with the render thread (EvaluateState/Dispatch/Present) to avoid
+    // concurrent access to _swapChainContext / _fgContext, which can deadlock or
+    // crash Intel's XeFG runtime when the multiplier is changed from the menu.
+    OwnedLockGuard lock(Mutex, 560);
+
     LOG_INFO("XeFG SetInterpolatedFrameCount called with count: {}", interpolatedFrameCount);
 
     if (interpolatedFrameCount == 0)
