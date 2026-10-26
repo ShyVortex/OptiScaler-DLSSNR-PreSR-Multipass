@@ -326,13 +326,18 @@ auto DlssNr_Dx12::State::ApplyFinishedColor(ID3D12Resource* color, ID3D12Command
     }
     const bool ran = slot.residualOnly ? appliedResidual : nr.successfulDispatches > before;
     late.reset = !ran;
-    late.Say(!Config::Instance()->DlssNrApplyModel.value_or_default() ? "NR changes are hidden."
-             : ran ? (slot.residualOnly
-                          ? (matchedResponse
-                                 ? "Applying pre-SR changes with HDR brightness matching (local fallback enabled)."
-                                 : "Applying the pre-SR changes to the finished picture.")
-                          : "Applying NR to the finished picture.")
-                   : "Preparing NR for the finished picture.");
+    const char* finishedMessage = "Preparing NR for the finished picture.";
+    if (!Config::Instance()->DlssNrApplyModel.value_or_default())
+        finishedMessage = "NR changes are hidden.";
+    else if (!ran)
+        finishedMessage = "Preparing NR for the finished picture.";
+    else if (slot.residualOnly)
+        finishedMessage = matchedResponse
+                              ? "Applying pre-SR changes with HDR brightness matching (local fallback enabled)."
+                              : "Applying the pre-SR changes to the finished picture.";
+    else
+        finishedMessage = "Applying NR to the finished picture.";
+    late.Say(finishedMessage);
     if (ran && (++late.successes == 1 || late.successes % 300 == 0))
         LOG_INFO("DLSS-NR finished picture: {} frames, {}x{}, OptiScaler FG {}, same producer queue {}, game-frame "
                  "handoff {}",
