@@ -18,7 +18,7 @@
 //   Resolve  proxy + model answer + untouched copy -> the frame, edited
 
 #include "DlssNr_Common.h"
-#include "DlssNr_GpuSubmission.h"
+#include "../../dlssnr/DlssNr_GpuSubmission.h"
 #include "DlssNr_Spatial.h"
 #include <dlssnr/DlssNrFeature_Dx12.h>
 #include <dlssnr/DlssNr_DescriptorSlots.h>
