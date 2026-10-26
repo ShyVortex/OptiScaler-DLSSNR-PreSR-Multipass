@@ -1,8 +1,8 @@
 ﻿#pragma once
+#include <cmath>
 
 #include <upscalers/ShaderPipeline_Vk.h>
 #include <shaders/dlssnr/DlssNr_Vk.h>
-#include <State.h>
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_vk.h>
 
@@ -48,16 +48,6 @@ inline bool HasSupportedSubrects(NVSDK_NGX_Parameter* parameters, bool beforeUps
         unsigned int width = 0, height = 0;
         parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &width);
         parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &height);
-        if (width == 0 || height == 0)
-        {
-            parameters->Get(NVSDK_NGX_Parameter_Width, &width);
-            parameters->Get(NVSDK_NGX_Parameter_Height, &height);
-        }
-        if ((width == 0 || height == 0) && State::Instance().currentFeature != nullptr)
-        {
-            width = State::Instance().currentFeature->RenderWidth();
-            height = State::Instance().currentFeature->RenderHeight();
-        }
         return colour.Image && ((width == 0) == (height == 0)) && width <= colour.Width && height <= colour.Height;
     }
     return true;
@@ -69,6 +59,7 @@ inline DlssNrFrameInfo_Vk FrameInfo(NVSDK_NGX_Parameter* parameters, bool before
     NVSDK_NGX_Resource_VK* motion = nullptr;
     parameters->Get(NVSDK_NGX_Parameter_Depth, (void**) &depth);
     parameters->Get(NVSDK_NGX_Parameter_MotionVectors, (void**) &motion);
+    frame.Exposure = ParameterImage(parameters, NVSDK_NGX_Parameter_ExposureTexture);
     frame.DepthReadWrite = depth && depth->ReadWrite;
     frame.MotionReadWrite = motion && motion->ReadWrite;
     unsigned int flags = 0;
@@ -82,21 +73,13 @@ inline DlssNrFrameInfo_Vk FrameInfo(NVSDK_NGX_Parameter* parameters, bool before
     frame.BeforeUpscale = beforeUpscale;
     parameters->Get(NVSDK_NGX_Parameter_MV_Scale_X, &frame.MvScaleX);
     parameters->Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.MvScaleY);
-    parameters->Get(NVSDK_NGX_Parameter_ExposureTexture, &frame.ExposureTexture);
+    if (!std::isfinite(frame.MvScaleX) || frame.MvScaleX == 0)
+        frame.MvScaleX = 1.0f;
+    if (!std::isfinite(frame.MvScaleY) || frame.MvScaleY == 0)
+        frame.MvScaleY = 1.0f;
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Pre_Exposure, &frame.PreExposure);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &frame.RenderSubrectWidth);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &frame.RenderSubrectHeight);
-    if (frame.RenderSubrectWidth == 0 || frame.RenderSubrectHeight == 0)
-    {
-        parameters->Get(NVSDK_NGX_Parameter_Width, &frame.RenderSubrectWidth);
-        parameters->Get(NVSDK_NGX_Parameter_Height, &frame.RenderSubrectHeight);
-    }
-    if ((frame.RenderSubrectWidth == 0 || frame.RenderSubrectHeight == 0) &&
-        State::Instance().currentFeature != nullptr)
-    {
-        frame.RenderSubrectWidth = State::Instance().currentFeature->RenderWidth();
-        frame.RenderSubrectHeight = State::Instance().currentFeature->RenderHeight();
-    }
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, &frame.ColorSubrectBaseX);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, &frame.ColorSubrectBaseY);
     parameters->Get(NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X, &frame.DepthSubrectBaseX);
