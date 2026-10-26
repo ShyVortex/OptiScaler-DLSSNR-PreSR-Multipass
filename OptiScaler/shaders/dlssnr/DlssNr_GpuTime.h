@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include <dlssnr/DlssNr_GpuLifetime.h>
-#include "DlssNr_GpuSubmission.h"
+#include <dlssnr/DlssNr_GpuSubmission.h>
 #include <vector>
 
 // NR calls are serialized by g_nrMutex, including submission/reset notifications.
