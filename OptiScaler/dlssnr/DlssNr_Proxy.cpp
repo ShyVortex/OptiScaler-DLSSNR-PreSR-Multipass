@@ -3,9 +3,11 @@
 #include "DlssNr_GpuLifetime.h"
 #include "DlssNr_NgxDiagnostics.h"
 #include "DlssNr_CompatibilityRuntime.h"
+#include "DlssNr_PrivateCreation.h"
 
 #include <Logger.h>
 #include <proxies/NVNGX_Proxy.h>
+#include <algorithm>
 #include <vector>
 
 namespace
@@ -18,8 +20,7 @@ struct ProxyState
 
     DlssNr::ModelSettings settings {};
     unsigned int width = 0, height = 0;
-    uint64_t creationEpoch = 0;
-    std::function<bool()> creationComplete;
+    std::shared_ptr<DlssNr::PrivateFeatureCreation> creation;
     bool creationReady = false;
     ID3D12Device* device = nullptr;
     bool failed = false;
@@ -85,16 +86,24 @@ struct Context::Impl
 {
     ProxyState state;
     DlssNr::GpuLifetime lifetime;
-    bool CreationReady(uint64_t epoch)
+    // Keep retired creation trackers reachable until their exact recordings retire.
+    std::vector<std::shared_ptr<PrivateFeatureCreation>> creations;
+    bool CreationReady(uint64_t)
     {
-        return state.creationReady = state.creationReady || epoch != state.creationEpoch ||
-                                     (state.creationComplete && state.creationComplete());
+        return state.creationReady = state.creationReady || (state.creation && state.creation->Ready());
     }
+    void Collect();
     void RetireState();
     unsigned int Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
                          unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready);
     void Release();
 };
+
+void Context::Impl::Collect()
+{
+    lifetime.Collect();
+    std::erase_if(creations, [](const auto& creation) { return creation->Idle(); });
+}
 
 void Context::Impl::RetireState()
 {
@@ -114,7 +123,7 @@ bool Context::Available()
 void Context::Impl::Release()
 {
     RetireState();
-    lifetime.Collect();
+    Collect();
 }
 
 void Context::RetryAfterFailure() { _impl->RetireState(); }
@@ -124,11 +133,15 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
                                     bool* ready)
 {
     *ready = false;
-    lifetime.Collect();
+    Collect();
     if (state.failed || !cmdList || !device || !width || !height)
         return 0;
     if ((!NVNGXProxy::IsDx12Inited() && !NVNGXProxy::InitDx12(device)) || !Context::Available())
         return 0;
+    // A reset/destruction before submission invalidates only this creation generation.
+    // Pending tokens, failed signals and device removal remain unresolved, not discarded.
+    if (state.feature && !state.creationReady && state.creation && state.creation->Discarded())
+        RetireState();
     if (state.feature &&
         (state.settings != settings || state.device != device || state.width != width || state.height != height))
         RetireState();
@@ -151,6 +164,9 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
 
     if (state.feature == nullptr)
     {
+        auto creation = std::make_shared<PrivateFeatureCreation>();
+        creations.push_back(creation);
+        state.creation = std::move(creation);
         NgxDiagnostics::Scope nrCreateTrace;
         NgxDiagnostics::RuntimeReport(cmdList, device, "before CreateFeature(18)");
         LOG_INFO("NR diagnostic creation: {}x{}, preset={}, style={}, intensity={}, structure={}, tone={}, "
@@ -165,13 +181,44 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
                  (void*) state.feature);
         if (NVSDK_NGX_FAILED(created) && !state.feature)
         {
-            state.compatibility = CompatibilityRuntime::TryOpen(device);
-            if (state.compatibility)
+            const auto candidates = CompatibilityRuntime::CandidatePaths();
+            if (!candidates.empty())
             {
-                SetCreationParameters(state.params, settings, width, height);
-                created = state.compatibility->Create(cmdList, state.params, &state.feature);
-                LOG_INFO("NR compatibility: CreateFeature(18) result=0x{:08X} handle={}", (unsigned) created,
-                         (void*) state.feature);
+                for (const auto& candidate : candidates)
+                {
+                    state.compatibility = CompatibilityRuntime::TryOpen(candidate, device);
+                    if (!state.compatibility)
+                        continue;
+
+                    SetCreationParameters(state.params, settings, width, height);
+                    created = state.compatibility->Create(cmdList, state.params, &state.feature);
+                    LOG_INFO("NR compatibility: candidate {} CreateFeature(18) result=0x{:08X} handle={}",
+                             candidate.string(), (unsigned) created, (void*) state.feature);
+
+                    if (created == NVSDK_NGX_Result_Success && state.feature != nullptr)
+                        break;
+
+                    LOG_WARN("NR compatibility: candidate {} CreateFeature(18) failed (0x{:08X}); releasing runtime to "
+                             "attempt next candidate",
+                             candidate.string(), (unsigned) created);
+                    if (state.feature)
+                    {
+                        state.compatibility->Release(state.feature);
+                        state.feature = nullptr;
+                    }
+                    state.compatibility.reset();
+                }
+            }
+            else
+            {
+                state.compatibility = CompatibilityRuntime::TryOpen(device);
+                if (state.compatibility)
+                {
+                    SetCreationParameters(state.params, settings, width, height);
+                    created = state.compatibility->Create(cmdList, state.params, &state.feature);
+                    LOG_INFO("NR compatibility: CreateFeature(18) result=0x{:08X} handle={}", (unsigned) created,
+                             (void*) state.feature);
+                }
             }
         }
         NgxDiagnostics::RuntimeReport(cmdList, device, "after CreateFeature(18)");
@@ -188,8 +235,7 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         state.device = device;
         state.width = width;
         state.height = height;
-        state.creationEpoch = submissionEpoch;
-        state.creationComplete = lifetime.CompletionProbe(cmdList);
+        state.creation->Record(cmdList);
         LOG_INFO("DLSS-NR: feature created at {}x{} through {}", width, height,
                  state.compatibility ? "direct compatibility runtime" : "NVIDIA NGX driver");
 
@@ -263,13 +309,55 @@ unsigned int Context::Run(ID3D12GraphicsCommandList* cmdList, ID3D12Device* devi
 Context::Context() : _impl(std::make_unique<Impl>()) {}
 Context::~Context() { _impl->Release(); }
 void Context::Release() { _impl->Release(); }
+GpuSubmission Context::BeginSubmission(UINT count, ID3D12CommandList* const* lists)
+{
+    if (_impl->creations.empty())
+        return _impl->lifetime.BeginSubmission(count, lists);
+    auto tokens = std::make_shared<std::vector<GpuSubmission>>();
+    tokens->reserve(_impl->creations.size() + 1);
+    for (const auto& creation : _impl->creations)
+        if (auto token = creation->BeginSubmission(count, lists))
+            tokens->push_back(std::move(token));
+    if (auto owner = _impl->lifetime.BeginSubmission(count, lists))
+        tokens->push_back(std::move(owner));
+    if (tokens->empty())
+        return {};
+    // Creation callbacks finish before owner completion can release their captured generation.
+    return GpuSubmission(
+        [tokens](ID3D12CommandQueue* queue)
+        {
+            for (auto& token : *tokens)
+                token.Complete(queue);
+        });
+}
+void Context::QuarantineSubmission(UINT count, ID3D12CommandList* const* lists)
+{
+    for (const auto& creation : _impl->creations)
+        creation->QuarantineSubmission(count, lists);
+    _impl->lifetime.QuarantineSubmission(count, lists);
+}
 void Context::Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
 {
-    _impl->lifetime.Submitted(queue, count, lists);
+    auto submission = BeginSubmission(count, lists);
+    submission.Complete(queue);
 }
-void Context::ResetRecording(ID3D12CommandList* commands) { _impl->lifetime.ResetRecording(commands); }
-bool Context::Idle() { return _impl->lifetime.Idle(); }
-void Context::FinishSubmitted() { _impl->lifetime.FinishSubmitted(); }
+void Context::ResetRecording(ID3D12CommandList* commands)
+{
+    for (const auto& creation : _impl->creations)
+        creation->ResetRecording(commands);
+    _impl->lifetime.ResetRecording(commands);
+}
+bool Context::Idle()
+{
+    return _impl->lifetime.Idle() && std::all_of(_impl->creations.begin(), _impl->creations.end(),
+                                                 [](const auto& creation) { return creation->Idle(); });
+}
+void Context::FinishSubmitted()
+{
+    for (const auto& creation : _impl->creations)
+        creation->FinishSubmitted();
+    _impl->lifetime.FinishSubmitted();
+}
 
 unsigned int Context::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
                               unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready)
@@ -281,7 +369,7 @@ bool Context::Ready(uint64_t epoch) const
 {
     return HasFeature() && !_impl->state.failed && _impl->CreationReady(epoch);
 }
-void Context::Collect() { _impl->lifetime.Collect(); }
+void Context::Collect() { _impl->Collect(); }
 
 } // namespace Proxy
 } // namespace DlssNr

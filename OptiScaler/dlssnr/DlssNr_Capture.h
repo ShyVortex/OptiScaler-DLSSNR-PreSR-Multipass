@@ -75,6 +75,14 @@ class FrameCapture
             wanted_ = std::min(frames, kMaxFrames);
     }
     bool isActive() const { return wanted_ != 0; }
+    DlssNr::GpuSubmission BeginSubmission(UINT count, ID3D12CommandList* const* lists)
+    {
+        return lifetime_.BeginSubmission(count, lists);
+    }
+    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists)
+    {
+        lifetime_.QuarantineSubmission(count, lists);
+    }
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists)
     {
         lifetime_.Submitted(queue, count, lists);
