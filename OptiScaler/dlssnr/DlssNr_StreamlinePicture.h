@@ -35,6 +35,6 @@ inline Microsoft::WRL::ComPtr<ID3D12CommandQueue> RenderQueue(IDXGISwapChain* sw
         queue.Reset();
     return queue;
 }
-using GetFunction = void* (*)(const char*);
+typedef void* (*GetFunction)(const char*);
 void* Wrap(const char* name, GetFunction getFunction, bool local = false);
 } // namespace DlssNr::StreamlinePicture
