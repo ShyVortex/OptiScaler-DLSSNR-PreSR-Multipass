@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Logger.h"
 #include "Config.h"
 #include <iostream>
@@ -10,6 +10,22 @@
 #include <include/spdlog_sink/debug_sink.h>
 
 #include "Util.h"
+
+namespace
+{
+// Keep the current logger and worker pool alive through CRT detach. ExitProcess may
+// have killed a worker while holding its queue mutex; joining it would deadlock.
+struct LoggerLifetime
+{
+    std::shared_ptr<spdlog::logger> logger;
+    std::shared_ptr<spdlog::details::thread_pool> pool;
+};
+LoggerLifetime& ProcessLogger()
+{
+    static auto* lifetime = new LoggerLifetime;
+    return *lifetime;
+}
+} // namespace
 
 static bool InitializeConsole()
 {
@@ -130,6 +146,8 @@ void PrepareLogger()
             auto callback_sink = std::make_shared<spdlog::sinks::callback_sink_mt>(
                 [](const spdlog::details::log_msg& msg)
                 {
+                    if (State::Instance().isShuttingDown)
+                        return;
                     if (Config::Instance()->LogToNGX.value_or_default() &&
                         State::Instance().NVNGX_Logger.LoggingCallback != nullptr &&
                         State::Instance().NVNGX_Logger.MinimumLoggingLevel != NVSDK_NGX_LOGGING_LEVEL_OFF &&
@@ -174,10 +192,14 @@ void PrepareLogger()
         logger->set_level((spdlog::level::level_enum) 2);
         spdlog::set_default_logger(logger);
     }
+    auto& lifetime = ProcessLogger();
+    lifetime.logger = spdlog::default_logger();
+    lifetime.pool = spdlog::thread_pool();
 }
 
 void CloseLogger()
 {
     spdlog::default_logger()->flush();
     spdlog::shutdown();
+    ProcessLogger() = {};
 }

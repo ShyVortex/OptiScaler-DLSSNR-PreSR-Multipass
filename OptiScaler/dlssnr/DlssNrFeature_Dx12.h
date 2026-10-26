@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "DlssNr_Status.h"
-#include "DlssNr_GpuSubmission.h"
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <string>
@@ -20,7 +19,6 @@ inline constexpr GUID FinishedColorSpaceKey = {
 std::string FinishedPictureStatus();
 bool WaitForFinishedPicture();
 void FinishedPictureResetCommandList(ID3D12CommandList* cmd);
-GpuSubmission BeginFinishedPictureSubmission(UINT count, ID3D12CommandList* const* lists) noexcept;
 void FinishedPictureSubmitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
 void ApplyToFinishedPicture(IDXGISwapChain* swapchain, ID3D12CommandQueue* queue);
 void ApplyToStreamlinePicture(IDXGISwapChain* swapchain, ID3D12Resource* picture, ID3D12CommandQueue* queue);

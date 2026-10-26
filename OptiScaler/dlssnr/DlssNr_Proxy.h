@@ -6,7 +6,6 @@
 #include "DlssNr_ModelParameters.h"
 #include <memory>
 #include <cstdint>
-#include "DlssNr_GpuSubmission.h"
 
 namespace DlssNr
 {
@@ -39,8 +38,7 @@ class Context
     // True when the driver's nvngx is initialised and exports what this path needs.
     static bool Available();
 
-    // Creation records GPU work. Readiness requires the exact creation recording's completion;
-    // submissionEpoch is diagnostic/frame identity, never evidence of submission or completion.
+    // Creation records GPU work. A feature becomes ready only in a later submission epoch.
     unsigned int Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device, unsigned int width,
                          unsigned int height, const ModelSettings& settings, uint64_t submissionEpoch, bool* ready);
     bool HasFeature() const;
@@ -54,8 +52,6 @@ class Context
     // Retires the current feature and clears the failure latch without immediately freeing GPU work.
     void RetryAfterFailure();
 
-    GpuSubmission BeginSubmission(UINT count, ID3D12CommandList* const* lists);
-    void QuarantineSubmission(UINT count, ID3D12CommandList* const* lists);
     void Submitted(ID3D12CommandQueue* queue, UINT count, ID3D12CommandList* const* lists);
     void ResetRecording(ID3D12CommandList* commands);
     bool Idle();

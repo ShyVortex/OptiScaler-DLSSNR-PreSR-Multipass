@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Shader_Vk.h"
 #include "Util.h"
 
@@ -9,6 +9,8 @@ Shader_Vk::Shader_Vk(std::string InName, VkDevice InDevice, VkPhysicalDevice InP
 
 Shader_Vk::~Shader_Vk()
 {
+    if (State::Instance().isShuttingDown)
+        return;
     if (_pipeline != VK_NULL_HANDLE)
     {
         vkDestroyPipeline(_device, _pipeline, nullptr);
