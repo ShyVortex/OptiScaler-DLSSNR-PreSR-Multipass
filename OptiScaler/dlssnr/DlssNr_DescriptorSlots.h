@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "DlssNr_GpuLifetime.h"
+#include "DlssNr_GpuSubmission.h"
 #include <Util.h>
 #include <algorithm>
 #include <array>

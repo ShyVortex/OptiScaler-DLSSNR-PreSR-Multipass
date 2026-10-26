@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "DlssNr_Dx12_ModelState.h"
+#include "DlssNr_GpuSubmission.h"
 #include <dlssnr/DlssNr_Placement.h>
 #include <dlssnr/DlssNr_FinishedReady.h>
 #include <dlssnr/PassProfiles.h>
