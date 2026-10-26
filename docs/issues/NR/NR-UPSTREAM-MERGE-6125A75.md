@@ -30,8 +30,22 @@ Upstream introduced several DLSS-NR improvements. This fork selectively merged l
 - UTF-8 BOM: restored on all modified C++ files.
 - Unit tests: not run (Windows-only build); CI to validate.
 
+## Post-Merge Build Fix (CI run 40374490346 → 40377055698)
+The first pushed merge (`aedff167`) failed MSVC compilation because merge commit `8ef1d025` had replaced several fork-hardened NR sources with their upstream variants, while dependent fork sources still used the fork transactional API. Five error clusters were reported:
+
+1. `DlssNr::BeginFinishedPictureSubmission` missing (`ResTrack_dx12.cpp`, `DlssNr_Dx12.cpp`).
+2. `DlssNr::RequestHistoryReset` missing (`menu_common.cpp`, `DlssNr_Menu.cpp`).
+3. `GpuLifetime::BeginSubmission` / `QuarantineSubmission` / `GpuComplete` missing (`DlssNr_PrivateCreation.h`, `DlssNr_GpuTime.h`).
+4. `DenoiseFirstContext::denoiseTime` / `enlargeTime` missing (`DlssNr_Dx12_FinishedQueue.cpp`).
+5. `DlssNr_Vk::Dispatch` 15-argument overload missing (`DlssNr_Vk.cpp`, `DlssNrFeature_Vk.cpp`).
+
+Validity assessment: genuine regression (header/source contract mismatch), not a user configuration issue. Fixes:
+- Restored `DlssNr_GpuLifetime.h/.cpp`, `DlssNrFeature_Dx12.h`, `DlssNr_Dx12_FinishedQueue.cpp`, `DlssNr_Proxy.h/.cpp` and `DlssNr_Capture.h` from `main`.
+- Declared `RequestHistoryReset()` in `DlssNr_Status.h`.
+- Added the `InModelLayout` parameter to `DlssNr_Vk::Dispatch` in `DlssNr_Vk.h` for the merged Vulkan callers.
+
+Result: Build (No Signing) run `40377055698` on `9799816a` completed successfully.
+
 ## Notes
 - `.agents/rules/optiscaler-architecture.md` invariants preserved.
 - Medium/high-risk items remain for future file-by-file review.
-EOF
-echo done
