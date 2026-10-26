@@ -714,126 +714,124 @@ void TrySetup()
                 }
             }
         }
-        catch (const std::exception& ex)
-        {
-            s_status.IniWritten = false;
-            s_status.ErrorMessage = std::string("Error writing dlssg_sm86.ini: ") + ex.what();
-            LOG_ERROR("AmpereMfgLoader: Exception writing INI: {}", ex.what());
-            return;
-        }
+    }
+    catch (const std::exception& ex)
+    {
+        s_status.IniWritten = false;
+        s_status.ErrorMessage = std::string("Error writing dlssg_sm86.ini: ") + ex.what();
+        LOG_ERROR("AmpereMfgLoader: Exception writing INI: {}", ex.what());
+        return;
+    }
 
-        const bool dynamicMfg =
-            cfg->FGDLSSGOverrideForceDMFG.value_or_default() || cfg->FGDLSSGForceDMFG.value_or_default();
-        const bool shouldFallback = ShouldFallbackToFsrFg(configuredFrames, onLinux, true, fallbackSetting, dynamicMfg);
-        s_status.FsrFallbackActive = shouldFallback;
-        if (shouldFallback)
-        {
-            s_status.ErrorMessage.clear();
-            LOG_INFO(
-                "AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of "
-                "sideloading dlssg_sm86",
-                fallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"));
-            return;
-        }
-
-        // Load dlssg_sm86.dll
-        NtdllProxy::Init();
-        LOG_INFO("AmpereMfgLoader: Loading {}", wstring_to_string(dllPath.wstring()));
-        HMODULE hMod = NtdllProxy::LoadLibraryExW_Ldr(dllPath.c_str(), NULL, 0);
-        if (!hMod)
-            hMod = LoadLibraryW(dllPath.c_str());
-
-        if (!hMod)
-        {
-            DWORD err = GetLastError();
-            s_status.DllLoaded = false;
-            s_status.ErrorMessage = "Failed to load dlssg_sm86.dll (error code " + std::to_string(err) + ").";
-            LOG_ERROR("AmpereMfgLoader: Failed to load dlssg_sm86.dll, error: {}", err);
-            return;
-        }
-
-        s_status.DllLoaded = true;
+    const bool dynamicMfg =
+        cfg->FGDLSSGOverrideForceDMFG.value_or_default() || cfg->FGDLSSGForceDMFG.value_or_default();
+    const bool shouldFallback = ShouldFallbackToFsrFg(configuredFrames, onLinux, true, fallbackSetting, dynamicMfg);
+    s_status.FsrFallbackActive = shouldFallback;
+    if (shouldFallback)
+    {
         s_status.ErrorMessage.clear();
-        LOG_INFO("AmpereMfgLoader: SM86/SM75 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+        LOG_INFO("AmpereMfgLoader: On Linux with FG fallback active (mode: {}), falling back to internal {} instead of "
+                 "sideloading dlssg_sm86",
+                 fallbackSetting, (fallbackType == "xefg" ? "XeFG" : "FSR FG"));
+        return;
+    }
 
+    // Load dlssg_sm86.dll
+    NtdllProxy::Init();
+    LOG_INFO("AmpereMfgLoader: Loading {}", wstring_to_string(dllPath.wstring()));
+    HMODULE hMod = NtdllProxy::LoadLibraryExW_Ldr(dllPath.c_str(), NULL, 0);
+    if (!hMod)
+        hMod = LoadLibraryW(dllPath.c_str());
+
+    if (!hMod)
+    {
+        DWORD err = GetLastError();
+        s_status.DllLoaded = false;
+        s_status.ErrorMessage = "Failed to load dlssg_sm86.dll (error code " + std::to_string(err) + ").";
+        LOG_ERROR("AmpereMfgLoader: Failed to load dlssg_sm86.dll, error: {}", err);
+        return;
+    }
+
+    s_status.DllLoaded = true;
+    s_status.ErrorMessage.clear();
+    LOG_INFO("AmpereMfgLoader: SM86/SM75 MFG loaded successfully from {}", wstring_to_string(dllPath.wstring()));
+
+    if (State::Instance().ampereMfgInternalActive)
+        LOG_INFO("AmpereMfg internal: mod loaded from {} (variant: {})", wstring_to_string(dllPath.wstring()),
+                 s_status.ModName);
+
+    // Store module handle for live programmatic control
+    s_hModule = hMod;
+
+    // Resolve SilyNoMeta v0.3.5-2 live control exports
+    s_pfnRequestControl = reinterpret_cast<PFN_DLSSG_RequestControl>(GetProcAddress(hMod, "DLSSG_RequestControl"));
+    s_pfnSetDisplayTarget =
+        reinterpret_cast<PFN_DLSSG_SetDisplayTarget>(GetProcAddress(hMod, "DLSSG_SetDisplayTarget"));
+    s_pfnRequestUI = reinterpret_cast<PFN_DLSSG_RequestUI>(GetProcAddress(hMod, "DLSSG_RequestUI"));
+
+    if (s_status.Variant == ModVariant::SilyNoMeta &&
+        (s_pfnRequestControl != nullptr || s_pfnSetDisplayTarget != nullptr))
+    {
+        s_status.LiveControlSupported = true;
+        LOG_INFO("AmpereMfgLoader: Live programmatic control exports resolved (RequestControl: {}, SetDisplayTarget: "
+                 "{}, RequestUI: {})",
+                 (s_pfnRequestControl != nullptr), (s_pfnSetDisplayTarget != nullptr), (s_pfnRequestUI != nullptr));
+
+        // Initial sync of live settings if configured
+        const bool dynamicMfg = cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
+        const float targetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
+        const int maxCeiling = s_status.Is3101Runtime ? 3 : 5;
+        const int explicitOverride = cfg->FGDLSSGOverrideInterpolationCount.value_or(0);
+        uint32_t mode = 0;
+        uint32_t multiplier = 0;
         if (State::Instance().ampereMfgInternalActive)
-            LOG_INFO("AmpereMfg internal: mod loaded from {} (variant: {})", wstring_to_string(dllPath.wstring()),
-                     s_status.ModName);
-
-        // Store module handle for live programmatic control
-        s_hModule = hMod;
-
-        // Resolve SilyNoMeta v0.3.5-2 live control exports
-        s_pfnRequestControl = reinterpret_cast<PFN_DLSSG_RequestControl>(GetProcAddress(hMod, "DLSSG_RequestControl"));
-        s_pfnSetDisplayTarget =
-            reinterpret_cast<PFN_DLSSG_SetDisplayTarget>(GetProcAddress(hMod, "DLSSG_SetDisplayTarget"));
-        s_pfnRequestUI = reinterpret_cast<PFN_DLSSG_RequestUI>(GetProcAddress(hMod, "DLSSG_RequestUI"));
-
-        if (s_status.Variant == ModVariant::SilyNoMeta &&
-            (s_pfnRequestControl != nullptr || s_pfnSetDisplayTarget != nullptr))
         {
-            s_status.LiveControlSupported = true;
-            LOG_INFO(
-                "AmpereMfgLoader: Live programmatic control exports resolved (RequestControl: {}, SetDisplayTarget: "
-                "{}, RequestUI: {})",
-                (s_pfnRequestControl != nullptr), (s_pfnSetDisplayTarget != nullptr), (s_pfnRequestUI != nullptr));
-
-            // Initial sync of live settings if configured
-            const bool dynamicMfg =
-                cfg->FGDLSSGOverrideForceDMFG.value_or(false) || cfg->FGDLSSGForceDMFG.value_or(false);
-            const float targetFps = cfg->FGDLSSGFramerateTargetDMFG.value_or(0.0f);
-            const int maxCeiling = s_status.Is3101Runtime ? 3 : 5;
-            const int explicitOverride = cfg->FGDLSSGOverrideInterpolationCount.value_or(0);
-            uint32_t mode = 0;
-            uint32_t multiplier = 0;
-            if (State::Instance().ampereMfgInternalActive)
-            {
-                // Internal FG route: FollowGame (mode 0) unless Dynamic MFG is explicitly requested;
-                // a fixed multiplier (mode 2) would fight OptiScaler's own slDLSSGSetOptions multiplier.
-                ResolveControlModeAndMultiplierInternal(dynamicMfg, mode, multiplier);
-            }
-            else
-            {
-                ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
-            }
-            uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
-
-            if (s_pfnRequestControl)
-            {
-                DLSSG_ControlRequest req {};
-                req.version = 1;
-                req.mode = mode;
-                req.multiplier = multiplier;
-                req.targetFPS = targetInt;
-                req.flags = 0;
-                s_status.LiveControlActive = s_pfnRequestControl(&req);
-            }
-        }
-
-        // SilyNoMeta ASI & UniversalProxy compatibility: when loaded under a custom filename (such as dlssg_sm86.dll),
-        // DllMain skips self-initialization to avoid conflict with standard proxy names.
-        // Explicitly invoke InitializeASI or DLSSG_UniversalProxy export so the mod installs hooks and starts worker
-        // threads.
-        using PFN_InitializeASI = void (*)();
-        auto pfnInitAsi = reinterpret_cast<PFN_InitializeASI>(GetProcAddress(hMod, "InitializeASI"));
-        if (pfnInitAsi != nullptr)
-        {
-            LOG_INFO("AmpereMfgLoader: Invoking InitializeASI() export on {}", wstring_to_string(dllPath.wstring()));
-            pfnInitAsi();
-            s_status.AsiInitInvoked = true;
+            // Internal FG route: FollowGame (mode 0) unless Dynamic MFG is explicitly requested;
+            // a fixed multiplier (mode 2) would fight OptiScaler's own slDLSSGSetOptions multiplier.
+            ResolveControlModeAndMultiplierInternal(dynamicMfg, mode, multiplier);
         }
         else
         {
-            using PFN_UniversalProxy = void (*)();
-            auto pfnUniversalProxy = reinterpret_cast<PFN_UniversalProxy>(GetProcAddress(hMod, "DLSSG_UniversalProxy"));
-            if (pfnUniversalProxy != nullptr)
-            {
-                LOG_INFO("AmpereMfgLoader: Invoking DLSSG_UniversalProxy() export on {}",
-                         wstring_to_string(dllPath.wstring()));
-                pfnUniversalProxy();
-                s_status.AsiInitInvoked = true;
-            }
+            ResolveControlModeAndMultiplier(dynamicMfg, explicitOverride, maxCeiling, mode, multiplier);
+        }
+        uint32_t targetInt = (targetFps > 0.0f) ? static_cast<uint32_t>(targetFps + 0.5f) : 0;
+
+        if (s_pfnRequestControl)
+        {
+            DLSSG_ControlRequest req {};
+            req.version = 1;
+            req.mode = mode;
+            req.multiplier = multiplier;
+            req.targetFPS = targetInt;
+            req.flags = 0;
+            s_status.LiveControlActive = s_pfnRequestControl(&req);
         }
     }
+
+    // SilyNoMeta ASI & UniversalProxy compatibility: when loaded under a custom filename (such as dlssg_sm86.dll),
+    // DllMain skips self-initialization to avoid conflict with standard proxy names.
+    // Explicitly invoke InitializeASI or DLSSG_UniversalProxy export so the mod installs hooks and starts worker
+    // threads.
+    using PFN_InitializeASI = void (*)();
+    auto pfnInitAsi = reinterpret_cast<PFN_InitializeASI>(GetProcAddress(hMod, "InitializeASI"));
+    if (pfnInitAsi != nullptr)
+    {
+        LOG_INFO("AmpereMfgLoader: Invoking InitializeASI() export on {}", wstring_to_string(dllPath.wstring()));
+        pfnInitAsi();
+        s_status.AsiInitInvoked = true;
+    }
+    else
+    {
+        using PFN_UniversalProxy = void (*)();
+        auto pfnUniversalProxy = reinterpret_cast<PFN_UniversalProxy>(GetProcAddress(hMod, "DLSSG_UniversalProxy"));
+        if (pfnUniversalProxy != nullptr)
+        {
+            LOG_INFO("AmpereMfgLoader: Invoking DLSSG_UniversalProxy() export on {}",
+                     wstring_to_string(dllPath.wstring()));
+            pfnUniversalProxy();
+            s_status.AsiInitInvoked = true;
+        }
+    }
+}
 
 } // namespace AmpereMfgLoader
