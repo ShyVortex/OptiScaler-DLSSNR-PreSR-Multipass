@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstdint>
 #include <optional>
@@ -30,7 +30,6 @@ struct ControlRequests
     uint64_t retryGeneration = 0;
     uint64_t captureGeneration = 0;
     unsigned int captureFrames = 0;
-    uint64_t historyGeneration = 0;
 };
 
 void PublishStatus(const void* owner, Backend backend, const StatusSnapshot& status);
@@ -42,5 +41,4 @@ void RenderMenu(::Config* config, float menuResScale);
 void RetryAfterFailure();
 std::optional<double> LastGpuTime();
 void RequestCapture(unsigned int frames);
-void RequestHistoryReset();
 } // namespace DlssNr
