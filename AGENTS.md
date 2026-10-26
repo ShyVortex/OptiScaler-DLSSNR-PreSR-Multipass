@@ -21,3 +21,4 @@ The plan must:
 - `.agents/rules/workflow-planning.md`
 - `.agents/rules/pr-review.md`
 - `.agents/rules/browser-tools.md`
+- `.agents/rules/ai-commit-coauthor.md`

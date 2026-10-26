@@ -933,8 +933,11 @@ bool StreamlineHooks::hkdlssg_slOnPluginLoad(sl::param::IParameters* params, con
 
     nlohmann::json configJson = nlohmann::json::parse(*pluginJSON);
 
-    // Kill the DLSSG streamline swapchain hooks
-    if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgOutput == FGOutput::DLSSG)
+    // Kill the DLSSG streamline swapchain hooks. In external MFG mode (Ampere/Turing SM86
+    // unlocker) OptiScaler is not driving DLSS-G, but the game may still load sl.dlss_g.dll,
+    // so its swapchain hooks must be neutralised to avoid conflicting with the external runtime.
+    if (State::Instance().activeFgInput == FGInput::DLSSG || State::Instance().activeFgOutput == FGOutput::DLSSG ||
+        ampereMfgActive)
     {
         if (configJson.contains("/hooks"_json_pointer))
             configJson["hooks"].clear();
