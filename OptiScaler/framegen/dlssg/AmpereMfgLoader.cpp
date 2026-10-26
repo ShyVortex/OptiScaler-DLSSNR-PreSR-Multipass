@@ -347,13 +347,20 @@ bool WriteCompanionIni()
     try
     {
         std::filesystem::create_directories(iniPath.parent_path());
-        std::ofstream iniFile(iniPath, std::ios::out | std::ios::trunc);
+        std::ofstream iniFile;
+        for (int attempt = 0; attempt < 20 && !iniFile.is_open(); ++attempt)
+        {
+            if (attempt > 0)
+                Sleep(50);
+            iniFile.open(iniPath, std::ios::out | std::ios::trunc);
+        }
         if (!iniFile.is_open())
         {
             std::lock_guard lock(s_mutex);
             s_status.IniWritten = false;
-            s_status.ErrorMessage = "Failed to open dlssg_sm86.ini for writing.";
-            LOG_ERROR("AmpereMfgLoader: Failed to open {} for writing", wstring_to_string(iniPath.wstring()));
+            s_status.ErrorMessage = "Failed to open dlssg_sm86.ini for writing (sharing violation?).";
+            LOG_WARN("AmpereMfgLoader: Failed to open {} for writing after retries; keeping existing INI",
+                     wstring_to_string(iniPath.wstring()));
             return false;
         }
         iniFile << GenerateIniContent(hasSm75, is3101, hasDynamic);
@@ -637,26 +644,37 @@ void TrySetup()
              wstring_to_string(dllPath.wstring()), s_status.ModName, static_cast<uint32_t>(s_status.Variant),
              s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
 
-    // Generate and write companion dlssg_sm86.ini beside the DLL
+    // Generate and write companion dlssg_sm86.ini beside the DLL. GTA V Enhanced (DirectStorage)
+    // may briefly hold a read handle on this file with read-only sharing, so retry a few times
+    // before giving up; on persistent failure, keep loading the DLL with the existing INI instead
+    // of aborting setup entirely.
     auto iniPath = dllPath.parent_path() / L"dlssg_sm86.ini";
     try
     {
         std::filesystem::create_directories(iniPath.parent_path());
-        std::ofstream iniFile(iniPath, std::ios::out | std::ios::trunc);
+        std::ofstream iniFile;
+        for (int attempt = 0; attempt < 20 && !iniFile.is_open(); ++attempt)
+        {
+            if (attempt > 0)
+                Sleep(50);
+            iniFile.open(iniPath, std::ios::out | std::ios::trunc);
+        }
         if (!iniFile.is_open())
         {
             s_status.IniWritten = false;
-            s_status.ErrorMessage = "Failed to open dlssg_sm86.ini for writing.";
-            LOG_ERROR("AmpereMfgLoader: Failed to open {} for writing", wstring_to_string(iniPath.wstring()));
-            return;
+            s_status.ErrorMessage = "Failed to open dlssg_sm86.ini for writing (sharing violation?).";
+            LOG_WARN("AmpereMfgLoader: Failed to open {} for writing after retries; continuing with existing INI",
+                     wstring_to_string(iniPath.wstring()));
         }
-        iniFile << GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
-        iniFile.close();
-        if (!iniFile)
-            throw std::runtime_error("Could not finish writing dlssg_sm86.ini");
-        s_status.IniWritten = true;
+        else
+        {
+            iniFile << GenerateIniContent(s_status.HasSm75Support, s_status.Is3101Runtime, s_status.HasDynamicMfgSupport);
+            iniFile.close();
+            if (!iniFile)
+                throw std::runtime_error("Could not finish writing dlssg_sm86.ini");
+            s_status.IniWritten = true;
 
-        if (s_status.HasDynamicMfgSupport)
+            if (s_status.HasDynamicMfgSupport)
         {
             auto reshadeIniPath = dllPath.parent_path() / L"ReShade.ini";
             std::string existingReshade;
