@@ -29,6 +29,7 @@ struct ControlRequests
 {
     uint64_t retryGeneration = 0;
     uint64_t captureGeneration = 0;
+    uint64_t historyGeneration = 0;
     unsigned int captureFrames = 0;
 };
 
