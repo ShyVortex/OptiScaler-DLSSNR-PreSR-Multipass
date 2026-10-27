@@ -147,7 +147,7 @@ Status ProbeCandidate(bool forceRefresh)
         s_status.LoadedDllPath = dllPath.wstring();
         s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
         s_status.Is3101Runtime = Is3101Runtime(dllPath);
-        s_status.Variant = DetectModVariant(dllPath, &s_status.ModName);
+        s_status.Variant = DetectModVariant(dllPath, &s_status.ModName, &s_status.ModVersion);
         s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) && HasDynamicMfgSupport(dllPath);
         s_status.LiveControlSupported = (s_status.Variant == ModVariant::SilyNoMeta);
     }
@@ -157,6 +157,7 @@ Status ProbeCandidate(bool forceRefresh)
         s_status.LoadedDllPath.clear();
         s_status.Variant = ModVariant::Unknown;
         s_status.ModName = "Not found";
+        s_status.ModVersion.clear();
         s_status.HasSm75Support = false;
         s_status.Is3101Runtime = false;
         s_status.HasDynamicMfgSupport = false;
@@ -641,7 +642,7 @@ void TrySetup()
     s_status.LoadedDllPath = dllPath.wstring();
     s_status.HasSm75Support = HasSm75KernelFamily(dllPath);
     s_status.Is3101Runtime = Is3101Runtime(dllPath);
-    s_status.Variant = DetectModVariant(dllPath, &s_status.ModName);
+    s_status.Variant = DetectModVariant(dllPath, &s_status.ModName, &s_status.ModVersion);
     s_status.HasDynamicMfgSupport = (s_status.Variant == ModVariant::SilyNoMeta) && HasDynamicMfgSupport(dllPath);
     s_status.LiveControlSupported = (s_status.Variant == ModVariant::SilyNoMeta);
 

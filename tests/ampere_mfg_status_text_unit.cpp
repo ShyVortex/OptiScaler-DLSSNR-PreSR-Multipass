@@ -19,6 +19,10 @@
 // 5. The menu uses the helpers in place of the old one-line status.
 // 6. R580 floor: only a known Windows driver below 580.00 shows the note; Wine and unknown versions never do.
 // 7. HardwareBilinear is labelled as 0.3.x / 0.4.0 only, and the menu uses the label and the floor note.
+// 8. CompareModVersion orders dotted versions numerically and ignores -suffixes.
+// 9. HardwareBilinear is locked only for sdli1995 that states 0.4.1 or newer; 0.4.0 / no version / SilyNoMeta /
+//    not loaded keep it enabled.
+// 10. The menu greys the checkbox, never writes the value while locked, and explains why.
 
 using AmpereMfgLoader::ModVariant;
 using AmpereMfgLoader::Status;
@@ -124,6 +128,55 @@ int main()
     assert(floor != std::string::npos && multiplier < floor && "the floor note follows the status lines");
     std::puts("Test 7 PASS: HardwareBilinear label and floor note wired into the menu");
 
-    std::puts("All Ampere MFG status text tests passed (7/7).");
+    // Test 8
+    assert(CompareModVersion("0.4.1", "0.4.1") == 0);
+    assert(CompareModVersion("0.4.1", "0.4.0") > 0 && CompareModVersion("0.4.0", "0.4.1") < 0);
+    assert(CompareModVersion("0.4.10", "0.4.9") > 0 && "numeric, not lexical");
+    assert(CompareModVersion("0.5.0", "0.4.1") > 0 && CompareModVersion("1.0", "0.4.1") > 0);
+    assert(CompareModVersion("0.4", "0.4.0") == 0 && CompareModVersion("0.4.1", "0.4") > 0);
+    assert(CompareModVersion("0.3.5-5", "0.3.5") == 0 && CompareModVersion("0.3.5-5", "0.4.1") < 0);
+    std::puts("Test 8 PASS: mod versions compare numerically");
+
+    // Test 9
+    auto v041 = running;
+    v041.ModVersion = "0.4.1";
+    assert(!HardwareBilinearHonoured(v041) && "0.4.1 no longer reads HardwareBilinear");
+    for (const char* newer : { "0.4.2", "0.4.10", "0.5.0" })
+    {
+        auto s = running;
+        s.ModVersion = newer;
+        assert(!HardwareBilinearHonoured(s));
+    }
+    auto v040 = running;
+    v040.ModVersion = "0.4.0";
+    assert(HardwareBilinearHonoured(v040));
+    auto unversioned = running; // 0.4.0 and older state no version and still read the key
+    unversioned.ModVersion.clear();
+    assert(HardwareBilinearHonoured(unversioned));
+    auto silyVersioned = sily;
+    silyVersioned.ModVersion = "0.4.5";
+    assert(HardwareBilinearHonoured(silyVersioned) && "only sdli1995 removed the key");
+    Status notLoaded;
+    assert(HardwareBilinearHonoured(notLoaded));
+    std::puts("Test 9 PASS: locked only for sdli1995 stating 0.4.1 or newer");
+
+    // Test 10
+    const auto block =
+        menu.substr(menu.find("const bool hwBilinearHonoured"),
+                    menu.find("// Dynamic Multi-Frame Generation") - menu.find("const bool hwBilinearHonoured"));
+    assert(block.find("AmpereMfgStatusText::HardwareBilinearHonoured(status)") != std::string::npos);
+    const auto disabled = block.find("ImGui::BeginDisabled(!hwBilinearHonoured);");
+    const auto checkbox = block.find("&hwBilinear) && hwBilinearHonoured)");
+    const auto write = block.find("config->FGDLSSGAmpereMfgHardwareBilinear = hwBilinear;");
+    assert(disabled != std::string::npos && checkbox != std::string::npos && write != std::string::npos &&
+           disabled < checkbox && checkbox < write && "no write while locked");
+    assert(block.find("ImGuiHoveredFlags_AllowWhenDisabled") != std::string::npos &&
+           block.find("HardwareBilinearIgnoredText") != std::string::npos);
+    assert(block.find("FGDLSSGAmpereMfgHardwareBilinear.reset") == std::string::npos &&
+           block.find("FGDLSSGAmpereMfgHardwareBilinear = false") == std::string::npos &&
+           "the saved value is never reset");
+    std::puts("Test 10 PASS: menu locks HardwareBilinear without touching the saved value");
+
+    std::puts("All Ampere MFG status text tests passed (10/10).");
     return 0;
 }

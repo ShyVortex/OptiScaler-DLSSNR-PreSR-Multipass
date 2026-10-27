@@ -3585,13 +3585,21 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                            "Save Settings and restart to apply.");
 
             // HardwareBilinear checkbox
+            // Locked, never reset, for builds that ignore the key: the value applies again with older builds.
+            const bool hwBilinearHonoured = AmpereMfgStatusText::HardwareBilinearHonoured(status);
             bool hwBilinear = config->FGDLSSGAmpereMfgHardwareBilinear.value_or_default();
-            if (ImGui::Checkbox(AmpereMfgStatusText::HardwareBilinearLabel, &hwBilinear))
+            ImGui::BeginDisabled(!hwBilinearHonoured);
+            if (ImGui::Checkbox(AmpereMfgStatusText::HardwareBilinearLabel, &hwBilinear) && hwBilinearHonoured)
                 config->FGDLSSGAmpereMfgHardwareBilinear = hwBilinear;
-            ShowHelpMarker("SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
-                           "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
-                           "sdli1995 0.4.1 and newer no longer read this setting; it has no effect there.\n"
-                           "Save Settings and restart to apply.");
+            ImGui::EndDisabled();
+            if (!hwBilinearHonoured && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", AmpereMfgStatusText::HardwareBilinearIgnoredText);
+            ShowHelpMarker(hwBilinearHonoured
+                               ? "SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
+                                 "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
+                                 "sdli1995 0.4.1 and newer no longer read this setting; it has no effect there.\n"
+                                 "Save Settings and restart to apply."
+                               : AmpereMfgStatusText::HardwareBilinearIgnoredText);
 
             // Dynamic Multi-Frame Generation (DynamicMFG & DynamicTargetFPS)
             if (!hasDynamicSupport)

@@ -34,7 +34,8 @@ struct Status
         false; // Loaded runtime binary contains Dynamic Multi-Frame Generation support (SilyNoMeta fork)
     ModVariant Variant = ModVariant::Unknown; // Detected mod variant (Unknown, Sdli1995, SilyNoMeta)
     std::string ModName;                      // Human-readable mod name/version (e.g. "SilyNoMeta", "sdli1995")
-    bool AsiInitInvoked = false;              // True if InitializeASI / DLSSG_UniversalProxy export was invoked
+    std::string ModVersion;      // Version the mod binary states about itself (e.g. "0.4.1"); empty when it states none
+    bool AsiInitInvoked = false; // True if InitializeASI / DLSSG_UniversalProxy export was invoked
     bool LiveControlSupported = false; // True if DLSSG_RequestControl / DLSSG_SetDisplayTarget exports are available
     bool LiveControlActive = false;    // True if a live control command has been dispatched to the running module
     std::wstring LoadedDllPath;        // Absolute path of loaded DLL
@@ -747,13 +748,16 @@ inline std::string ModDisplayName(ModVariant variant, const std::string& version
                                                              : std::string(family) + " v" + version;
 }
 
-inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::string* outModName = nullptr)
+inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::string* outModName = nullptr,
+                                   std::string* outVersion = nullptr)
 {
     std::error_code ec;
     if (dllPath.empty() || !std::filesystem::exists(dllPath, ec))
     {
         if (outModName)
             *outModName = "Unknown";
+        if (outVersion)
+            outVersion->clear();
         return ModVariant::Unknown;
     }
 
@@ -868,8 +872,11 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
     // The name carries a version only when the binary states one; otherwise just the family.
     const auto setName = [&](ModVariant variant)
     {
+        const auto version = ReadEmbeddedModVersion(dllPath, variant);
         if (outModName)
-            *outModName = ModDisplayName(variant, ReadEmbeddedModVersion(dllPath, variant));
+            *outModName = ModDisplayName(variant, version);
+        if (outVersion)
+            *outVersion = version;
         return variant;
     };
 
@@ -888,6 +895,8 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
 
     if (outModName)
         *outModName = "Unknown";
+    if (outVersion)
+        outVersion->clear();
     return ModVariant::Unknown;
 }
 

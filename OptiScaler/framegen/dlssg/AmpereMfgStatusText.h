@@ -74,6 +74,50 @@ inline std::string DriverFloorText(uint32_t driverVersion)
 
 inline constexpr const char* HardwareBilinearLabel = "Hardware Bilinear (0.3.x / 0.4.0 only)##sm86";
 
+// Numeric dotted comparison of versions the mod states ("0.4.1", "0.3.5-5"); a -suffix does not affect ordering.
+// Returns <0, 0 or >0.
+inline int CompareModVersion(const std::string& a, const std::string& b)
+{
+    size_t i = 0;
+    size_t j = 0;
+    while (true)
+    {
+        const auto part = [](const std::string& s, size_t& pos) -> long
+        {
+            if (pos >= s.size() || s[pos] == '-')
+                return 0;
+            long value = 0;
+            while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9')
+                value = value * 10 + (s[pos++] - '0');
+            if (pos < s.size() && s[pos] == '.')
+                ++pos;
+            return value;
+        };
+        const bool aDone = i >= a.size() || a[i] == '-';
+        const bool bDone = j >= b.size() || b[j] == '-';
+        if (aDone && bDone)
+            return 0;
+        const long x = part(a, i);
+        const long y = part(b, j);
+        if (x != y)
+            return x < y ? -1 : 1;
+    }
+}
+
+// sdli1995 0.4.1 removed [Compatibility] HardwareBilinear (and runs [DLSSG] Preset=Auto as A). Only a build that
+// states 0.4.1 or newer is known to ignore it; 0.4.0 and older state no version and still read it.
+inline bool IsSdli1995AtLeast041(const AmpereMfgLoader::Status& status)
+{
+    return status.Variant == AmpereMfgLoader::ModVariant::Sdli1995 && !status.ModVersion.empty() &&
+           CompareModVersion(status.ModVersion, "0.4.1") >= 0;
+}
+
+inline bool HardwareBilinearHonoured(const AmpereMfgLoader::Status& status) { return !IsSdli1995AtLeast041(status); }
+
+inline constexpr const char* HardwareBilinearIgnoredText =
+    "sdli1995 0.4.1 and newer no longer read this setting, so it is locked for this build.\n"
+    "Your saved value is kept and applies again with builds that still read it.";
+
 // Technical fields for bug reports, shown in the headline's help marker.
 inline std::string DetailsText(const AmpereMfgLoader::Status& status, const std::string& router)
 {

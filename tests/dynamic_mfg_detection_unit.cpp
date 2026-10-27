@@ -260,6 +260,9 @@ int main()
                        "Real sdli1995 version.dll must detect ModVariant::Sdli1995");
                 // The version comes only from the binary itself; without one the name is the family alone.
                 const std::string stated = ReadEmbeddedModVersion(realSdliDll, ModVariant::Sdli1995);
+                std::string sdliVersion = "stale";
+                DetectModVariant(realSdliDll, nullptr, &sdliVersion);
+                assert(sdliVersion == stated && "Status::ModVersion must carry exactly the stated version");
                 assert(sdliName == (stated.empty() ? std::string("sdli1995") : "sdli1995 v" + stated) &&
                        "Detected mod name must be the family plus the binary's own version, if any");
 
@@ -354,6 +357,13 @@ int main()
         assert(DetectModVariant(sdli041Dll, &name) == ModVariant::Sdli1995);
         assert(name == "sdli1995 v0.4.1");
 
+        // The stated version is also returned on its own (used to gate options per build)
+        std::string version = "stale";
+        assert(DetectModVariant(sdli041Dll, nullptr, &version) == ModVariant::Sdli1995 && version == "0.4.1");
+        assert(DetectModVariant(sdli040Dll, &name, &version) == ModVariant::Sdli1995 && version.empty() &&
+               name == "sdli1995");
+        assert(DetectModVariant("non_existent_dll.dll", nullptr, &version) == ModVariant::Unknown && version.empty());
+
         // 10g: a "version" field that is not a version leaves the family alone
         auto sdliBadVersionDll = tempDir / "sdli_badver.dll";
         {
@@ -378,6 +388,9 @@ int main()
         }
         assert(DetectModVariant(silyV036Dll, &name) == ModVariant::SilyNoMeta);
         assert(name == "SilyNoMeta v0.3.6");
+        std::string silyVersion;
+        assert(DetectModVariant(silyV036Dll, nullptr, &silyVersion) == ModVariant::SilyNoMeta &&
+               silyVersion == "0.3.6");
         auto silyWideDll = tempDir / "sily_wide.dll";
         {
             std::ofstream f(silyWideDll, std::ios::binary);
