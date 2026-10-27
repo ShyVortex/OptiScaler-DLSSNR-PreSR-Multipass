@@ -187,7 +187,11 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
         auto created = NVNGXProxy::D3D12_CreateFeature()(cmdList, (NVSDK_NGX_Feature) 18, state.params, &state.feature);
         LOG_INFO("NR diagnostic CreateFeature(18): result=0x{:08X} handle={}", (unsigned) created,
                  (void*) state.feature);
-        if (NVSDK_NGX_FAILED(created) && !state.feature)
+        // FAIL_OutOfDate means the driver lacks NR support, not a loader rejection. Forcing the direct runtime past
+        // it hung the GPU until reboot (DLSS Unlocked #60), so only other failures fall back.
+        if ((unsigned int) created == DriverGate::NgxResultOutOfDate && !state.feature)
+            LOG_ERROR("DLSS-NR (driver): {}; not trying the direct runtime", DriverGate::UnsupportedDriverReason);
+        else if (NVSDK_NGX_FAILED(created) && !state.feature)
         {
             const auto candidates = CompatibilityRuntime::CandidatePaths();
             if (!candidates.empty())

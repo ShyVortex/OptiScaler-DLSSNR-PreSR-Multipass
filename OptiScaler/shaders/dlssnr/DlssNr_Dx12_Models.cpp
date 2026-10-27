@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DlssNr_Dx12_State.h"
+#include <dlssnr/DlssNr_DriverGate.h>
 
 bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID3D12Device* device,
                                           const DlssNrFrameInfo& frame, const D3D12_RESOURCE_DESC& desc,
@@ -185,7 +186,12 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
                 if (pass == 0)
                 {
                     nr.failed = true;
-                    if (!frame.BeforeUpscale)
+                    if (prepared == DlssNr::DriverGate::NgxResultOutOfDate)
+                    {
+                        // No placement or resolution change helps; only a driver update does.
+                        nr.reason = DlssNr::DriverGate::UnsupportedDriverReason;
+                    }
+                    else if (!frame.BeforeUpscale)
                     {
                         nr.reason = "the NVIDIA NGX driver could not create Neural Rendering at display resolution "
                                     "(try enabling 'Generate model before upscale' or reducing Working Scale)";

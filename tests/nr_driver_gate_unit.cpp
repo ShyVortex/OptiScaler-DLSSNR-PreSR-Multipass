@@ -23,6 +23,9 @@
 // 8. The NR proxy refuses creation before any NGX call while blocked.
 // 9. The menu disables "Enable Neural Rendering", explains why, and never writes the setting while blocked.
 // 10. The NR hotkey shows the message instead of toggling, and no other code path writes DlssNrEnabled.
+// 11. The FAIL_OutOfDate reason names the same minimum and recommended versions as the gate.
+// 12. The proxy never opens the direct runtime after FAIL_OutOfDate; every other failure still falls back.
+// 13. The status shows the driver reason for FAIL_OutOfDate and keeps the contextual display-resolution message.
 
 using namespace DlssNr::DriverGate;
 
@@ -96,6 +99,7 @@ int main()
     const std::string proxy = ReadFile("OptiScaler/dlssnr/DlssNr_Proxy.cpp");
     const std::string menu = ReadFile("OptiScaler/dlssnr/DlssNr_Menu.cpp");
     const std::string common = ReadFile("OptiScaler/menu/menu_common.cpp");
+    const std::string models = ReadFile("OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp");
 
     // Test 5
     assert(identifyHeader.find("uint32_t nvidiaDriverVersion = 0;") != std::string::npos);
@@ -161,6 +165,39 @@ int main()
     assert(writes == 2 && "only the guarded checkbox and hotkey write DlssNrEnabled");
     std::puts("Test 10 PASS: the hotkey shows the message instead of toggling");
 
-    std::puts("All NR driver gate tests passed (10/10).");
+    // Test 11
+    static_assert(NgxResultOutOfDate == 0xBAD0000Cu); // NVSDK_NGX_Result_Fail | 12
+    const std::string reason = UnsupportedDriverReason;
+    assert(reason.find(FormatVersion(MinimumWindowsDriver) + " or newer") != std::string::npos);
+    assert(reason.find(FormatVersion(RecommendedWindowsDriver) + "+ recommended") != std::string::npos);
+    std::puts("Test 11 PASS: the OutOfDate reason matches the gate's versions");
+
+    // Test 12
+    const auto creation = Between(proxy, "D3D12_CreateFeature()(cmdList, (NVSDK_NGX_Feature) 18",
+                                  "NgxDiagnostics::RuntimeReport(cmdList, device, \"after CreateFeature(18)\");");
+    const auto outOfDate =
+        creation.find("if ((unsigned int) created == DriverGate::NgxResultOutOfDate && !state.feature)");
+    const auto fallback = creation.find("else if (NVSDK_NGX_FAILED(created) && !state.feature)");
+    const auto firstOpen = creation.find("CompatibilityRuntime::");
+    assert(outOfDate != std::string::npos && fallback != std::string::npos && firstOpen != std::string::npos);
+    assert(outOfDate < fallback && fallback < firstOpen && "OutOfDate is decided before any runtime is opened");
+    const auto outOfDateBranch = creation.substr(outOfDate, fallback - outOfDate);
+    assert(outOfDateBranch.find("TryOpen") == std::string::npos &&
+           outOfDateBranch.find("Create(") == std::string::npos);
+    assert(creation.find("if (created == NVSDK_NGX_Result_FAIL_UnableToInitializeFeature") == std::string::npos &&
+           "other failures keep the 47e134cb fallback");
+    std::puts("Test 12 PASS: no direct runtime after FAIL_OutOfDate, other failures still fall back");
+
+    // Test 13
+    const auto failure = Between(models, "nr.passCreateFailed[pass] = true;", "LOG_ERROR(");
+    const auto driverReason = failure.find("if (prepared == DlssNr::DriverGate::NgxResultOutOfDate)");
+    const auto displayReason = failure.find("else if (!frame.BeforeUpscale)");
+    assert(driverReason != std::string::npos && displayReason != std::string::npos && driverReason < displayReason);
+    assert(failure.find("nr.reason = DlssNr::DriverGate::UnsupportedDriverReason;") != std::string::npos);
+    assert(failure.find("could not create Neural Rendering at display resolution") != std::string::npos &&
+           "the fork's contextual driver error must remain");
+    std::puts("Test 13 PASS: status explains the driver, contextual resolution message preserved");
+
+    std::puts("All NR driver gate tests passed (13/13).");
     return 0;
 }
