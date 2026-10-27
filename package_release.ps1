@@ -318,7 +318,7 @@ if ($IncludeAmpereMfg) {
         $sm86Dll = "$sm86Src\version.dll"
     }
     if ($UpdateAmpereMfg -or (-not (Test-Path -LiteralPath $sm86Dll))) {
-        Write-Host "Acquiring verified SM75/SM86 0.4.0 runtime from sdli1995 repository..."
+        Write-Host "Acquiring verified SM75/SM86 0.4.1 runtime from sdli1995 repository..."
         if (-not (Test-Path -LiteralPath $sm86Src)) {
             New-Item -ItemType Directory -Force -Path $sm86Src | Out-Null
         }
@@ -328,8 +328,8 @@ if ($IncludeAmpereMfg) {
         } else {
             git -C $sm86Src remote set-url origin https://github.com/sdli1995/dlssg_for_sm86.git
         }
-        git -C $sm86Src fetch --depth 1 origin tags/0.4.0
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.0 runtime from sdli1995 repository' }
+        git -C $sm86Src fetch --depth 1 origin tags/0.4.1
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.1 runtime from sdli1995 repository' }
         git -C $sm86Src checkout --detach FETCH_HEAD
         $sm86Dll = "$sm86Src\version.dll"
     }
@@ -397,7 +397,7 @@ if ($IncludeAmpereMfg) {
         Copy-Item -LiteralPath $docs -Destination "$sm86DestDir\docs" -Recurse -Force
     }
 
-    # Strict v0.4.0 modular verification
+    # Strict 0.4.x modular verification
     $requiredModularFiles = @(
         "$targetModularDir\backend\sm86_backend.dll",
         "$targetModularDir\kernels\fg_kernels.dll",
@@ -405,7 +405,7 @@ if ($IncludeAmpereMfg) {
     )
     foreach ($req in $requiredModularFiles) {
         if (-not (Test-Path -LiteralPath $req)) {
-            throw "Ampere/Turing SM86/SM75 0.4.0 required modular binary not found: $req"
+            throw "Ampere/Turing SM86/SM75 0.4.x required modular binary not found: $req"
         }
     }
     foreach ($ex in @('sr', 'xefg')) {

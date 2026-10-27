@@ -69,7 +69,7 @@ jobs:
             }
         }
         if ($needsAcquire) {
-            Write-Host "dlssg_for_sm86 0.4.0 modular files not complete in working copy; cloning from sdli1995/dlssg_for_sm86..."
+            Write-Host "dlssg_for_sm86 0.4.1 modular files not complete in working copy; cloning from sdli1995/dlssg_for_sm86..."
             if (-not (Test-Path "dlssg_for_sm86")) {
                 New-Item -ItemType Directory -Force -Path "dlssg_for_sm86" | Out-Null
             }
@@ -79,17 +79,17 @@ jobs:
             } else {
                 git -C dlssg_for_sm86 remote set-url origin https://github.com/sdli1995/dlssg_for_sm86.git
             }
-            git -C dlssg_for_sm86 fetch --depth 1 origin tags/0.4.0
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.0 runtime' }
+            git -C dlssg_for_sm86 fetch --depth 1 origin tags/0.4.1
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch pinned SM75/SM86 0.4.1 runtime' }
             git -C dlssg_for_sm86 checkout --detach FETCH_HEAD
         }
         foreach ($file in $requiredFiles) {
             if (-not (Test-Path $file)) {
-                Write-Error "Failed to acquire required dlssg_for_sm86 0.4.0 file: $file"
+                Write-Error "Failed to acquire required dlssg_for_sm86 0.4.1 file: $file"
                 exit 1
             }
         }
-        Write-Host "dlssg_for_sm86 0.4.0 modular files verified."
+        Write-Host "dlssg_for_sm86 0.4.1 modular files verified."
 
     - name: Ensure NVSmooth30 files are present
       if: ${{ inputs.include_nvsmooth30 }}
