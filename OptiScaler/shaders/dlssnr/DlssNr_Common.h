@@ -271,6 +271,18 @@ class DlssNr_Common
         return (std::isfinite(dark) && dark > 0) || (std::isfinite(bright) && bright > 0);
     }
 
+    // The halo pass runs on the final model answer, except in the raw model-output debug view.
+    template <typename ConfigType> static bool HaloRuns(const ConfigType& config)
+    {
+        return HaloEnabled(config) && config.DlssNrDebugView.value_or_default() != 2;
+    }
+
+    // passClamp holds the multipass clamp and, after the last pass, the halo-filtered answer.
+    template <typename ConfigType> static bool NeedsPassClamp(unsigned int passes, const ConfigType& config)
+    {
+        return passes > 1 || HaloEnabled(config);
+    }
+
     template <typename ConfigType> static void SetQualityConstants(DlssNrConstants& c, const ConfigType& config)
     {
         const auto bounded = [](float value, float fallback, float lo, float hi)

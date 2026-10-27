@@ -571,7 +571,7 @@ bool ModelVk::Impl::Evaluate(VkCommandBuffer cmdBuffer, const VkImageInfo& colou
     resolve.ReplaceDetailStrength = cfg.DlssNrReplaceDetailStrength.value_or_default();
     resolve.ModelWorkScale = workScale;
 
-    if (DlssNr_Common::HaloEnabled(cfg) && cfg.DlssNrDebugView.value_or_default() != 2)
+    if (DlssNr_Common::HaloRuns(cfg))
     {
         Transition(cmdBuffer, *modelInput, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         Transition(cmdBuffer, *answer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
