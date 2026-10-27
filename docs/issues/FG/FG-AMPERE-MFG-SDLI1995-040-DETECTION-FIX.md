@@ -134,3 +134,29 @@ Removed lines 346–349 in `package_release.ps1` that staged `ReShade.ini` into 
 ### 3. Full Standalone Test Suite Verification
 - All 30 standalone unit tests in `tests/` compiled and passed cleanly with zero regressions.
 - All modified C++ files validated with `python3` asserting UTF-8 BOM (`\xef\xbb\xbf`) and verified clean with `clang-format --dry-run --Werror`.
+
+## 6. Follow-up: Plain-Language Menu Status (2026-10-27, `a53633c9`)
+Once detection was fixed, sdli1995 v0.4.0 showed
+`Mod: sdli1995 v0.4.0 | DLL: found | Router: SM86 | INI: written | Loaded: yes | Live: n/a`. This was correct, but
+users read "Live: n/a" as the unlocker not running.
+
+The menu now shows:
+- **Headline** (green / red / amber):
+  - `RTX 20/30 frame generation unlock: running (<mod>)`;
+  - `... not running: <error>`;
+  - `... starting...`.
+- **Where the multiplier is changed**:
+  - sdli1995: `Multiplier: set in the game's graphics menu. Ceiling changes need Save Settings + restart.`
+  - SilyNoMeta: `Multiplier: set in the game's menu or live from OptiScaler (Dynamic MFG available).`
+- **Details** in the headline's `(?)` marker: the technical fields, with `Live control: active / ready / not supported
+  by this mod`.
+
+There is deliberately no "game is generating frames" state. In External mode `dlssgLastSetMode` only updates when
+OptiScaler hooks `sl.dlss_g`, which some games (e.g. TLOU2) never trigger. Capability gating is unchanged: live
+control and Dynamic MFG remain SilyNoMeta-only.
+
+- Wording: `OptiScaler/framegen/dlssg/AmpereMfgStatusText.h`.
+- Test: `tests/ampere_mfg_status_text_unit.cpp` (5/5 PASS).
+- Binaries checked:
+  - DLSS Unlocked bundle and RDR2 (sdli1995 v0.4.0, root, `runtime/`, `kernels/` and `backend/`): no control exports;
+  - TLOU Part I (SilyNoMeta v0.3.5): `DLSSG_RequestControl`, `DLSSG_SetDisplayTarget`, `DLSSG_RequestUI`.
