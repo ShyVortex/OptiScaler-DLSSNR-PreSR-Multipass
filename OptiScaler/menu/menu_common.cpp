@@ -14,6 +14,7 @@
 #include <cfloat>
 
 #include <dlssnr/DlssNr.h>
+#include <dlssnr/DlssNr_DriverGate.h>
 
 #include "input/input_system.h"
 
@@ -1514,6 +1515,17 @@ void MenuCommon::HandleMenuShortcuts(RenderMenuContext& ctx)
         {
             inputFps = false;
             config->ShowFps = !config->ShowFps.value_or_default();
+        }
+
+        if (inputDlssNr && DlssNr::DriverGate::Blocked())
+        {
+            // Toggling would replace the startup block with a real value and start NR on a too-old driver.
+            inputDlssNr = false;
+            const auto message = DlssNr::DriverGate::BlockedMessage(DlssNr::DriverGate::DetectedVersion());
+            ImGuiToast toast { ImGuiToastType::Warning, 5000 };
+            toast.setTitle("DLSS Neural Rendering");
+            toast.setContent("%s", message.c_str());
+            ImGui::InsertNotification(toast);
         }
 
         if (inputDlssNr)

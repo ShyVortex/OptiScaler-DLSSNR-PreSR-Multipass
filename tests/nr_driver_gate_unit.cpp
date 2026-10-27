@@ -21,6 +21,8 @@
 // 7. The volatile off survives Config::Reload / profile loads: set_from_config never replaces a set value, and
 //    value_for_config still saves the user's own setting.
 // 8. The NR proxy refuses creation before any NGX call while blocked.
+// 9. The menu disables "Enable Neural Rendering", explains why, and never writes the setting while blocked.
+// 10. The NR hotkey shows the message instead of toggling, and no other code path writes DlssNrEnabled.
 
 using namespace DlssNr::DriverGate;
 
@@ -92,6 +94,8 @@ int main()
     const std::string dllmain = ReadFile("OptiScaler/dllmain.cpp");
     const std::string config = ReadFile("OptiScaler/Config.h");
     const std::string proxy = ReadFile("OptiScaler/dlssnr/DlssNr_Proxy.cpp");
+    const std::string menu = ReadFile("OptiScaler/dlssnr/DlssNr_Menu.cpp");
+    const std::string common = ReadFile("OptiScaler/menu/menu_common.cpp");
 
     // Test 5
     assert(identifyHeader.find("uint32_t nvidiaDriverVersion = 0;") != std::string::npos);
@@ -128,6 +132,35 @@ int main()
     assert(prepare.find("NVSDK_NGX_Result_FAIL_OutOfDate") != std::string::npos);
     std::puts("Test 8 PASS: the proxy refuses creation before touching NGX");
 
-    std::puts("All NR driver gate tests passed (8/8).");
+    // Test 9
+    const auto toggle = Between(menu, "const bool driverBlocked = DriverGate::Blocked();", "Apply model");
+    assert(toggle.find("ImGui::TextWrapped(\"%s\", driverMessage.c_str());") != std::string::npos &&
+           "the reason is shown in the menu");
+    const auto disabled = toggle.find("ImGui::BeginDisabled(driverBlocked);");
+    const auto checkbox = toggle.find("\"Enable Neural Rendering\", &enabled, toggleWidth) && !driverBlocked)");
+    const auto write = toggle.find("config->DlssNrEnabled = enabled;");
+    assert(disabled != std::string::npos && checkbox != std::string::npos && write != std::string::npos);
+    assert(disabled < checkbox && checkbox < write);
+    assert(toggle.find("ImGuiHoveredFlags_AllowWhenDisabled") != std::string::npos &&
+           toggle.find("driverBlocked ? driverMessage.c_str()") != std::string::npos);
+    std::puts("Test 9 PASS: the menu checkbox is disabled with the driver message");
+
+    // Test 10
+    const auto blockedKey = common.find("if (inputDlssNr && DlssNr::DriverGate::Blocked())");
+    const auto toggleKey = common.find("config->DlssNrEnabled = !config->DlssNrEnabled.value_or_default();");
+    assert(blockedKey != std::string::npos && toggleKey != std::string::npos && blockedKey < toggleKey);
+    const auto keyBlock = Between(common, "if (inputDlssNr && DlssNr::DriverGate::Blocked())", "if (inputDlssNr)\n");
+    assert(keyBlock.find("inputDlssNr = false;") != std::string::npos &&
+           keyBlock.find("BlockedMessage(") != std::string::npos &&
+           keyBlock.find("DlssNrEnabled") == std::string::npos && "the blocked hotkey consumes the key, never toggles");
+    size_t writes = 0;
+    for (const auto* source : { &menu, &common, &dllmain, &proxy })
+        for (auto at = source->find("DlssNrEnabled = "); at != std::string::npos;
+             at = source->find("DlssNrEnabled = ", at + 1))
+            ++writes;
+    assert(writes == 2 && "only the guarded checkbox and hotkey write DlssNrEnabled");
+    std::puts("Test 10 PASS: the hotkey shows the message instead of toggling");
+
+    std::puts("All NR driver gate tests passed (10/10).");
     return 0;
 }

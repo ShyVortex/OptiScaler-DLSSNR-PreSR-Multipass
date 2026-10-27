@@ -7,6 +7,7 @@
 #include "DlssNr_Upscaler.h"
 #include "DlssNr_MenuSections.h"
 #include "DlssNr_Placement.h"
+#include "DlssNr_DriverGate.h"
 #include <Config.h>
 #include <menu/menu_common.h>
 #include <algorithm>
@@ -159,16 +160,30 @@ void RenderMenu(Config* config, float menuResScale)
         const float toggleGap = ImGui::GetStyle().ItemSpacing.x;
         const float toggleWidth = (ImGui::GetContentRegionAvail().x - toggleGap) * 0.5f;
         const float toggleRight = ImGui::GetCursorPosX() + toggleWidth + toggleGap;
+        // Below the minimum driver NR stays off (DLSS Unlocked #60); say why above the two-column toggle row.
+        const bool driverBlocked = DriverGate::Blocked();
+        const std::string driverMessage =
+            driverBlocked ? DriverGate::BlockedMessage(DriverGate::DetectedVersion()) : std::string {};
+        if (driverBlocked)
+        {
+            const auto textColor = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(textColor.x, textColor.y * 0.8f, 0.0f, textColor.w));
+            ImGui::TextWrapped("%s", driverMessage.c_str());
+            ImGui::PopStyleColor();
+        }
+
         bool enabled = config->DlssNrEnabled.value_or_default();
-        if (PipelineUi::CheckboxWrapped("Enable Neural Rendering", &enabled, toggleWidth))
+        ImGui::BeginDisabled(driverBlocked);
+        if (PipelineUi::CheckboxWrapped("Enable Neural Rendering", &enabled, toggleWidth) && !driverBlocked)
         {
             config->DlssNrEnabled = enabled;
             RequestHistoryReset();
             if (enabled && !config->DlssNrRunBeforeSr.has_value())
                 config->DlssNrRunBeforeSr = true;
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Enable NR processing.");
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", driverBlocked ? driverMessage.c_str() : "Enable NR processing.");
 
         bool applyModel = config->DlssNrApplyModel.value_or_default();
         if (PipelineUi::CheckboxWrapped("Apply model", &applyModel, toggleWidth))
