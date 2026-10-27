@@ -160,7 +160,7 @@ In PowerShell 7 on Windows, from this checkout after building OptiScaler:
 ```
 
 Omit `-SkipBuild` to build first. `-StreamlineArchive` supplies the official ZIP offline.
-The output is `release/OptiScaler-DLSSNR-v0.6.0-fg-preview-with-dlss-fg.zip`. Normal packages omit
+The output is `release/OptiScaler-NR-PreSR-MFG-v0.6.0-fg-preview-with-dlss-fg.zip`. Normal packages omit
 the NVIDIA DLLs but include the downloader and manifest. Both variants keep FG and NR off by
 default, and include `SHA256SUMS.txt`. Existing version outputs are never overwritten.
 

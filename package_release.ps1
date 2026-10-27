@@ -30,7 +30,7 @@ if ($IncludeAmpereMfg) { $flavour += '-with-sm86-mfg' }
 if ($IncludeNVSmooth30) { $flavour += '-with-nvsmooth30' }
 
 $stage = "$root\release\$Version$flavour"
-$zip = "$root\release\OptiScaler-DLSSNR-$Version$flavour.zip"
+$zip = "$root\release\OptiScaler-NR-PreSR-MFG-$Version$flavour.zip"
 if ((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $zip)) {
     throw 'Release output already exists. Choose a new -Version; existing packages are never deleted or overwritten.'
 }
