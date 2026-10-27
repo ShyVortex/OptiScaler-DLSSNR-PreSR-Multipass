@@ -28,6 +28,9 @@ class XeFG_Dx12 : public virtual IFGFeature_Dx12
     bool _needResetHistory = false;
     uint64_t _lastResetFrame = 0;
 
+    // Menu request waiting for the game's present thread; -1 = none.
+    std::atomic<int> _pendingInterpolationCount { -1 };
+
     std::unique_ptr<DI_Dx12> _depthInvert;
 
     static void xefgLogCallback(const char* message, xefg_swapchain_logging_level_t level, void* userData);
@@ -84,5 +87,6 @@ class XeFG_Dx12 : public virtual IFGFeature_Dx12
 
     // Inherited via IFGFeature_Dx12
     bool SetInterpolatedFrameCount(UINT interpolatedFrameCount) override;
+    void RequestInterpolatedFrameCount(UINT interpolatedFrameCount) override;
     bool IsPassthrough() const override { return _passthrough; }
 };

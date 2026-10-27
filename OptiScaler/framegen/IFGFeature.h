@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SysUtils.h"
 #include <OwnedMutex.h>
 #include <dxgi1_6.h>
@@ -111,6 +111,13 @@ class IFGFeature
     virtual bool Shutdown() = 0;
     virtual bool HasResource(FG_ResourceType type, int index = -1) = 0;
     virtual bool SetInterpolatedFrameCount(UINT interpolatedFrameCount) = 0;
+
+    // For callers that may run inside the backend's own Present (the overlay menu). Backends whose
+    // runtime cannot be re-entered from there queue the request and apply it on the next frame.
+    virtual void RequestInterpolatedFrameCount(UINT interpolatedFrameCount)
+    {
+        SetInterpolatedFrameCount(interpolatedFrameCount);
+    }
 
     int GetIndex();
     int GetIndexWillBeDispatched();

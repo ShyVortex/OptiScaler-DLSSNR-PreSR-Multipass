@@ -3781,7 +3781,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                             XeMfgLoader::TryApply();
 
                         if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
-                            state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
+                            state.currentFG->RequestInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
 
                         state.fgChanged = true;
                     }
@@ -3846,7 +3846,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                         XeMfgLoader::TryApply();
 
                     if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
-                        state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
+                        state.currentFG->RequestInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
 
                     state.fgChanged = true;
                 }
@@ -3991,7 +3991,7 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 if (XeMfgLoader::IsEnabled())
                     XeMfgLoader::SetMaxGeneratedFrames(static_cast<uint32_t>(maxFrames));
                 if (state.currentFG != nullptr && !state.currentFG->IsPassthrough())
-                    state.currentFG->SetInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
+                    state.currentFG->RequestInterpolatedFrameCount(static_cast<uint32_t>(maxFrames));
             }
             ShowHelpMarker("Number of interpolated frames generated per real rendered frame (allowed in XeFG and "
                            "advertised to Streamline).\n"
