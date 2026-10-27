@@ -1,16 +1,16 @@
-# OptiScaler: NR & MFG Suite
+# OptiScaler-NR-PreSR-MFG
 
-[![GitHub Release](https://img.shields.io/github/v/release/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass?style=flat-square&color=blue)](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/releases)
-[![Build & Test CI](https://img.shields.io/github/actions/workflow/status/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/build.yml?branch=main&style=flat-square&label=Build%20CI)](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/actions)
+[![GitHub Release](https://img.shields.io/github/v/release/ShyVortex/OptiScaler-NR-PreSR-MFG?style=flat-square&color=blue)](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG/releases)
+[![Build & Test CI](https://img.shields.io/github/actions/workflow/status/ShyVortex/OptiScaler-NR-PreSR-MFG/build.yml?branch=main&style=flat-square&label=Build%20CI)](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG/actions)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green.svg?style=flat-square)](LICENSE)
 [![C++20](https://img.shields.io/badge/Standard-C%2B%2B20-darkblue.svg?style=flat-square)](https://en.cppreference.com/w/cpp/20)
-[![DirectX 12](https://img.shields.io/badge/DirectX-12%20%7C%2011%20%7C%20Vulkan-orange.svg?style=flat-square)](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass)
+[![DirectX 12](https://img.shields.io/badge/DirectX-12%20%7C%2011%20%7C%20Vulkan-orange.svg?style=flat-square)](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG)
 
-A high-performance, next-generation AI image reconstruction, neural processing, and **Multi-Frame Generation (up to 6X FG)** middleware suite.
+An OptiScaler fork built to pair with **[DLSS Unlocked](https://github.com/ShyVortex/DLSS-Unlocked)**. It carries upstream's DLSS Neural Rendering (Pre-SR, multipass) and adds Multi-Frame Generation unlocks: DLSS MFG on RTX 20, 30 and 40 cards, and Intel XeMFG on any GPU (up to 6X FG).
 
-This repository (**ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass**) is an advanced evolutionary fork of [OptiScaler](https://github.com/optiscaler/OptiScaler) and [wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass). It unifies production-grade **DLSS 5 Neural Rendering (DLSS-NR) Pre-SR Multipass**, deep hardware **Multi-Frame Generation** across four GPU generations (Turing, Ampere, Ada Lovelace, Blackwell), universal vendor-agnostic **Intel XeMFG** with custom presentation pacing engines, and driver-level **Smooth Motion** for RTX 30 series GPUs.
+This repository (**ShyVortex/OptiScaler-NR-PreSR-MFG**) is an advanced evolutionary fork of [OptiScaler](https://github.com/optiscaler/OptiScaler) and [wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass). It unifies production-grade **DLSS 5 Neural Rendering (DLSS-NR) Pre-SR Multipass**, deep hardware **Multi-Frame Generation** across four GPU generations (Turing, Ampere, Ada Lovelace, Blackwell), universal vendor-agnostic **Intel XeMFG** with custom presentation pacing engines, and driver-level **Smooth Motion** for RTX 30 series GPUs.
 
-**[Download Latest Release](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/releases/latest)** · **[Installation Guide](INSTALL-DLSSNR.md)** · **[Configuration Guide](Config.md)** · **[Report an Issue](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/issues)**
+**[Download Latest Release](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG/releases/latest)** · **[Installation Guide](INSTALL-DLSSNR.md)** · **[Configuration Guide](Config.md)** · **[Report an Issue](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG/issues)**
 
 ---
 
@@ -146,7 +146,7 @@ Integrates `ItsAdeline`'s `NVSmooth30` driver-level frame generation unlocker fo
 > **Anti-Cheat Warning**: Do **not** use this mod in online multiplayer games with active anti-cheat solutions (e.g. Easy Anti-Cheat, BattlEye, Ricochet). You may risk an account ban.
 
 ### Windows (Automated Setup)
-1. Download the latest release archive (`OptiScaler-DLSSNR-PreSR-Multipass-vX.X.X.zip`) from [Releases](https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass/releases/latest).
+1. Download the latest release archive (`OptiScaler-NR-PreSR-MFG-vX.X.X.zip`) from [Releases](https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG/releases/latest).
 2. Extract all contents directly beside the main game executable (in the folder containing the game's `.exe`).
 3. Ensure runtime model binaries are present:
    - For **Neural Rendering**: place `nvngx_dlssnr.dll` beside the game executable (see [INSTALL-DLSSNR.md](INSTALL-DLSSNR.md)).
@@ -230,8 +230,8 @@ For complete documentation on all parameters, see [Config.md](Config.md).
 ### Compilation Steps
 1. Clone this repository with submodules:
    ```bash
-   git clone --recurse-submodules https://github.com/ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass.git
-   cd OptiScaler-DLSSNR-PreSR-Multipass
+   git clone --recurse-submodules https://github.com/ShyVortex/OptiScaler-NR-PreSR-MFG.git
+   cd OptiScaler-NR-PreSR-MFG
    ```
 2. Open `OptiScaler.sln` in Visual Studio 2022.
 3. Select **Release** and **x64** configuration.
