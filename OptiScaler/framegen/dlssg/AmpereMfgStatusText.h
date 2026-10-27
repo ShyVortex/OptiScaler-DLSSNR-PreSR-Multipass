@@ -55,6 +55,25 @@ inline const char* LiveControlText(const AmpereMfgLoader::Status& status)
     return status.LiveControlSupported ? "ready" : "not supported by this mod";
 }
 
+// The mod needs an R580 driver (hard since sdli1995 0.4.1: below it frame generation is refused, no PTX fallback).
+// Windows only: under Wine/Proton dxvk-nvapi reports Linux driver numbers; an unknown version (0) says nothing.
+inline constexpr uint32_t MinimumDriver = 58000; // NVAPI encoding: 580.00
+
+inline bool DriverBelowFloor(bool onWine, uint32_t driverVersion)
+{
+    return !onWine && driverVersion != 0 && driverVersion < MinimumDriver;
+}
+
+inline std::string DriverFloorText(uint32_t driverVersion)
+{
+    const uint32_t minor = driverVersion % 100;
+    const std::string version = std::to_string(driverVersion / 100) + (minor < 10 ? ".0" : ".") + std::to_string(minor);
+    return "NVIDIA driver " + version +
+           " is too old: this unlocker needs driver 580 or newer and refuses frame generation below it.";
+}
+
+inline constexpr const char* HardwareBilinearLabel = "Hardware Bilinear (0.3.x / 0.4.0 only)##sm86";
+
 // Technical fields for bug reports, shown in the headline's help marker.
 inline std::string DetailsText(const AmpereMfgLoader::Status& status, const std::string& router)
 {

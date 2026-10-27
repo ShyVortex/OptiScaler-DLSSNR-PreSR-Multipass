@@ -232,12 +232,14 @@ std::string ResolveRouter()
     const auto& gpu = IdentifyGpu::getPrimaryGpu();
     const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
     bool hasSm75Support = false;
+    bool is3101Runtime = false;
     {
         std::lock_guard lock(s_mutex);
         hasSm75Support = s_status.HasSm75Support;
+        is3101Runtime = s_status.Is3101Runtime;
     }
     return ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name, configuredRouter,
-                         hasSm75Support);
+                         hasSm75Support, is3101Runtime);
 }
 
 std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool hasDynamicMfgSupport)
@@ -287,7 +289,7 @@ std::string GenerateIniContent(bool hasSm75Support, bool is3101Runtime, bool has
     int hwBilinear = cfg->FGDLSSGAmpereMfgHardwareBilinear.value_or_default() ? 1 : 0;
     const std::string configuredRouter = cfg->FGDLSSGAmpereMfgRouter.value_or("Auto");
     std::string router = ResolveRouter(static_cast<uint32_t>(gpu.nvidiaArchInfo.architecture_id), gpu.name,
-                                       configuredRouter, hasSm75Support);
+                                       configuredRouter, hasSm75Support, is3101Runtime);
     const int optimized = cfg->FGDLSSGAmpereMfgOptimized.value_or(1);
     const std::string preset = cfg->FGDLSSGAmpereMfgPreset.value_or("Auto");
     const std::string spoofArch = cfg->FGDLSSGAmpereMfgSpoofArchToGame.value_or("Auto");

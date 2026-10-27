@@ -17,6 +17,8 @@
 // 3. Multiplier line: game menu + restart for sdli1995, live from OptiScaler for SilyNoMeta.
 // 4. Details: live control is active / ready / "not supported by this mod", never "n/a"; fields kept.
 // 5. The menu uses the helpers in place of the old one-line status.
+// 6. R580 floor: only a known Windows driver below 580.00 shows the note; Wine and unknown versions never do.
+// 7. HardwareBilinear is labelled as 0.3.x / 0.4.0 only, and the menu uses the label and the floor note.
 
 using AmpereMfgLoader::ModVariant;
 using AmpereMfgLoader::Status;
@@ -102,6 +104,26 @@ int main()
     assert(header < headline && headline < marker && marker < multiplier);
     std::puts("Test 5 PASS: the menu shows headline, details marker and multiplier line");
 
-    std::puts("All Ampere MFG status text tests passed (5/5).");
+    // Test 6
+    assert(DriverBelowFloor(false, 57688) && "576.88 is below R580");
+    assert(DriverBelowFloor(false, 57999));
+    assert(!DriverBelowFloor(false, 58000) && !DriverBelowFloor(false, 61664));
+    assert(!DriverBelowFloor(false, 0) && "unknown version says nothing");
+    assert(!DriverBelowFloor(true, 57688) && "Wine reports Linux driver numbers");
+    assert(DriverFloorText(57688) ==
+           "NVIDIA driver 576.88 is too old: this unlocker needs driver 580 or newer and refuses frame generation "
+           "below it.");
+    assert(DriverFloorText(57605).find("576.05") != std::string::npos);
+    std::puts("Test 6 PASS: R580 floor note only for a known Windows driver below 580");
+
+    // Test 7
+    assert(std::string(HardwareBilinearLabel) == "Hardware Bilinear (0.3.x / 0.4.0 only)##sm86");
+    assert(menu.find("ImGui::Checkbox(AmpereMfgStatusText::HardwareBilinearLabel, &hwBilinear)") != std::string::npos);
+    assert(menu.find("\"Hardware Bilinear (approximate sampling)##sm86\"") == std::string::npos);
+    const auto floor = menu.find("AmpereMfgStatusText::DriverBelowFloor(onLinux, primaryGpu.nvidiaDriverVersion)");
+    assert(floor != std::string::npos && multiplier < floor && "the floor note follows the status lines");
+    std::puts("Test 7 PASS: HardwareBilinear label and floor note wired into the menu");
+
+    std::puts("All Ampere MFG status text tests passed (7/7).");
     return 0;
 }

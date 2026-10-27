@@ -36,6 +36,8 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - Preserve `"None (Real DLSSG / RTX 20/30 w/ SM75-86 mod)"` menu option.
       - **Streamline Architecture Spoofing for External MFG (`Streamline_Hooks.cpp`)**:
         - `hkdlssg_slOnPluginLoad`: `shouldSpoofArch` must include `ampereMfgActive` so `sl.dlss_g.dll` is spoofed during plugin load even when `activeFgInput == NoFG`.
+        - **Never clear the game's DLSS-G hooks for the external unlocker**: the `hooks` / `exclusive_hooks` / `external/feature/tags` clearing in `hkdlssg_slOnPluginLoad` runs only when OptiScaler owns DLSS-G (`activeFgInput == FGInput::DLSSG || activeFgOutput == FGOutput::DLSSG`), never for `ampereMfgActive` alone. With the external unlocker the game's own DLSS-G presents the generated frames and needs those hooks and tags (`2a0dbf5e` added the unlocker to the clearing; reverted in `b30c2433`, DLSS Unlocked #58). The arch spoof, capability hooks and vsync/HWS relaxation still cover the unlocker.
+        - Documentation: `docs/issues/FG/FG-WRC-GENERATIONS-EXTERNAL-MFG.md`. Associated test: `tests/streamline_dlssg_hook_ownership_unit.cpp`.
       - **Dual Runtime Architecture & Turing Router Safety (`AmpereMfgLoader.h`, `AmpereMfgLoader.cpp`)**:
         - Prioritize `310.1` runtime folder (`dlssg_sm86/310.1/dlssg_sm86.dll`) on Turing cards for native SM75 kernels (`DLSSG_SM75_SLOTS`).
         - When running on 310.9 runtime, `ResolveRouter` must output `Router=Auto` on Turing (never `Router=SM75`) to avoid runtime backend abort.
@@ -49,6 +51,7 @@ description: Architecture, frame generation, and safety rules for OptiScaler
         - `tests/kernel_hooks_nvngx_dlssg_unit.cpp`
         - `tests/turing_menu_recognition_unit.cpp`
         - `tests/streamline_turing_spoof_unit.cpp`
+        - `tests/streamline_dlssg_hook_ownership_unit.cpp`
         - `tests/turing_dual_runtime_unit.cpp`
         - `tests/dlssg_sm86_v030_ini_unit.cpp`
    - Always preserve **Ada (RTX 40) MFG Unlocker**:
