@@ -1,4 +1,4 @@
-#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
+﻿#include "../OptiScaler/framegen/dlssg/AmpereMfgLoader.h"
 #include <cassert>
 #include <cstdio>
 #include <filesystem>
@@ -67,15 +67,19 @@ int main()
 
     // Test 3: Runtime on Turing hardware with SM75 support uses dedicated SM75 kernels
     {
-        // Turing 0x160 with hasSm75Support = true: Auto router resolves to SM75
-        std::string routerSm75 = ResolveRouter(0x00000160, "RTX 2070", "Auto", true);
-        assert(routerSm75 == "SM75" && "On SM75-capable runtime, Turing Auto router resolves to SM75!");
+        // Turing 0x160 on the 310.1 runtime with SM75 kernels: Auto router resolves to SM75
+        std::string routerSm75 = ResolveRouter(0x00000160, "RTX 2070", "Auto", true, true);
+        assert(routerSm75 == "SM75" && "On the 310.1 runtime, Turing Auto router resolves to SM75!");
 
-        // Explicit "SM75" honored when runtime has SM75 support
-        std::string explicitSm75 = ResolveRouter(0x00000160, "RTX 2070", "SM75", true);
-        assert(explicitSm75 == "SM75");
+        // 310.9 with SM75 kernels (0.4.x): Auto stays Auto, the mod picks SM75 from the physical GPU (rule 4)
+        assert(ResolveRouter(0x00000160, "RTX 2070", "Auto", true, false) == "Auto");
+        assert(ResolveRouter(0, "NVIDIA GeForce RTX 2080 Ti", "Auto", true, false) == "Auto");
 
-        std::printf("  [PASS] Case 3: 310.1 runtime routes to SM75 for native Turing kernels\n");
+        // Explicit "SM75" honored whenever the runtime has SM75 kernels
+        assert(ResolveRouter(0x00000160, "RTX 2070", "SM75", true) == "SM75");
+        assert(ResolveRouter(0x00000160, "RTX 2070", "SM75", true, true) == "SM75");
+
+        std::printf("  [PASS] Case 3: Turing routes SM75 on 310.1, Auto on 310.9; explicit SM75 honoured\n");
     }
 
     // Test 4: Ampere (0x170) is completely unaffected and always routes to SM86
@@ -88,12 +92,12 @@ int main()
 
     // Test 5: Expanded GPU name heuristics for Turing & Ampere
     {
-        // Turing names without archId
-        assert(ResolveRouter(0, "NVIDIA TITAN RTX", "Auto", true) == "SM75");
-        assert(ResolveRouter(0, "NVIDIA TITAN RTX", "Auto", false) == "Auto");
-        assert(ResolveRouter(0, "TU104 [GeForce RTX 2080]", "Auto", true) == "SM75");
-        assert(ResolveRouter(0, "TU116 [GeForce GTX 1660 SUPER]", "Auto", true) == "SM75");
-        assert(ResolveRouter(0, "NVIDIA GeForce Turing Card", "Auto", true) == "SM75");
+        // Turing names without archId (310.1 runtime with SM75 kernels, so the name decides SM75)
+        assert(ResolveRouter(0, "NVIDIA TITAN RTX", "Auto", true, true) == "SM75");
+        assert(ResolveRouter(0, "NVIDIA TITAN RTX", "Auto", false, true) == "Auto");
+        assert(ResolveRouter(0, "TU104 [GeForce RTX 2080]", "Auto", true, true) == "SM75");
+        assert(ResolveRouter(0, "TU116 [GeForce GTX 1660 SUPER]", "Auto", true, true) == "SM75");
+        assert(ResolveRouter(0, "NVIDIA GeForce Turing Card", "Auto", true, true) == "SM75");
 
         // Ampere names
         assert(ResolveRouter(0, "NVIDIA RTX A4000", "Auto", false) == "SM86");
@@ -125,6 +129,49 @@ int main()
         assert(ResolveAutoKernelImage(0x170, "RTX 3070", false) == "Auto");
 
         std::printf("  [PASS] Case 7: ResolveAutoKernelImage correctly selects PTX for all Turing variants\n");
+    }
+
+    // Test 8: 0.4.1 moved the SM75 marker out of the proxy; the modular backend beside it still has the kernels
+    {
+        const auto root = std::filesystem::temp_directory_path() / "optiscaler_sm75_backend";
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root / "dlssg_sm86" / "backend");
+        const auto write = [](const std::filesystem::path& p, const std::string& text)
+        {
+            std::ofstream f(p, std::ios::binary);
+            f << "MZ\x90\x00" << text;
+        };
+        const auto proxy = root / "dlssg_sm86.dll";
+        const auto backend = root / "dlssg_sm86" / "backend" / "sm86_backend.dll";
+
+        // Proxy without markers, no backend: no SM75
+        write(proxy, "Auto was removed in 0.4.0 and sm86_backend.dll is next to the proxy");
+        assert(!HasSm75KernelFamily(proxy));
+
+        // Backend with SM75 kernel markers (0.4.1 layout): SM75 present
+        write(backend, "cubin_sm75 ... executed_on_sm75_hardware");
+        assert(HasSm75KernelFamily(proxy) && "0.4.1: SM75 kernels detected in the modular backend");
+
+        // Backend without markers: no SM75
+        write(backend, "sm86 kernels only");
+        assert(!HasSm75KernelFamily(proxy));
+
+        // A proxy that states it has no SM75 family wins over the backend
+        write(backend, "cubin_sm75");
+        write(proxy, "The 310.9 backend has no SM75 kernel family; use Router=Auto or SM86");
+        assert(!HasSm75KernelFamily(proxy));
+
+        // Real 0.4.1 release laid out as packaged, when present
+        const std::filesystem::path real041 = "dlssg_for_sm86/sdli1995/version.dll";
+        if (std::filesystem::exists(real041) &&
+            std::filesystem::exists("dlssg_for_sm86/sdli1995/dlssg_sm86/backend/sm86_backend.dll"))
+        {
+            assert(HasSm75KernelFamily(real041) && "real 0.4.1 release must report SM75 kernels");
+            std::printf("  [PASS] Case 8b: real sdli1995 0.4.1 release reports SM75 kernels from its backend\n");
+        }
+
+        std::filesystem::remove_all(root);
+        std::printf("  [PASS] Case 8: SM75 kernels detected in the 0.4.x modular backend\n");
     }
 
     std::printf("=== All Turing Dual Runtime & Router Safety Unit Tests PASSED! ===\n");

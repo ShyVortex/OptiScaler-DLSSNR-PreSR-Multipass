@@ -445,18 +445,12 @@ inline std::string MergeReshadeCompanionContent(const std::string& existingConte
     return outStream.str();
 }
 
-/// Detects if a dlssg_sm86 binary contains the SM75 kernel family (310.1 build or 0.3.1+ unified 310.9 build).
-inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
+/// Scans one binary for SM75 kernel-family markers: 1 = found, 0 = none, -1 = states it has no SM75 family.
+inline int ScanSm75Markers(const std::filesystem::path& dllPath)
 {
-    if (dllPath.empty())
-        return false;
-
-    if (dllPath.wstring().find(L"310.1") != std::wstring::npos)
-        return true;
-
     std::ifstream file(dllPath, std::ios::binary);
     if (!file.is_open())
-        return false;
+        return 0;
 
     constexpr size_t bufferSize = 65536;
     std::string buffer(bufferSize, '\0');
@@ -486,7 +480,7 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
         size_t bytesRead = file.gcount();
         std::string chunk = overlap + std::string(buffer.data(), bytesRead);
         if (chunk.find(needle3109NoSm75) != std::string::npos)
-            return false;
+            return -1;
         if (!foundSm75 &&
             (chunk.find(needleSm75Slots) != std::string::npos || chunk.find(needleSm75Family) != std::string::npos ||
              chunk.find(needleCubinSm75) != std::string::npos || chunk.find(needleSm75Hw) != std::string::npos ||
@@ -501,7 +495,34 @@ inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
             overlap = chunk;
     }
 
-    return foundSm75;
+    return foundSm75 ? 1 : 0;
+}
+
+/// Detects if a dlssg_sm86 install has the SM75 kernel family (310.1 build, 0.3.1+ unified 310.9 build, or the
+/// 0.4.x modular backend).
+inline bool HasSm75KernelFamily(const std::filesystem::path& dllPath)
+{
+    if (dllPath.empty())
+        return false;
+
+    if (dllPath.wstring().find(L"310.1") != std::wstring::npos)
+        return true;
+
+    const int proxy = ScanSm75Markers(dllPath);
+    if (proxy != 0)
+        return proxy > 0;
+
+    // 0.4.1 removed [Compatibility] SM75Family and with it the proxy's marker; the SM75 kernels live in the modular
+    // backend beside the proxy.
+    std::error_code ec;
+    const auto dir = dllPath.parent_path();
+    for (const auto& backend :
+         { dir / L"dlssg_sm86" / L"backend" / L"sm86_backend.dll", dir / L"backend" / L"sm86_backend.dll" })
+    {
+        if (std::filesystem::exists(backend, ec))
+            return ScanSm75Markers(backend) > 0;
+    }
+    return false;
 }
 
 /// Detects if a dlssg_sm86 binary represents the 310.1 runtime (4X / MaxGeneratedFrames=3 ceiling)
@@ -907,8 +928,11 @@ inline bool HasAsiInitExport(const std::filesystem::path& dllPath)
 
 /// Resolves router string ("Auto", "SM75" or "SM86") based on architecture ID, GPU name, configured preference,
 /// and whether the selected runtime binary supports dedicated SM75 kernels.
+/// is3101Runtime: the 310.1 runtime. On 310.9 (0.4.x ships only 310.9) a Turing Auto stays Auto and the mod picks
+/// the SM75 family itself from the physical GPU (architecture rule 4).
 inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "",
-                                 const std::string& configuredRouter = "Auto", bool hasSm75Support = true)
+                                 const std::string& configuredRouter = "Auto", bool hasSm75Support = true,
+                                 bool is3101Runtime = false)
 {
     if (configuredRouter == "SM75" || configuredRouter == "sm75")
     {
@@ -922,8 +946,9 @@ inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "
     // If running on Turing, only select SM75 if the runtime actually supports it (310.1).
     // On 310.9, use "Auto" which is safe and prevents the abort message:
     // "The 310.9 backend has no SM75 kernel family; use Router=Auto or SM86"
+    const char* turingAuto = hasSm75Support && is3101Runtime ? "SM75" : "Auto";
     if (IsTuringArch(archId))
-        return hasSm75Support ? "SM75" : "Auto";
+        return turingAuto;
     if (IsAmpereArch(archId))
         return "SM86";
 
@@ -933,7 +958,7 @@ inline std::string ResolveRouter(uint32_t archId, const std::string& gpuName = "
         if (gpuName.find("RTX 20") != std::string::npos || gpuName.find("GTX 16") != std::string::npos ||
             gpuName.find("TITAN RTX") != std::string::npos || gpuName.find("Turing") != std::string::npos ||
             gpuName.find("TU10") != std::string::npos || gpuName.find("TU11") != std::string::npos)
-            return hasSm75Support ? "SM75" : "Auto";
+            return turingAuto;
 
         if (gpuName.find("RTX 30") != std::string::npos || gpuName.find("Ampere") != std::string::npos ||
             gpuName.find("GA10") != std::string::npos || gpuName.find("RTX A") != std::string::npos)

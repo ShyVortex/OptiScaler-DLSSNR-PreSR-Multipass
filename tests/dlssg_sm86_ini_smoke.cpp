@@ -116,13 +116,16 @@ int main()
 
     // 8. ResolveRouter hardware routing
     {
-        // Direct architecture ID resolution
-        assert(ResolveRouter(0x00000160) == "SM75");
+        // Direct architecture ID resolution. Turing Auto is SM75 only on the 310.1 runtime; on 310.9 (the
+        // default) it stays Auto and the mod picks the family (architecture rule 4).
+        assert(ResolveRouter(0x00000160) == "Auto");
+        assert(ResolveRouter(0x00000160, "", "Auto", true, true) == "SM75");
         assert(ResolveRouter(0x00000170) == "SM86");
 
         // GPU name fallback resolution when arch ID is masked/generic
-        assert(ResolveRouter(0, "NVIDIA GeForce RTX 2070 SUPER") == "SM75");
-        assert(ResolveRouter(0, "NVIDIA GeForce GTX 1660 Ti") == "SM75");
+        assert(ResolveRouter(0, "NVIDIA GeForce RTX 2070 SUPER") == "Auto");
+        assert(ResolveRouter(0, "NVIDIA GeForce RTX 2070 SUPER", "Auto", true, true) == "SM75");
+        assert(ResolveRouter(0, "NVIDIA GeForce GTX 1660 Ti", "Auto", true, true) == "SM75");
         assert(ResolveRouter(0, "NVIDIA GeForce RTX 3080 Ti Laptop GPU") == "SM86");
         assert(ResolveRouter(0, "NVIDIA GeForce RTX 3060") == "SM86");
 
@@ -135,11 +138,14 @@ int main()
         assert(ResolveRouter(0x00000160, "RTX 2070", "SM86") == "SM86");
         assert(ResolveRouter(0x00000160, "RTX 2070", "sm86") == "SM86");
         assert(ResolveRouter(0x00000170, "RTX 3080", "Auto") == "SM86");
-        assert(ResolveRouter(0x00000160, "RTX 2070", "Auto") == "SM75");
+        assert(ResolveRouter(0x00000160, "RTX 2070", "Auto") == "Auto");
+        assert(ResolveRouter(0x00000160, "RTX 2070", "Auto", true, true) == "SM75");
 
         // End-to-end INI output with router resolution
-        std::string turingIni = FormatIniContent(3, "PTX", 0, ResolveRouter(0x160));
-        assert(turingIni.find("Router=SM75") != std::string::npos);
+        std::string turing3101Ini = FormatIniContent(3, "PTX", 0, ResolveRouter(0x160, "", "Auto", true, true));
+        assert(turing3101Ini.find("Router=SM75") != std::string::npos);
+        std::string turing3109Ini = FormatIniContent(3, "PTX", 0, ResolveRouter(0x160));
+        assert(turing3109Ini.find("Router=Auto") != std::string::npos);
 
         std::string ampereIni = FormatIniContent(3, "PTX", 0, ResolveRouter(0x170));
         assert(ampereIni.find("Router=SM86") != std::string::npos);

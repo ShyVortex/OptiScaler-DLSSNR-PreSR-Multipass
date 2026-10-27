@@ -3557,9 +3557,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "Save Settings and restart to apply.");
 
             // Router Architecture combo
+            const auto& routerStatus = AmpereMfgLoader::LastStatus();
             std::string resolvedAutoRouter = AmpereMfgLoader::ResolveRouter(
-                static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id), primaryGpu.name, "Auto");
-            std::string autoRouterLabel = "Auto (" + resolvedAutoRouter + " on this GPU)";
+                static_cast<uint32_t>(primaryGpu.nvidiaArchInfo.architecture_id), primaryGpu.name, "Auto",
+                routerStatus.HasSm75Support, routerStatus.Is3101Runtime);
+            std::string autoRouterLabel = resolvedAutoRouter == "Auto"
+                                              ? std::string("Auto (chosen by the mod)")
+                                              : "Auto (" + resolvedAutoRouter + " on this GPU)";
             const char* routerOptions[] = { autoRouterLabel.c_str(), "SM86 (RTX 30 series)", "SM75 (RTX 20 / GTX 16)" };
             std::string currentRouter = config->FGDLSSGAmpereMfgRouter.value_or("Auto");
             int routerIdx = (currentRouter == "SM86") ? 1 : (currentRouter == "SM75") ? 2 : 0;
