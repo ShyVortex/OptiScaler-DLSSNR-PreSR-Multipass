@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DlssNr_MenuSections.h"
+#include "DlssNr_MenuPresets.h"
 #include "DlssNr_Placement.h"
 #include "DlssNr_Status.h"
 #include <shaders/dlssnr/DlssNr_Spatial.h>
@@ -276,21 +277,19 @@ static void DeferredSlider(const char* label, Option* opt, float mn, float mx, f
 
 template <typename Option> static void NrModelCombo(Option* opt, bool allowInherit)
 {
-    static const char* names[] = { "Automatic", "Original", "Optimized" };
-    const bool inherited = allowInherit && !opt->has_value();
-    const uint32_t preset = opt->has_value() ? opt->value() : 0u;
-    const char* preview = inherited                      ? "Inherit pass 1"
-                          : preset < IM_ARRAYSIZE(names) ? names[preset]
-                                                         : "Unavailable preset";
+    namespace Presets = DlssNr::MenuPresets;
+    const auto current = opt->has_value() ? std::optional<uint32_t>(opt->value()) : std::nullopt;
+    const bool inherited = Presets::Inherited(allowInherit, current);
+    const uint32_t preset = current.value_or(0u);
 
-    if (ImGui::BeginCombo("NR model", preview))
+    if (ImGui::BeginCombo("NR model", Presets::Preview(allowInherit, current)))
     {
-        if (allowInherit && ImGui::Selectable("Inherit pass 1", inherited))
+        if (allowInherit && ImGui::Selectable(Presets::Inherit, inherited))
             *opt = std::optional<uint32_t> {};
-        for (uint32_t value = 0; value < IM_ARRAYSIZE(names); ++value)
+        for (uint32_t value = 0; value < Presets::Count; ++value)
         {
             const bool selected = !inherited && preset == value;
-            if (ImGui::Selectable(names[value], selected))
+            if (ImGui::Selectable(Presets::Names[value], selected))
                 *opt = value;
             if (selected)
                 ImGui::SetItemDefaultFocus();
@@ -376,10 +375,7 @@ void RenderModel(Config* config)
     else
     {
         auto& pass = config->DlssNrPassOverrides[selectedPass - 1];
-        if (selectedPass <= 2)
-            NrModelCombo(&pass.preset, true);
-        else
-            ImGui::TextDisabled("NR model: inherits pass 1");
+        NrModelCombo(&pass.preset, true);
         int style = pass.style.has_value() ? std::clamp((int) pass.style.value(), 0, 2) + 1 : 0;
         if (ImGui::Combo("Style", &style, inheritedStyles, IM_ARRAYSIZE(inheritedStyles)))
             pass.style = style ? std::optional<uint32_t>(style - 1) : std::nullopt;
