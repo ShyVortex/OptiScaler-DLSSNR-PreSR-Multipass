@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 int main()
@@ -257,24 +258,26 @@ int main()
                 ModVariant sdliVariant = DetectModVariant(realSdliDll, &sdliName);
                 assert(sdliVariant == ModVariant::Sdli1995 &&
                        "Real sdli1995 version.dll must detect ModVariant::Sdli1995");
-                assert((sdliName == "sdli1995 v0.4.0" || sdliName == "sdli1995") &&
-                       "Detected mod name must be sdli1995 or sdli1995 v0.4.0");
+                // The version comes only from the binary itself; without one the name is the family alone.
+                const std::string stated = ReadEmbeddedModVersion(realSdliDll, ModVariant::Sdli1995);
+                assert(sdliName == (stated.empty() ? std::string("sdli1995") : "sdli1995 v" + stated) &&
+                       "Detected mod name must be the family plus the binary's own version, if any");
 
                 std::printf("  [PASS] Case 9b: Real sdli1995 release binary verified as clean (%s, mod: %s)\n",
                             realSdliDll.string().c_str(), sdliName.c_str());
 
-                // Verify modular 0.4.0 subdirectory layout
+                // Verify modular 0.4.x subdirectory layout
                 auto baseDir = realSdliDll.parent_path();
                 if (std::filesystem::exists(baseDir / "dlssg_sm86"))
                 {
                     assert(std::filesystem::exists(baseDir / "dlssg_sm86" / "backend" / "sm86_backend.dll") &&
-                           "0.4.0 modular layout must contain backend/sm86_backend.dll");
+                           "0.4.x modular layout must contain backend/sm86_backend.dll");
                     assert(std::filesystem::exists(baseDir / "dlssg_sm86" / "kernels" / "fg_kernels.dll") &&
-                           "0.4.0 modular layout must contain kernels/fg_kernels.dll");
+                           "0.4.x modular layout must contain kernels/fg_kernels.dll");
                     assert(std::filesystem::exists(baseDir / "dlssg_sm86" / "runtime" / "nvngx_dlssg.dll") &&
-                           "0.4.0 modular layout must contain runtime/nvngx_dlssg.dll");
+                           "0.4.x modular layout must contain runtime/nvngx_dlssg.dll");
                     std::printf(
-                        "  [PASS] Case 9c: Real sdli1995 0.4.0 modular directory structure verified (%s/dlssg_sm86)\n",
+                        "  [PASS] Case 9c: Real sdli1995 0.4.x modular directory structure verified (%s/dlssg_sm86)\n",
                         baseDir.string().c_str());
                 }
                 break;
@@ -320,10 +323,10 @@ int main()
             f << "Auto was removed in 0.4.0 and sm86_backend.dll is next to the proxy";
         }
         assert(DetectModVariant(sdli040Dll, &name) == ModVariant::Sdli1995);
-        assert(name == "sdli1995 v0.4.0");
+        assert(name == "sdli1995" && "no version field in the binary: family only, never a hardcoded number");
         assert(!HasDynamicMfgSupport(sdli040Dll));
 
-        // 10e: sdli1995 v0.4.0 with ReShade.ini and dlssg_sm86.ini companion files must remain sdli1995 v0.4.0
+        // 10e: sdli1995 0.4.0 with ReShade.ini and dlssg_sm86.ini companion files must remain sdli1995
         auto dummyIni = tempDir / "dlssg_sm86.ini";
         {
             std::ofstream f(dummyIni);
@@ -335,9 +338,84 @@ int main()
             f << "[DLSSG-SM86-75-COMPANION]\nDynamic=0\n";
         }
         assert(DetectModVariant(sdli040Dll, &name) == ModVariant::Sdli1995);
-        assert(name == "sdli1995 v0.4.0");
+        assert(name == "sdli1995");
         assert(!HasDynamicMfgSupport(sdli040Dll));
 
+        // 10f: sdli1995 0.4.1 states its version in the log-session metadata ("version\0" + "0.4.1")
+        auto sdli041Dll = tempDir / "sdli_041.dll";
+        {
+            std::ofstream f(sdli041Dll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Auto was removed in 0.4.0 and sm86_backend.dll is next to the proxy";
+            f << std::string("proxy_sha256\0\0\0version\0"
+                             "0.4.1\0\0\0log\0",
+                             33);
+        }
+        assert(DetectModVariant(sdli041Dll, &name) == ModVariant::Sdli1995);
+        assert(name == "sdli1995 v0.4.1");
+
+        // 10g: a "version" field that is not a version leaves the family alone
+        auto sdliBadVersionDll = tempDir / "sdli_badver.dll";
+        {
+            std::ofstream f(sdliBadVersionDll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Auto was removed in 0.4.0";
+            f << std::string("version\0"
+                             "abc\0 version\0"
+                             "4\0 version\0"
+                             "0.4.\0",
+                             36);
+        }
+        assert(DetectModVariant(sdliBadVersionDll, &name) == ModVariant::Sdli1995);
+        assert(name == "sdli1995");
+
+        // 10h: SilyNoMeta versions are parsed, not matched against a fixed list (ASCII and UTF-16LE)
+        auto silyV036Dll = tempDir / "sily_036.dll";
+        {
+            std::ofstream f(silyV036Dll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Control engine v0.3.6 integrated in the proxy";
+        }
+        assert(DetectModVariant(silyV036Dll, &name) == ModVariant::SilyNoMeta);
+        assert(name == "SilyNoMeta v0.3.6");
+        auto silyWideDll = tempDir / "sily_wide.dll";
+        {
+            std::ofstream f(silyWideDll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            for (char c : std::string("Control engine v0.3.7-2 ready"))
+            {
+                f.put(c);
+                f.put('\0');
+            }
+        }
+        assert(DetectModVariant(silyWideDll, &name) == ModVariant::SilyNoMeta);
+        assert(name == "SilyNoMeta v0.3.7-2");
+
+        // 10i: SilyNoMeta markers without a stated version give the family alone
+        auto silyNoVersionDll = tempDir / "sily_nover.dll";
+        {
+            std::ofstream f(silyNoVersionDll, std::ios::binary);
+            f << "MZ\x90\x00\x03\x00\x00\x00";
+            f << "Exports DLSSG_RequestControl and DLSSG_GetControlStatus";
+        }
+        assert(DetectModVariant(silyNoVersionDll, &name) == ModVariant::SilyNoMeta);
+        assert(name == "SilyNoMeta");
+
+        // 10j: no versioned mod name is hardcoded in the loader
+        {
+            std::ifstream header("OptiScaler/framegen/dlssg/AmpereMfgLoader.h", std::ios::binary);
+            assert(header.is_open() && "run from the repository root");
+            const std::string text((std::istreambuf_iterator<char>(header)), std::istreambuf_iterator<char>());
+            assert(text.find("\"sdli1995 v") == std::string::npos && text.find("\"SilyNoMeta v") == std::string::npos &&
+                   "mod versions must be read from the binary, never written as a fallback");
+        }
+        std::printf("  [PASS] Case 10f-10j: versions read from the binary; family name alone when none is stated\n");
+
+        std::filesystem::remove(sdli041Dll);
+        std::filesystem::remove(sdliBadVersionDll);
+        std::filesystem::remove(silyV036Dll);
+        std::filesystem::remove(silyWideDll);
+        std::filesystem::remove(silyNoVersionDll);
         std::filesystem::remove(dummyReshade);
         std::filesystem::remove(dummyIni);
         std::filesystem::remove(sdli040Dll);

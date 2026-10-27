@@ -1,10 +1,13 @@
 ﻿#pragma once
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace AmpereMfgLoader
 {
@@ -621,6 +624,108 @@ inline bool HasDynamicMfgSupport(const std::filesystem::path& dllPath)
 }
 
 /// Detects which mod variant/fork a dlssg_sm86 binary represents (sdli1995 vs SilyNoMeta).
+/// Reads the version a mod binary states about itself; empty when it states none. Never a guess.
+/// - sdli1995 (0.4.1+): the log-session metadata field "version" (stored as `version\0` + `0.4.1`).
+/// - SilyNoMeta: the text after "Control engine v", ASCII or UTF-16LE.
+inline std::string ParseModVersionToken(const std::string& data, size_t pos, size_t stride)
+{
+    // Accepts N.N[.N[.N]] with an optional -suffix, e.g. 0.4.1 or 0.3.5-5.
+    std::string token;
+    for (size_t i = pos; i < data.size() && token.size() < 24; i += stride)
+    {
+        if (stride == 2 && (i + 1 >= data.size() || data[i + 1] != '\0'))
+            break;
+        const char c = data[i];
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-')
+            token.push_back(c);
+        else
+            break;
+    }
+
+    const size_t dash = token.find('-');
+    const std::string core = token.substr(0, dash);
+    const std::string suffix = dash == std::string::npos ? std::string() : token.substr(dash + 1);
+
+    size_t parts = 0;
+    for (size_t start = 0; start <= core.size(); ++parts)
+    {
+        const size_t dot = std::min(core.find('.', start), core.size());
+        if (dot == start || !std::all_of(core.begin() + start, core.begin() + dot, ::isdigit))
+            return {};
+        start = dot + 1;
+    }
+    if (parts < 2 || parts > 4)
+        return {};
+    if (dash != std::string::npos &&
+        (suffix.empty() || !std::all_of(suffix.begin(), suffix.end(),
+                                        [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; })))
+        return {};
+    return token;
+}
+
+inline std::string ReadEmbeddedModVersion(const std::filesystem::path& dllPath, ModVariant variant)
+{
+    struct Needle
+    {
+        std::string text;
+        size_t stride;
+        bool skipNulls;
+    };
+    std::vector<Needle> needles;
+    if (variant == ModVariant::Sdli1995)
+        needles.push_back({ std::string("version\0", 8), 1, true });
+    else if (variant == ModVariant::SilyNoMeta)
+    {
+        std::string wide;
+        for (char c : std::string("Control engine v"))
+        {
+            wide.push_back(c);
+            wide.push_back('\0');
+        }
+        needles.push_back({ "Control engine v", 1, false });
+        needles.push_back({ wide, 2, false });
+    }
+    else
+        return {};
+
+    std::ifstream file(dllPath, std::ios::binary);
+    if (!file.is_open())
+        return {};
+
+    constexpr size_t bufferSize = 65536;
+    constexpr size_t overlapSize = 128;
+    std::string buffer(bufferSize, '\0');
+    std::string overlap;
+    while (file.read(buffer.data(), bufferSize) || file.gcount() > 0)
+    {
+        const std::string chunk = overlap + std::string(buffer.data(), static_cast<size_t>(file.gcount()));
+        for (const auto& needle : needles)
+        {
+            for (size_t at = chunk.find(needle.text); at != std::string::npos; at = chunk.find(needle.text, at + 1))
+            {
+                size_t pos = at + needle.text.size();
+                while (needle.skipNulls && pos < chunk.size() && chunk[pos] == '\0' &&
+                       pos - at < needle.text.size() + 8)
+                    ++pos;
+                const auto version = ParseModVersionToken(chunk, pos, needle.stride);
+                if (!version.empty())
+                    return version;
+            }
+        }
+        overlap = chunk.size() > overlapSize ? chunk.substr(chunk.size() - overlapSize) : chunk;
+    }
+    return {};
+}
+
+inline std::string ModDisplayName(ModVariant variant, const std::string& version)
+{
+    const char* family = variant == ModVariant::Sdli1995     ? "sdli1995"
+                         : variant == ModVariant::SilyNoMeta ? "SilyNoMeta"
+                                                             : "Unknown";
+    return version.empty() || variant == ModVariant::Unknown ? std::string(family)
+                                                             : std::string(family) + " v" + version;
+}
+
 inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::string* outModName = nullptr)
 {
     std::error_code ec;
@@ -652,10 +757,9 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
     const std::string needleSdli040_2 = "sm86_backend.dll is next to the proxy";
     const std::string needleSdli040_3 = "DlssgMod_GetInfo";
 
-    const std::string needleEngineV0354 = "Control engine v0.3.5-5";
-    const std::string needleEngineV0354_16 = makeUtf16Le(needleEngineV0354);
-    const std::string needleEngineV035 = "Control engine v0.3.5";
-    const std::string needleEngineV035_16 = makeUtf16Le(needleEngineV035);
+    // Any versioned SilyNoMeta control engine ("Control engine v0.3.5-5", "v0.3.6", ...).
+    const std::string needleEngineVersioned = "Control engine v";
+    const std::string needleEngineVersioned16 = makeUtf16Le(needleEngineVersioned);
     const std::string needleControlEngine = "Control engine";
     const std::string needleControlEngine16 = makeUtf16Le(needleControlEngine);
 
@@ -680,7 +784,6 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
     bool isSily = false;
     bool isSdli = false;
     bool isSdli040 = hasModular040;
-    std::string detectedName = hasModular040 ? "sdli1995 v0.4.0" : "Unknown";
 
     std::ifstream file(dllPath, std::ios::binary);
     if (file.is_open())
@@ -699,22 +802,13 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
             {
                 isSdli = true;
                 isSdli040 = true;
-                detectedName = "sdli1995 v0.4.0";
                 break;
             }
 
-            if (chunk.find(needleEngineV0354) != std::string::npos ||
-                chunk.find(needleEngineV0354_16) != std::string::npos)
+            if (chunk.find(needleEngineVersioned) != std::string::npos ||
+                chunk.find(needleEngineVersioned16) != std::string::npos)
             {
                 isSily = true;
-                detectedName = "SilyNoMeta v0.3.5-5";
-                break;
-            }
-            if (chunk.find(needleEngineV035) != std::string::npos ||
-                chunk.find(needleEngineV035_16) != std::string::npos)
-            {
-                isSily = true;
-                detectedName = "SilyNoMeta v0.3.5";
                 break;
             }
             else if (!isSily && (chunk.find(needleControlEngine) != std::string::npos ||
@@ -732,7 +826,6 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
                                  chunk.find(needleSilyNoMeta16) != std::string::npos))
             {
                 isSily = true;
-                detectedName = "SilyNoMeta";
             }
 
             if (!isSily && (chunk.find(needleSm75Slots) != std::string::npos ||
@@ -751,34 +844,26 @@ inline ModVariant DetectModVariant(const std::filesystem::path& dllPath, std::st
         }
     }
 
-    if (isSdli040)
+    // The name carries a version only when the binary states one; otherwise just the family.
+    const auto setName = [&](ModVariant variant)
     {
         if (outModName)
-            *outModName = "sdli1995 v0.4.0";
-        return ModVariant::Sdli1995;
-    }
+            *outModName = ModDisplayName(variant, ReadEmbeddedModVersion(dllPath, variant));
+        return variant;
+    };
+
+    if (isSdli040)
+        return setName(ModVariant::Sdli1995);
 
     if (isSily)
-    {
-        if (outModName)
-            *outModName = detectedName;
-        return ModVariant::SilyNoMeta;
-    }
+        return setName(ModVariant::SilyNoMeta);
 
     const std::string pathStr = dllPath.string();
     if (isSdli || pathStr.find("sdli1995") != std::string::npos)
-    {
-        if (outModName)
-            *outModName = detectedName.empty() || detectedName == "Unknown" ? "sdli1995" : detectedName;
-        return ModVariant::Sdli1995;
-    }
+        return setName(ModVariant::Sdli1995);
 
     if (pathStr.find("SilyNoMeta") != std::string::npos)
-    {
-        if (outModName)
-            *outModName = "SilyNoMeta";
-        return ModVariant::SilyNoMeta;
-    }
+        return setName(ModVariant::SilyNoMeta);
 
     if (outModName)
         *outModName = "Unknown";
