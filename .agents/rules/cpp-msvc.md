@@ -28,6 +28,7 @@ description: C++ and MSVC compilation standards for OptiScaler
      clang-format --dry-run --Werror <modified_files>
      ```
    - Always ensure `clang-format -i` did not strip the UTF-8 BOM; restore the BOM immediately if removed.
+   - **Pinned Version**: CI (`.github/workflows/clang-format.yml`) runs clang-format **23.1.3** from PyPI. Use clang-format 23.x locally; other major versions (e.g. 20, used by upstream) format some constructs differently and will fail CI. To match CI exactly: `pip install clang-format==23.1.3` in a venv. Files arriving from upstream merges may need `clang-format -i` before they pass.
 
 ## Mandatory Pre-Commit / Pre-Push Gate
 
