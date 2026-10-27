@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "DlssNr_Dx12_ModelState.h"
 #include <dlssnr/DlssNr_GpuSubmission.h>
+#include "DlssNr_ResidualHistory.h"
 #include <dlssnr/DlssNr_Placement.h>
 #include <dlssnr/DlssNr_FinishedReady.h>
 #include <dlssnr/PassProfiles.h>
@@ -218,6 +219,7 @@ struct DlssNr_Dx12::State
             ID3D12Resource* accumulatedEdit[2] {};
             unsigned accumulatedIndex = 0;
             bool accumulationReadable = false, accumulationValid = false;
+            DlssNr::ResidualHistory::State history;
             bool smallReadable = false, reset = true, failed = false;
             bool rayReconstruction = false, finishedPicture = false, privateRr = false;
             DlssNr::PrivateUpscaler backend = DlssNr::PrivateUpscaler::DLSS;
