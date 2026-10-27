@@ -20,6 +20,7 @@ The version/hash/size gate and fixed import offset were already removed in v0.8.
 - Actual model creation/evaluation errors stop that context until Retry; they are runtime results, not file-version exclusions. Exposure/capture budgets limit inspection work and do not block model loading.
 - NR exports and parseable import tables remain necessary. Differing wrappers for duplicate imports of the same API remain an explicit unsupported case; the backend cannot preserve multiple distinct chains with one adapter.
 - Native Vulkan still uses its driver path. Optional MFG instruction-patch signatures remain necessary to locate actual patch sites; they are separate from NR loading.
+- Added after DLSS Unlocked #60 (fork, 2026-10-27): FAIL_OutOfDate is excluded from the "any failure" fallback. It means the driver lacks NR support, not a loader rejection; forcing the direct runtime past it hung the GPU until reboot on driver 576.88. Every other failure still falls back. On native Windows NR is also kept off below driver 610.88 (616.64+ recommended). This is a driver check, not the removed NR DLL version/hash/size gate. See docs/issues/NR/NR-OLD-DRIVER-HANG.md.
 
 ## Validation
 
