@@ -77,6 +77,29 @@ UTF-8 BOM, and match their `.hlsl` sources.
   of each control. **Pending in-game DX12 check**: WorkingScale < 100% (no flicker, correct motion), halo
   sliders, and "Reject stale history" with RR.
 
+## In-Game Results (TLOU2, DX12, v0.9.74-pre3, 2026-10-27)
+- "Generate model before upscale" (Pre-SR): works as expected.
+- Finished-picture gate under External FG: works (see `NR-FINISHED-PICTURE-EXTERNAL-FG-GATE.md`).
+- **Open: "Generate before upscale, apply after upscale" colour noise.**
+  - Symptoms: the picture is darkened with magenta/green noise.
+    - v0.9.73 was reported clean, pre1 showed blue-ish artifacts, and pre2/pre3 show the magenta/green noise.
+    - It is identical with the private DLSS, XeSS and FSR upscalers, and toggling FG has no effect.
+  - Static audit found no code delta on this path:
+    - v0.9.73 (`9f463e72`) is NR-identical to `main`.
+    - In TLOU2 the RR residual block, which holds the only `DeferredSr` change, is inactive (no game RR guides).
+    - Motion scale is 1:1 and guides are not matched.
+    - Encode/apply shader modes are unchanged; the blob differs only by the additive halo and edge-aware code.
+  - The test used Intensity 2.00 and Local tone 2.00. No same-INI A/B against v0.9.73 has been run yet.
+  - Paper white swung between 0.25x and 2000x in the log.
+  - Deferred to wider testing; not a merge blocker by the maintainer's decision.
+- **Unconfirmed: halo sliders.**
+  - The user saw no visible effect.
+  - Dispatch, `passClamp` allocation, resolve consumption and the compiled mode-13 code are verified, and no
+    allocation or dispatch errors were logged.
+  - The filter only lifts NR-darkened rims next to 1-3+ stop luminance edges, so dim scenes may show nothing.
+    No log line confirms that it dispatches.
+- Not yet tested in game: WorkingScale < 100% with MatchGuides, "Reject stale history" with RR, FF7 format bouncing.
+
 ## Notes
 - `.agents/rules/optiscaler-architecture.md` invariants preserved.
 - Medium/high-risk items remain for future file-by-file review.

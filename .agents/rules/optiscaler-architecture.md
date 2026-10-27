@@ -120,15 +120,27 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - Associated test: `tests/nr_format_bouncing_unit.cpp`.
      - **DLSS 5 Lightweight Model ("Crazy Cuckoo Small FP8") Support & Preset Integration**:
        - `Config.h`: `DlssNrPreset` (defaults to `0` / Auto) and per-pass `NrPassOverrides::preset`.
-       - `OptiScaler/dlssnr/DlssNr_MenuControls.cpp`: In-game ImGui `Model preset` combo selector:
-         - Pass 1: Auto (`0`, maps to Performance / Small FP8 in 310.9), Quality (`1`, "Honest Tench", full-precision teacher model), Performance (`2`, "Crazy Cuckoo Small FP8", lightweight FP8 Tensor Core model with up to +40% faster inference).
-         - Pass 2..10: Inherited combo (Auto / inherit Pass 1, Quality, Performance).
+       - `OptiScaler/dlssnr/DlssNr_MenuControls.cpp`: In-game ImGui `NR model` combo selector for **every** pass (never gate it with `selectedPass <= 2`):
+         - Labels come from `OptiScaler/dlssnr/DlssNr_MenuPresets.h` (upstream wording): Automatic (`0`, maps to the lightweight model in 310.9), Original (`1`, "Honest Tench", full-precision teacher model), Optimized (`2`, "Crazy Cuckoo Small FP8", lightweight FP8 model with up to +40% faster inference). Out-of-range values show "Unavailable preset".
+         - Pass 2..10 add "Inherit pass 1" (`Pass{N}Preset=auto`); an explicit `Pass{N}Preset=0` is Automatic, not inherit.
+         - Associated test: `tests/nr_model_preset_menu_unit.cpp`.
        - `OptiScaler/dlssnr/PassProfiles.h`: Generalized `extra.preset` inheritance across all passes without legacy clamping to `pass <= 2`.
        - `OptiScaler/Config.cpp`: Generalized `Pass{}Preset` loading and saving across multi-pass layers.
        - `OptiScaler/shaders/dlssnr/DlssNr_Dx12_Models.cpp`: `TuningMatchesFeature` using `operator==` on `ModelSettings` to detect preset changes and trigger guarded context recreation.
        - `OptiScaler.ini`: Documented `Preset`, `Pass2Preset`, `Pass3Preset` with reverse-engineered model weights and performance characteristics.
        - Documentation: `docs/issues/NR/NR-LIGHTWEIGHT-MODEL-PRESET-SUPPORT.md`.
        - Associated test: `tests/nr_model_preset_unit.cpp`.
+     - **Finished-Picture NR Gate Under External FG / DLSS-G (verified in-game, TLOU2)**:
+       - Finished-picture NR is skipped at runtime when `externalFrameGeneration || activeFgOutput == FGOutput::DLSSG` (`DlssNr_Dx12.cpp`, `DlssNr_Dx12_FinishedCompose.cpp`, `wrapped_swapchain.cpp`); editing the presented image would race the generated frames. Never remove these gates.
+       - The skip must never be silent: `OptiScaler/dlssnr/DlssNr_Placement.h` `ResolveFinishedPictureGate` drives `DlssNr_Menu.cpp`, which disables the "Apply NR to the finished picture" checkbox while blocked (it can still be turned off), shows the amber `FinishedPictureBlockedWarning` / `FinishedPictureNotAppliedWarning`, and appends "(not applied: finished picture blocked by frame generation)" to the Running status.
+       - Documentation: `docs/issues/NR/NR-FINISHED-PICTURE-EXTERNAL-FG-GATE.md`.
+       - Associated test: `tests/nr_finished_picture_gate_unit.cpp`.
+     - **DX12 Parity for Upstream 6125a75 NR Filters (merge guard; in-game effect still under wider testing)**:
+       - Halo suppression (`DlssNrMode_SuppressHalo` into `nr.passClamp` in `DlssNr_Dx12_Run.cpp`, `SetQualityConstants` in `DlssNr_Dx12_Encode.cpp`), "Reject stale history" (`OptiScaler/shaders/dlssnr/DlssNr_ResidualHistory.h` in `DlssNr_Dx12_DeferredSr.cpp`) and MatchGuides / RenderMotionScale (`nr.depthSmall` / `nr.motionSmall`, shared `DlssNrModelMotionScale` in `DlssNr_Common.h`) must stay wired on DX12, not Vulkan only.
+       - Port future upstream NR changes hunk by hunk, never whole files: upstream's `DlssNr_Dx12_Models.cpp`, `_ModelState.h`, `_DeferredSr.cpp` and `_State.h` drop the `altSurfaces` cache, the contextual post-SR driver error and the fork's private-creation lifetime contracts.
+       - `passClamp` allocation for the halo filter (`DlssNr_Common::NeedsPassClamp`) only creates a texture; it must never rebuild models. `depthSmall` / `motionSmall` stay **out** of the `altSurfaces` swap set (guide formats do not follow colour format) and are released only on resolution/placement change or `ReleaseResources()`.
+       - Documentation: `docs/issues/NR/NR-UPSTREAM-MERGE-6125A75.md`.
+       - Associated tests: `tests/nr_halo_dx12_unit.cpp`, `tests/nr_history_rejection_unit.cpp`, `tests/nr_motion_scale_unit.cpp`, `tests/nr_ini_keys_unit.cpp`.
 
 7. **Preservation of NVSmooth30 (RTX 30 Smooth Motion Unlocker) Integration Across Upstream Merges**:
    - Upstream author (`wilsjo2`) does not maintain the NVSmooth30 proxy integration.

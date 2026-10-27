@@ -44,4 +44,5 @@ The real defect is that the skip is silent. The option could be enabled, and the
   - that the menu uses it for the checkbox, warning, tooltip and status line;
   - that every runtime gate site is still present.
 - All existing portable NR / MFG unit tests pass; clang-format 23.1.3 / 23.1.4 clean; UTF-8 BOM present.
-- Pending: in-game check that the warning appears with External FG on and that the option can be turned off.
+- In-game (TLOU2, v0.9.74-pre3, External FG): confirmed by the user on 2026-10-27. The checkbox is disabled and
+  the amber warning is shown while frame generation is active.
