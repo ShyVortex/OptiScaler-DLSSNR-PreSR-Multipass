@@ -101,10 +101,28 @@ SilyNoMeta is `SilyNoMeta v0.3.5-5` (TLOU Part I) or `v0.3.5-4` (the local `dlss
   - `ampere_*`, `turing_*`, `dlssg_sm86_*`, `streamline_*` (except the Windows-only `streamline_active_plugin_smoke`);
   - `xemfg_menu_exclusion`, `nr_driver_gate`, `xefg_menu_multiplier_queue`.
 - clang-format 23 clean; UTF-8 BOM present.
-- **Pending:**
-  - An MSVC build.
-  - In game with 0.4.1:
-    - Ampere and, if available, Turing generate frames;
-    - the menu shows "running (sdli1995 v0.4.1)";
-    - the OptiScaler log reports `hasSm75Support: true`;
-    - `dlssg_sm86\logs\dlssg_sm86.log` has no `configuration_invalid`.
+- **In game:** confirmed working with 0.4.1 on Ampere (RTX 3080 Ti Laptop) by the maintainer on 2026-10-27, before
+  the merge into `main` (PR #31). Turing hardware has not been tested in game; it is covered by the unit tests and the
+  real-binary checks.
+
+## 6. Follow-up: Options 0.4.1 No Longer Reads (`a503774b`, `f2668edb`, on `main`)
+Two RTX 20/30 options still appeared to work with 0.4.1, although that build ignores them:
+- **Hardware Bilinear:** `[Compatibility] HardwareBilinear` is a removed key and is not read.
+  - The checkbox is now greyed out, with a tooltip saying why, when the loaded mod is sdli1995 and **states**
+    0.4.1 or newer.
+  - The saved value is never reset, and the companion INI keeps writing it (rule §4, dual 0.3.x / 0.4.x INI).
+- **Preset `Auto`:** 0.4.1 runs `[DLSSG] Preset=Auto` as `A`.
+  - The combo's first entry reads "Auto (runs as A in this build)" for the same builds.
+  - The stored value and the INI stay `Auto`.
+
+Supporting changes:
+- `AmpereMfgLoader::Status` gains `ModVersion`, the version the binary states, which `DetectModVariant` also returns.
+- `AmpereMfgStatusText::CompareModVersion` orders dotted versions numerically.
+
+Builds that state no version (sdli1995 0.4.0 and older), SilyNoMeta and an unloaded mod behave as before. An
+unversioned sdli1995 build can't be told apart from 0.4.0, which still reads both keys.
+
+Tests:
+- `ampere_mfg_status_text_unit` (11/11): version ordering, the lock matrix, menu wiring with no write while locked,
+  the Preset label, and an unchanged INI.
+- `dynamic_mfg_detection_unit`: the version out-parameter, from synthetic and real binaries.
