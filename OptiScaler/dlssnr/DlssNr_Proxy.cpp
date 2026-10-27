@@ -4,6 +4,7 @@
 #include "DlssNr_NgxDiagnostics.h"
 #include "DlssNr_CompatibilityRuntime.h"
 #include "DlssNr_PrivateCreation.h"
+#include "DlssNr_DriverGate.h"
 
 #include <Logger.h>
 #include <proxies/NVNGX_Proxy.h>
@@ -136,6 +137,13 @@ unsigned int Context::Impl::Prepare(ID3D12GraphicsCommandList* cmdList, ID3D12De
     Collect();
     if (state.failed || !cmdList || !device || !width || !height)
         return 0;
+    if (DriverGate::Blocked())
+    {
+        // Normally unreachable: startup turns NR off. Never let a too-old driver reach model creation.
+        state.failed = true;
+        LOG_ERROR("DLSS-NR (driver): {}", DriverGate::BlockedMessage(DriverGate::DetectedVersion()));
+        return (unsigned int) NVSDK_NGX_Result_FAIL_OutOfDate;
+    }
     if ((!NVNGXProxy::IsDx12Inited() && !NVNGXProxy::InitDx12(device)) || !Context::Available())
         return 0;
     // A reset/destruction before submission invalidates only this creation generation.

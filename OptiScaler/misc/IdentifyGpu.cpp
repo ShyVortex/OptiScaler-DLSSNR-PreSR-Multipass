@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "IdentifyGpu.h"
 
 #include <magic_enum.hpp>
@@ -273,6 +273,14 @@ void IdentifyGpu::queryNvapi(GpuInformation& gpuInfo)
     gpuInfo.nvidiaArchInfo.version = NV_GPU_ARCH_INFO_VER;
     if (getArchInfo && hPhysicalGpu && getArchInfo(hPhysicalGpu, &gpuInfo.nvidiaArchInfo) != NVAPI_OK)
         LOG_ERROR("Couldn't get GPU Architecture");
+
+    auto* getDriverVersion = GET_INTERFACE(NvAPI_SYS_GetDriverAndBranchVersion, o_NvAPI_QueryInterface);
+    NvU32 driverVersion = 0;
+    NvAPI_ShortString branch {};
+    if (getDriverVersion && getDriverVersion(&driverVersion, branch) == NVAPI_OK)
+        gpuInfo.nvidiaDriverVersion = driverVersion;
+    else
+        LOG_WARN("Couldn't get the NVIDIA driver version");
 
     auto* getConnectedDisplayIds = GET_INTERFACE(NvAPI_GPU_GetConnectedDisplayIds, o_NvAPI_QueryInterface);
     NvU32 displayCount = 0;

@@ -51,6 +51,7 @@
 #include <magic_enum.hpp>
 #include <version_check.h>
 #include <misc/IdentifyGpu.h>
+#include <dlssnr/DlssNr_DriverGate.h>
 #include <sha1/sha1.hpp>
 
 static std::vector<HMODULE> _asiHandles;
@@ -1738,6 +1739,26 @@ void CheckMemoryForProxies()
 DWORD WINAPI getGpuInfo(LPVOID hModuleVoid)
 {
     auto primaryGpu = IdentifyGpu::getPrimaryGpu();
+
+    // NR needs driver 610.88+ on Windows (616.64+ recommended). A volatile off keeps every NR path disabled
+    // without rewriting the user's INI, and survives profile reloads (set_from_config never replaces a value
+    // that is already set).
+    if (primaryGpu.vendorId == VendorId::Nvidia)
+    {
+        const auto verdict =
+            DlssNr::DriverGate::Resolve(State::Instance().isRunningOnLinux, primaryGpu.nvidiaDriverVersion);
+        DlssNr::DriverGate::Publish(verdict, primaryGpu.nvidiaDriverVersion);
+        if (verdict == DlssNr::DriverGate::Verdict::TooOld)
+        {
+            Config::Instance()->DlssNrEnabled.set_volatile_value(false);
+            LOG_WARN("DLSS-NR disabled: {}", DlssNr::DriverGate::BlockedMessage(primaryGpu.nvidiaDriverVersion));
+        }
+        else if (verdict == DlssNr::DriverGate::Verdict::Supported)
+        {
+            LOG_INFO("DLSS-NR: NVIDIA driver {} supports Neural Rendering",
+                     DlssNr::DriverGate::FormatVersion(primaryGpu.nvidiaDriverVersion));
+        }
+    }
 
     // We don't yet know if the GPU supports FSR 4 so hook any AMD
     if (primaryGpu.vendorId == VendorId::AMD)
