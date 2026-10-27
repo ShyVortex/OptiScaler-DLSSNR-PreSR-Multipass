@@ -3428,6 +3428,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ShowHelpMarker(details.c_str());
                 if (headline != AmpereMfgStatusText::Headline::NotRunning)
                     ImGui::TextWrapped("%s", AmpereMfgStatusText::MultiplierText(status));
+                if (AmpereMfgStatusText::DriverBelowFloor(onLinux, primaryGpu.nvidiaDriverVersion))
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                    ImGui::TextWrapped("%s",
+                                       AmpereMfgStatusText::DriverFloorText(primaryGpu.nvidiaDriverVersion).c_str());
+                    ImGui::PopStyleColor();
+                }
             }
 
             // Ampere MFG Mode combo (External / Internal)
@@ -3579,10 +3586,11 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
 
             // HardwareBilinear checkbox
             bool hwBilinear = config->FGDLSSGAmpereMfgHardwareBilinear.value_or_default();
-            if (ImGui::Checkbox("Hardware Bilinear (approximate sampling)##sm86", &hwBilinear))
+            if (ImGui::Checkbox(AmpereMfgStatusText::HardwareBilinearLabel, &hwBilinear))
                 config->FGDLSSGAmpereMfgHardwareBilinear = hwBilinear;
             ShowHelpMarker("SM86 (RTX 30 series) only. 0 = exact output (default); 1 = optional approximate\n"
                            "hardware bilinear sampling for ~2-4% additional GPU latency reduction.\n"
+                           "sdli1995 0.4.1 and newer no longer read this setting; it has no effect there.\n"
                            "Save Settings and restart to apply.");
 
             // Dynamic Multi-Frame Generation (DynamicMFG & DynamicTargetFPS)
