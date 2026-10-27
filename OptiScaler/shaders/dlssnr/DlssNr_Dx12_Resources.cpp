@@ -284,9 +284,10 @@ auto DlssNr_Dx12::State::ReleaseResources() -> void
     std::fill(std::begin(nr.passCreateFailed), std::end(nr.passCreateFailed), false);
     modelRunning = false;
 
-    for (auto** resource :
-         { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.activeColor, &nr.colorSmall })
+    for (auto** resource : { &nr.output, &nr.passScratch, &nr.passClamp, &nr.colorCopy, &nr.hdrCopy, &nr.activeColor,
+                             &nr.colorSmall, &nr.depthSmall, &nr.motionSmall })
         ParkNrResource(*resource);
+    nr.loggedGuideMatch = false;
 
     ParkNrResource(nr.altSurfaces.output);
     ParkNrResource(nr.altSurfaces.passScratch);

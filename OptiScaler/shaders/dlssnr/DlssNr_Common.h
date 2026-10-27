@@ -261,6 +261,51 @@ enum DlssNrResidualMode : uint32_t
     DlssNrResidualMode_Apply = 1,      // base + delta * TransferStrength, after RR+SR
 };
 
+// How the game's motion-vector scale reaches the model (non-spatial path). The game's scale gives pixels of
+// the size the vectors are measured in: the render size for low-resolution vectors, the output size
+// otherwise. The model reads the scale in pixels of the motion texture it is handed -- the working-size
+// resample when guides are matched, the game's own region otherwise -- so the conversion is "texture the
+// model reads / size the vectors are measured in". RenderMotionScale=false keeps the old working size /
+// frame size rule for an A/B, and an axis whose reference size is unknown (0) falls back to that rule.
+struct DlssNrMotionScaleInput
+{
+    bool renderMotionScale = true;
+    bool matchedGuides = false;
+    bool lowResVectors = false;
+    uint32_t workW = 0, workH = 0;     // model working size
+    uint32_t guideW = 0, guideH = 0;   // the game's motion region
+    uint32_t frameW = 0, frameH = 0;   // NR frame size
+    uint32_t renderW = 0, renderH = 0; // render subrect
+    uint32_t outputW = 0, outputH = 0; // upscaler output
+};
+
+struct DlssNrMotionScale
+{
+    float x = 1.0f, y = 1.0f;
+    uint32_t textureW = 0, textureH = 0;     // motion texture size the model reads
+    uint32_t referenceW = 0, referenceH = 0; // size the vectors are measured in
+};
+
+inline DlssNrMotionScale DlssNrModelMotionScale(const DlssNrMotionScaleInput& in)
+{
+    const auto axis = [&](uint32_t work, uint32_t guide, uint32_t frame, uint32_t render, uint32_t output,
+                          uint32_t& texture, uint32_t& reference)
+    {
+        reference = !in.renderMotionScale ? frame : in.lowResVectors ? render : output;
+        texture = !in.renderMotionScale || in.matchedGuides ? work : guide;
+        if (reference == 0)
+        {
+            reference = frame;
+            texture = work;
+        }
+        return reference != 0 ? (float) texture / (float) reference : 1.0f;
+    };
+    DlssNrMotionScale out;
+    out.x = axis(in.workW, in.guideW, in.frameW, in.renderW, in.outputW, out.textureW, out.referenceW);
+    out.y = axis(in.workH, in.guideH, in.frameH, in.renderH, in.outputH, out.textureH, out.referenceH);
+    return out;
+}
+
 class DlssNr_Common
 {
   public:

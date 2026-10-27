@@ -441,7 +441,7 @@ bool ModelVk::Impl::Evaluate(VkCommandBuffer cmdBuffer, const VkImageInfo& colou
     // magnitudes rescaled -- the contract the D3D12 path had before MatchGuides, and it flickered at
     // every scale below 100% there. Same fix, same shader mode: resample both to the working size
     // and describe them as a full zero-origin region. The vectors keep the game's units; the scale
-    // below converts them. Mirrors DlssNr_Dx12_Run.cpp.
+    // below converts them. Same rule as DlssNr_Dx12_Run.cpp.
     bool matchedGuides = false;
     if (reduced && workWidth < width && cfg.DlssNrMatchGuides.value_or_default() && state.depthSmall.Valid() &&
         state.motionSmall.Valid())
@@ -488,26 +488,19 @@ bool ModelVk::Impl::Evaluate(VkCommandBuffer cmdBuffer, const VkImageInfo& colou
     // The model
     // -----------------------------------------------------------------------------------------
 
-    // The game's scale turns its vectors into pixels of the size they are measured in: the render
-    // size for low-resolution vectors, the output size otherwise. The model reads the scale in
-    // pixels of the motion texture it is handed, so the conversion is "texture the model reads /
-    // size the vectors are measured in": the matched resample when there is one, the game's own
-    // region otherwise (which makes that case the game's own scale). Same rule as the D3D12 path;
-    // RenderMotionScale=false keeps the old working size / frame size conversion for an A/B.
+    // Shared with the D3D12 path; see DlssNrModelMotionScale.
     float mvX = frame.MvScaleX, mvY = frame.MvScaleY;
     const bool renderMotionScale = cfg.DlssNrRenderMotionScale.value_or_default();
-    const uint32_t mvGuideW = !renderMotionScale ? workWidth : matchedGuides ? workWidth : guides.motion.width;
-    const uint32_t mvGuideH = !renderMotionScale ? workHeight : matchedGuides ? workHeight : guides.motion.height;
-    const uint32_t mvRefW = !renderMotionScale ? width : frame.MotionVectorsLowResolution ? renderWidth : outputWidth;
-    const uint32_t mvRefH = !renderMotionScale                 ? height
-                            : frame.MotionVectorsLowResolution ? renderHeight
-                                                               : outputHeight;
+    const auto motionScale =
+        DlssNrModelMotionScale({ renderMotionScale, matchedGuides, frame.MotionVectorsLowResolution, workWidth,
+                                 workHeight, guides.motion.width, guides.motion.height, width, height, renderWidth,
+                                 renderHeight, outputWidth, outputHeight });
     if (spatial.active)
         mvX = mvY = 1.0f; // packed vectors already carry displacement in packed pixels
     else
     {
-        mvX *= mvRefW ? (float) mvGuideW / mvRefW : 1.0f;
-        mvY *= mvRefH ? (float) mvGuideH / mvRefH : 1.0f;
+        mvX *= motionScale.x;
+        mvY *= motionScale.y;
     }
     ImageVk* answer = &state.output;
     ImageVk* input = modelInput;
@@ -703,12 +696,12 @@ bool ModelVk::Impl::Evaluate(VkCommandBuffer cmdBuffer, const VkImageInfo& colou
         if (!spatial.active)
             LOG_INFO("DLSS-NR Vulkan model motion scale {:.1f} x {:.1f}: game scale {} x {} measured against {}x{} "
                      "({}), motion texture {}x{} ({}), model {}x{}",
-                     mvX, mvY, frame.MvScaleX, frame.MvScaleY, mvRefW, mvRefH,
+                     mvX, mvY, frame.MvScaleX, frame.MvScaleY, motionScale.referenceW, motionScale.referenceH,
                      !renderMotionScale                 ? "frame size, RenderMotionScale=false"
                      : frame.MotionVectorsLowResolution ? "render size, low-resolution vectors"
                                                         : "output size",
-                     mvGuideW, mvGuideH, matchedGuides ? "matched to the working size" : "the game's region", workWidth,
-                     workHeight);
+                     motionScale.textureW, motionScale.textureH,
+                     matchedGuides ? "matched to the working size" : "the game's region", workWidth, workHeight);
     }
     state.spatialRan = spatial.active;
     return true;
