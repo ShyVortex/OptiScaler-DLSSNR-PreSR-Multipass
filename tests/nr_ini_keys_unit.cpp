@@ -75,6 +75,12 @@ int main()
               section.find("5 Edge-aware") != std::string::npos,
           "Test 4: the 6125a75 keys and Transfer 5 (Edge-aware) are documented");
 
+    // PassProfiles applies an explicit Pass{N}Preset/Style of 0 as preset 0 / standard; only auto inherits.
+    Check(section.find(";   Preset: auto = inherit pass 1, 0 = Automatic") != std::string::npos &&
+              section.find(";   Style: auto = inherit pass 1, 0 = standard") != std::string::npos &&
+              section.find("0 = auto (inherit pass 1)") == std::string::npos,
+          "Test 5: per-pass Preset/Style comments say only auto inherits pass 1");
+
     std::printf("%s (%d failure%s)\n", failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }
