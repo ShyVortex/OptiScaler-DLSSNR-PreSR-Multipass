@@ -1,5 +1,12 @@
 # External MFG Startup Gate: graceful no-op for game-owned FG
 
+> **Correction (2026-10-27, DLSS Unlocked #58):** the root cause below is wrong. The
+> `FGHooks::CreateSwapChainForHwnd Can't init FG Feature or invalid FGOutput setting!` warning was never fatal. In
+> the v0.9.72 log the wrapped swapchain is created right after it, and the game was still failing after this change
+> (`9f463e7` test build). The early return added in `17fe1221` is kept because it is correct and harmless. It only
+> stops OptiScaler from attempting internal FG under External mode; it did not fix the launch. See
+> `FG-WRC-GENERATIONS-EXTERNAL-MFG.md` for the full analysis.
+
 ## 1. Overview
 
 This defect was reported as a startup failure when external frame generation was enabled for the Ampere SM86 MFG path. The underlying issue was not a user misconfiguration, but a startup guard that treated the intentionally external path as an invalid internal FG configuration and aborted swapchain creation.
