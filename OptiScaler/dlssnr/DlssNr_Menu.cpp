@@ -102,8 +102,14 @@ static void RenderStatus(Config* config)
     {
         const auto ms = vulkan ? vk.gpuTime : dx12.gpuTime;
 
-        // Hiding the edit keeps model evaluation running.
-        const char* runSuffix = !config->DlssNrApplyModel.value_or_default() ? "  (model running, edit hidden)" : "";
+        // Hiding the edit keeps model evaluation running. A blocked finished picture discards the edit.
+        const bool finishedSkipped = ResolveFinishedPictureGate(config->DlssNrFinishedPicture.value_or_default(),
+                                                                State::Instance().externalFrameGeneration,
+                                                                State::Instance().activeFgOutput == FGOutput::DLSSG)
+                                         .notApplied;
+        const char* runSuffix = finishedSkipped ? "  (not applied: finished picture blocked by frame generation)"
+                                : !config->DlssNrApplyModel.value_or_default() ? "  (model running, edit hidden)"
+                                                                               : "";
 
         // Keep the running indicator green, using the theme's HDR-adjusted text brightness.
         const auto textColor = ImGui::GetStyleColorVec4(ImGuiCol_Text);
@@ -192,14 +198,19 @@ void RenderMenu(Config* config, float menuResScale)
                               : denoiseFirstOn   ? "Denoise first decides the placement while it is on."
                                                  : "Run NR before the game's upscaler, including RR.");
 
+        const auto finishedGate = ResolveFinishedPictureGate(finished, State::Instance().externalFrameGeneration,
+                                                             State::Instance().activeFgOutput == FGOutput::DLSSG);
+        ImGui::BeginDisabled(!finishedGate.canToggle);
         if (PipelineUi::CheckboxWrapped("Apply NR to the finished picture", &finished, toggleWidth))
         {
             config->DlssNrFinishedPicture = finished;
             DlssNr::RetryAfterFailure();
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip(
-                "Apply NR after game effects and HUD. Early generation carries the edit through a separate upscaler.");
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip(finishedGate.blocked ? FinishedPictureBlockedWarning
+                                                   : "Apply NR after game effects and HUD. Early generation carries "
+                                                     "the edit through a separate upscaler.");
 
         placement = ResolvePlacement(config->DlssNrRunBeforeSr.value_or_default(),
                                      config->DlssNrDeferredDlss.value_or_default(),
@@ -217,6 +228,16 @@ void RenderMenu(Config* config, float menuResScale)
             ImGui::SetTooltip(
                 "Keep the game's SR/RR input clean and upscale only the NR edit with a separate non-RR backend."
                 "\nApply after upscale, or at presentation when finished-picture mode is enabled.");
+        if (finishedGate.blocked)
+        {
+            // Same amber as "Presets are overridden externally", scaled by the theme's HDR text brightness.
+            const auto textColor = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(textColor.x, textColor.y * 0.8f, 0.0f, textColor.w));
+            ImGui::TextWrapped("%s", FinishedPictureBlockedWarning);
+            if (finishedGate.notApplied)
+                ImGui::TextWrapped("%s", FinishedPictureNotAppliedWarning);
+            ImGui::PopStyleColor();
+        }
         ImGui::Spacing();
 
         // Denoise first. Written for people who did not design it: what it does, what it costs, what each knob is.
