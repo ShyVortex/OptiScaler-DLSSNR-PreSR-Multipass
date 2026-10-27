@@ -3525,7 +3525,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 "Save Settings and restart to apply.");
 
             // UI Recomposition / FG Lite Preset combo (0.3.0 - 0.4.0)
-            const char* presetOptions[] = { "Auto (Game / Profile default)", "Preset A (Force UI recomposition off)",
+            const char* presetOptions[] = { AmpereMfgStatusText::PresetAutoLabel(status),
+                                            "Preset A (Force UI recomposition off)",
                                             "Preset B (Force UI recomposition on)",
                                             "Preset C (FG Lite: fast / 30-50% less GPU time)" };
             std::string currentPreset = config->FGDLSSGAmpereMfgPreset.value_or("Auto");
@@ -3539,7 +3540,8 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 config->FGDLSSGAmpereMfgPreset = std::string(storedPresetOptions[presetIdx]);
             }
             ShowHelpMarker("Preset for UI / HUD recomposition / FG Lite:\n"
-                           "Auto: Let the game or driver profile decide (default).\n"
+                           "Auto: Let the game or driver profile decide (default). sdli1995 0.4.1 and newer run "
+                           "Auto as A.\n"
                            "A: Force UI recomposition off.\n"
                            "B: Force UI recomposition on for cleaner HUD inside generated frames (only takes effect if "
                            "game provides HUD-less plane).\n"

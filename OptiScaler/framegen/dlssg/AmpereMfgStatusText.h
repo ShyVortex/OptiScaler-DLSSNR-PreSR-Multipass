@@ -114,6 +114,14 @@ inline bool IsSdli1995AtLeast041(const AmpereMfgLoader::Status& status)
 
 inline bool HardwareBilinearHonoured(const AmpereMfgLoader::Status& status) { return !IsSdli1995AtLeast041(status); }
 
+// 0.4.1 removed [DLSSG] Preset=Auto and runs it as A; the stored value stays "Auto" for builds that still honour it.
+inline bool PresetAutoRunsAsA(const AmpereMfgLoader::Status& status) { return IsSdli1995AtLeast041(status); }
+
+inline const char* PresetAutoLabel(const AmpereMfgLoader::Status& status)
+{
+    return PresetAutoRunsAsA(status) ? "Auto (runs as A in this build)" : "Auto (Game / Profile default)";
+}
+
 inline constexpr const char* HardwareBilinearIgnoredText =
     "sdli1995 0.4.1 and newer no longer read this setting, so it is locked for this build.\n"
     "Your saved value is kept and applies again with builds that still read it.";

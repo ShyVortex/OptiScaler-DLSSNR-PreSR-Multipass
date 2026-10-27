@@ -23,6 +23,8 @@
 // 9. HardwareBilinear is locked only for sdli1995 that states 0.4.1 or newer; 0.4.0 / no version / SilyNoMeta /
 //    not loaded keep it enabled.
 // 10. The menu greys the checkbox, never writes the value while locked, and explains why.
+// 11. The Preset combo's Auto entry says it runs as A on sdli1995 0.4.1+, while the stored value and the companion
+//     INI stay "Auto".
 
 using AmpereMfgLoader::ModVariant;
 using AmpereMfgLoader::Status;
@@ -177,6 +179,20 @@ int main()
            "the saved value is never reset");
     std::puts("Test 10 PASS: menu locks HardwareBilinear without touching the saved value");
 
-    std::puts("All Ampere MFG status text tests passed (10/10).");
+    // Test 11
+    assert(std::string(PresetAutoLabel(v041)) == "Auto (runs as A in this build)");
+    assert(std::string(PresetAutoLabel(v040)) == "Auto (Game / Profile default)");
+    assert(std::string(PresetAutoLabel(unversioned)) == "Auto (Game / Profile default)");
+    assert(std::string(PresetAutoLabel(silyVersioned)) == "Auto (Game / Profile default)");
+    assert(menu.find("const char* presetOptions[] = { AmpereMfgStatusText::PresetAutoLabel(status),") !=
+           std::string::npos);
+    assert(menu.find("const char* storedPresetOptions[] = { \"Auto\", \"A\", \"B\", \"C\" };") != std::string::npos &&
+           "the stored value stays Auto");
+    assert(AmpereMfgLoader::FormatIniContent030(3, 1, "Auto").find("[DLSSG]\nOptimized=1\nPreset=Auto\n") !=
+               std::string::npos &&
+           "the companion INI keeps Preset=Auto (0.3.x reads it; 0.4.1 runs it as A)");
+    std::puts("Test 11 PASS: Preset Auto label per build; stored value and INI unchanged");
+
+    std::puts("All Ampere MFG status text tests passed (11/11).");
     return 0;
 }
