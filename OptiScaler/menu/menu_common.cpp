@@ -6,6 +6,7 @@
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
 #include <framegen/dlssg/AmpereMfgLoader.h>
+#include <framegen/dlssg/AmpereMfgStatusText.h>
 #include <framegen/xefg/XeMfgLoader.h>
 #include <framegen/smoothmotion/NVSmooth30Loader.h>
 #include <nvapi/NvApiHooks.h>
@@ -3414,21 +3415,19 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
             }
             else
             {
-                // Status display
-                if (!status.ErrorMessage.empty())
-                    ImGui::TextColored(toneMapColor(ImVec4(1.f, 0.4f, 0.4f, 1.f)), "Error: %s",
-                                       status.ErrorMessage.c_str());
-                else
-                {
-                    std::string routerStr = AmpereMfgLoader::ResolveRouter();
-                    std::string liveStr =
-                        status.LiveControlActive ? "active" : (status.LiveControlSupported ? "ready" : "n/a");
-                    const std::string& modStr = status.ModName.empty() ? "sdli1995" : status.ModName;
-                    ImGui::TextWrapped("Mod: %s | DLL: %s | Router: %s | INI: %s | Loaded: %s | Live: %s",
-                                       modStr.c_str(), status.DllFound ? "found" : "missing", routerStr.c_str(),
-                                       status.IniWritten ? "written" : "not written", status.DllLoaded ? "yes" : "no",
-                                       liveStr.c_str());
-                }
+                // Plain-language status; the technical fields stay available in the help marker for bug reports.
+                const auto headline = AmpereMfgStatusText::ResolveHeadline(status);
+                const ImVec4 headlineColor =
+                    headline == AmpereMfgStatusText::Headline::Running      ? ImVec4(0.f, 1.f, 0.25f, 1.f)
+                    : headline == AmpereMfgStatusText::Headline::NotRunning ? ImVec4(1.f, 0.4f, 0.4f, 1.f)
+                                                                            : ImVec4(1.f, 0.75f, 0.2f, 1.f);
+                ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(headlineColor));
+                ImGui::TextWrapped("%s", AmpereMfgStatusText::HeadlineText(status).c_str());
+                ImGui::PopStyleColor();
+                const auto details = AmpereMfgStatusText::DetailsText(status, AmpereMfgLoader::ResolveRouter());
+                ShowHelpMarker(details.c_str());
+                if (headline != AmpereMfgStatusText::Headline::NotRunning)
+                    ImGui::TextWrapped("%s", AmpereMfgStatusText::MultiplierText(status));
             }
 
             // Ampere MFG Mode combo (External / Internal)
