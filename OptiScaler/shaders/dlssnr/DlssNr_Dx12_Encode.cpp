@@ -302,6 +302,7 @@ DlssNrConstants DlssNr_Dx12::State::MakeResolveConstants(const EncodeContext& co
 
     resolveParams.ReplaceDetailStrength = cfg.DlssNrReplaceDetailStrength.value_or_default();
     resolveParams.ModelWorkScale = context.workScale;
+    DlssNr_Common::SetQualityConstants(resolveParams, cfg);
 
     // Report the effective composition settings when they change.
 

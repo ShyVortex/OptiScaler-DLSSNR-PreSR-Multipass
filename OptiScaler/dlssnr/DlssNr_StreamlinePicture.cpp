@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "DlssNr_StreamlinePicture.h"
 #include "DlssNrFeature_Dx12.h"
 #include <Config.h>
@@ -97,7 +97,7 @@ template <bool Local> struct Hooks
         const bool present = std::strcmp(name, "slHookPresent") == 0;
         const bool present1 = std::strcmp(name, "slHookPresent1") == 0;
         const bool createHwnd = std::strcmp(name, "slHookCreateSwapChainForHwnd") == 0;
-        const bool create = Local && std::strcmp(name, "slHookCreateSwapChain") == 0;
+        const bool create = std::strcmp(name, "slHookCreateSwapChain") == 0;
         if (!present && !present1 && !createHwnd && !create)
             return nullptr;
         auto* function = getFunction(name);

@@ -42,6 +42,9 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
             ParkNrResource(nr.colorCopy);
             ParkNrResource(nr.hdrCopy);
             ParkNrResource(nr.colorSmall);
+            ParkNrResource(nr.depthSmall);
+            ParkNrResource(nr.motionSmall);
+            nr.loggedGuideMatch = false;
             ParkNrResource(nr.outputNative);
             ParkNrResource(nr.activeColor);
             nr.passScratchFailed = false;
@@ -91,27 +94,34 @@ bool DlssNr_Dx12::State::PrepareRunModels(ID3D12GraphicsCommandList* cmdList, ID
         return false;
     }
 
-    if (requestedPasses == 1)
+    // The halo filter needs passClamp even with one pass. Allocating it never touches the models, so
+    // enabling the filter costs one texture, not a feature rebuild; the format-change swap above has
+    // already run, so a missing cached passClamp is simply created in the current format.
+    const bool needsClamp = DlssNr_Common::NeedsPassClamp(requestedPasses, cfg);
+    const bool needsScratch = requestedPasses > 1;
+    if (!needsScratch)
+        ParkNrResource(nr.passScratch);
+    if (!needsClamp)
     {
         // Reclaim the extra raster and clear its failure latch. Raising the count later gets one fresh
         // allocation attempt; holding a failing allocation at two must not retry it every frame.
-        ParkNrResource(nr.passScratch);
         ParkNrResource(nr.passClamp);
         nr.passScratchFailed = false;
     }
-    else if (nr.passScratch == nullptr && !nr.passScratchFailed)
+    else if (!nr.passScratchFailed && (nr.passClamp == nullptr || (needsScratch && nr.passScratch == nullptr)))
     {
-        nr.passScratch = CreateScratch(device, modelFormat, workWidth, workHeight);
-        nr.passClamp = CreateScratch(device, modelFormat, workWidth, workHeight);
-        nr.passScratchFailed = nr.passScratch == nullptr || nr.passClamp == nullptr;
+        if (needsScratch && nr.passScratch == nullptr)
+            nr.passScratch = CreateScratch(device, modelFormat, workWidth, workHeight);
+        if (nr.passClamp == nullptr)
+            nr.passClamp = CreateScratch(device, modelFormat, workWidth, workHeight);
+        nr.passScratchFailed = (needsScratch && nr.passScratch == nullptr) || nr.passClamp == nullptr;
         if (nr.passScratchFailed)
         {
             ParkNrResource(nr.passScratch);
             ParkNrResource(nr.passClamp);
+            LOG_ERROR("DLSS-NR: could not allocate the filter/multipass textures; halo filtering and extra passes "
+                      "are disabled");
         }
-
-        if (nr.passScratchFailed)
-            LOG_ERROR("DLSS-NR: could not allocate the multipass textures; extra passes are disabled");
     }
 
     if (reduced && !spatial && nr.colorSmall == nullptr)

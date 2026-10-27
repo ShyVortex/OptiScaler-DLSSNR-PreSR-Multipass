@@ -980,6 +980,8 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dlssnr\DlssNr_Placement.h" />
+    <ClInclude Include="shaders\dlssnr\DlssNr_ResidualHistory.h" />
+    <ClInclude Include="dlssnr\DlssNr_MenuPresets.h" />
     <ClInclude Include="dlssnr\DlssNr_FinishedReady.h" />
     <ClInclude Include="dlssnr\DlssNr_StreamlinePicture.h" />
     <ClCompile Include="dlssnr\DlssNr_StreamlinePicture.cpp" />

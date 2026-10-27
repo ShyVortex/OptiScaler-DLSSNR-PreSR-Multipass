@@ -1700,6 +1700,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dlssnr\DlssNr_Placement.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="shaders\dlssnr\DlssNr_ResidualHistory.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="dlssnr\DlssNr_MenuPresets.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNr_FinishedReady.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="dlssnr\DlssNr_StreamlinePicture.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="dlssnr\DlssNr_StreamlinePicture.cpp"><Filter>Source Files</Filter></ClCompile>

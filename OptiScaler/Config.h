@@ -101,12 +101,13 @@ template <class T, HasDefaultValue defaultState = WithDefault> class CustomOptio
     }
 
     constexpr T value_or_default() &&
-        requires(defaultState != NoDefault) {
-            return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
-        }
+        requires(defaultState != NoDefault)
+    {
+        return this->has_value() ? std::move(this->value()) : std::move(_defaultValue);
+    }
 
-        constexpr std::optional<T> value_for_config()
-            requires(defaultState == WithDefault)
+    constexpr std::optional<T> value_for_config()
+        requires(defaultState == WithDefault)
     {
         if (_volatile)
         {
@@ -321,6 +322,9 @@ class Config
     CustomOptional<float> DlssNrEnvironmentColour { 1.0f };
     CustomOptional<bool> DlssNrShowSkinMask { false };
     CustomOptional<bool> DlssNrUnlockPasses { false };
+    // Below-native WorkingScale: resample depth and motion to the model's working size.
+    CustomOptional<bool> DlssNrMatchGuides { true };
+    CustomOptional<bool> DlssNrRenderMotionScale { true };
     // Passes 2..30 inherit pass 1, except LocalTone defaults to zero.
     struct NrPassOverrides
     {
@@ -388,6 +392,10 @@ class Config
     // Manual white-point divisor for the HDR-to-model encode.
     CustomOptional<float> DlssNrWhitePointScale { 1.0f };
     CustomOptional<float> DlssNrReplaceDetailStrength { 0.0f };
+    CustomOptional<bool> DlssNrHistoryRejection { false };
+    CustomOptional<float> DlssNrHaloSuppression { 0.0f };
+    CustomOptional<float> DlssNrHaloBrightSuppression { 0.0f };
+    CustomOptional<float> DlssNrHaloRadius { 2.0f };
     CustomOptional<float> DlssNrResidualConfidenceSensitivity { 0.0f };
     CustomOptional<uint32_t> DlssNrWhitePointSource { 0u };
     CustomOptional<float> DlssNrWhitePointTrim { 1.0f };

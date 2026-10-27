@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "DlssNr_MenuOverlay.h"
 #include "DlssNr_Status.h"
@@ -27,7 +27,7 @@ static void RenderSpatialOutlines()
                                        static_cast<unsigned>(screen.y), config.DlssNrWorkingScale.value_or_default());
     if (!layout.active)
         return;
-    auto* draw = ImGui::GetForegroundDrawList();
+    auto* draw = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
     const auto rectangle = [&](const Spatial::Rect& bounds, ImU32 color)
     {
         const ImVec2 lo { bounds.left * screen.x, bounds.top * screen.y };
@@ -67,7 +67,7 @@ void RenderNrCompareTags()
     const char* leftText = swap ? "DLSS NR : ON" : "DLSS NR : OFF";
     const char* rightText = swap ? "DLSS NR : OFF" : "DLSS NR : ON";
 
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    ImDrawList* dl = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
     ImFont* font = ImGui::GetFont();
     const float fontSize = ImGui::GetFontSize() * scale;
     const float margin = 10.0f * scale;

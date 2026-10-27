@@ -56,16 +56,18 @@ OptiScaler's low-level feature creation pipeline was already equipped to pass pr
 ## 3. Applied Architecture Solutions
 
 ### 3.1 In-Game ImGui Menu Preset Selector (`DlssNr_MenuControls.cpp`)
-In `DlssNr_MenuControls.cpp`, `RenderModel()` now exposes explicit combo selectors with contextual tooltips:
-- **Pass 1 (Primary Model)**:
-  - `0`: `"Auto (Performance / Small FP8)"`
-  - `1`: `"Quality (Honest Tench)"`
-  - `2`: `"Performance (Crazy Cuckoo Small FP8, +40% FPS)"`
-- **Pass 2..10 (Multipass Layers)**:
-  - `0`: `"Auto (inherit Pass 1)"`
-  - `1`: `"Quality (Honest Tench)"`
-  - `2`: `"Performance (Crazy Cuckoo Small FP8)"`
-- Comprehensive `HelpMarker` explaining the Quality vs Performance FP8 models and performance characteristics.
+`RenderModel()` uses one `NrModelCombo` for every pass. The labels come from upstream 6125a75 and live in
+`dlssnr/DlssNr_MenuPresets.h` (no ImGui dependency, so tests include it directly):
+- **Pass 1 (Primary Model)**: `0` `"Automatic"` (runtime default, Small FP8 on 310.9), `1` `"Original"`
+  ("Honest Tench"), `2` `"Optimized"` ("Crazy Cuckoo Small FP8").
+- **Pass 2..10 (Multipass Layers)**: `"Inherit pass 1"` (unset), then the same three explicit presets.
+- Out-of-range INI values preview as `"Unavailable preset"` instead of being clamped silently.
+
+> **Update (PR #30 review):** The selective upstream merge (6125a75) brought in upstream's combo behind a
+> `selectedPass <= 2` gate, which showed passes 3..10 as `"NR model: inherits pass 1"` even when a
+> `Pass{N}Preset` was configured. The gate was removed so every pass has the combo again. Upstream's combo also
+> fixed an off-by-one in the fork's earlier per-pass combo, where `"Quality (Honest Tench)"` stored preset `0`
+> (Automatic) and `"Performance"` stored `1`. Guarded by `tests/nr_model_preset_menu_unit.cpp`.
 
 ### 3.2 Multi-Pass Generalization (`PassProfiles.h` & `Config.cpp`)
 - In `PassProfiles.h`, removed the legacy `pass <= 2` restriction so that any pass with an explicit `extra.preset` override applies it cleanly.
@@ -87,6 +89,10 @@ Automated unit test coverage was implemented in `tests/nr_model_preset_unit.cpp`
 6. **Per-Pass Overrides**: Verifies independent preset assignments across Pass 1 (Performance), Pass 2 (Quality), Pass 3 (Performance), and Pass 4 (Quality).
 7. **Feature Rebuild Invariant**: Asserts that `ModelSettings::operator==` detects preset transitions and reports inequality to trigger guarded context recreation.
 8. **UI Combo Index Mapping**: Validates zero-offset and inheritance combo index conversions.
+
+### Menu Coverage
+`tests/nr_model_preset_menu_unit.cpp` (6 cases) checks the production labels and previews, and that no pass
+gate comes back in `DlssNr_MenuControls.cpp`.
 
 ### Regression Test Suite Results
 All test suites compiled cleanly with C++20 and passed with zero errors:

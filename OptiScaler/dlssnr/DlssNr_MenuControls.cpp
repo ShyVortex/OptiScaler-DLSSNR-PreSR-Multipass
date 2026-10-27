@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include "DlssNr_MenuSections.h"
+#include "DlssNr_MenuPresets.h"
 #include "DlssNr_Placement.h"
 #include "DlssNr_Status.h"
 #include <shaders/dlssnr/DlssNr_Spatial.h>
@@ -179,9 +180,11 @@ void RenderInput(Config* config)
 
         ImGui::BeginDisabled(!reduced);
 
-        static const char* enlargeNames[] = { "Classic", "Matched residual", "Matched residual + DLSS",
-                                              "Lighting + colour", "Lighting + colour + DLSS" };
-        int enlarge = (int) std::min(config->DlssNrTransfer.value_or_default(), 4u);
+        static const char* enlargeNames[] = {
+            "Classic",           "Matched residual",         "Matched residual + DLSS",
+            "Lighting + colour", "Lighting + colour + DLSS", "Edge-aware"
+        };
+        int enlarge = (int) std::min(config->DlssNrTransfer.value_or_default(), 5u);
 
         if (ImGui::Combo("Enlargement", &enlarge, enlargeNames, IM_ARRAYSIZE(enlargeNames)))
             config->DlssNrTransfer = (uint32_t) enlarge;
@@ -190,6 +193,7 @@ void RenderInput(Config* config)
 
         HelpMarker("Below 100%: Lighting + colour resizes lighting gain and colour changes separately, then applies "
                    "them at full resolution. This can reduce resize halos; fully black pixels remain black. "
+                   "Edge-aware uses the original picture's brightness to keep edits on the correct side of edges. "
                    "DLSS modes require post-upscale DX12 processing.");
     }
     static const char* reversibleNames[] = { "Off (soft knee)", "Neutwo proxy + composed", "Neutwo proxy + replace",
@@ -271,6 +275,34 @@ static void DeferredSlider(const char* label, Option* opt, float mn, float mx, f
         HelpMarker("Skin detail. -1 follows Local structure.");
 }
 
+template <typename Option> static void NrModelCombo(Option* opt, bool allowInherit)
+{
+    namespace Presets = DlssNr::MenuPresets;
+    const auto current = opt->has_value() ? std::optional<uint32_t>(opt->value()) : std::nullopt;
+    const bool inherited = Presets::Inherited(allowInherit, current);
+    const uint32_t preset = current.value_or(0u);
+
+    if (ImGui::BeginCombo("NR model", Presets::Preview(allowInherit, current)))
+    {
+        if (allowInherit && ImGui::Selectable(Presets::Inherit, inherited))
+            *opt = std::optional<uint32_t> {};
+        for (uint32_t value = 0; value < Presets::Count; ++value)
+        {
+            const bool selected = !inherited && preset == value;
+            if (ImGui::Selectable(Presets::Names[value], selected))
+                *opt = value;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    HelpMarker("Automatic: use the installed NR runtime's default model.\n"
+               "Original: use the original model (preset 1).\n"
+               "Optimized: use the smaller FP8 model (preset 2), included in NR 310.9.16.0.\n"
+               "Older runtimes fall back to their default when a model is unavailable.\n"
+               "Changing the model rebuilds this pass and resets its history.");
+}
+
 void RenderModel(Config* config)
 {
     bool unlockPasses = config->DlssNrUnlockPasses.value_or_default();
@@ -329,23 +361,11 @@ void RenderModel(Config* config)
         }
         HelpMarker("Model-based skin selection.");
     };
-    static const char* presets[] = { "Auto (Performance / Small FP8)", "Quality (Honest Tench)",
-                                     "Performance (Crazy Cuckoo Small FP8, +40% FPS)" };
-    static const char* inheritedPresets[] = { "Auto (inherit Pass 1)", "Quality (Honest Tench)",
-                                              "Performance (Crazy Cuckoo Small FP8)" };
     static const char* styles[] = { "Standard", "Natural", "Cinematic" };
     static const char* inheritedStyles[] = { "Auto", "Standard", "Natural", "Cinematic" };
     if (selectedPass == 0)
     {
-        int preset = (int) std::min(config->DlssNrPreset.value_or_default(), 2u);
-        if (ImGui::Combo("Model preset", &preset, presets, IM_ARRAYSIZE(presets)))
-            config->DlssNrPreset = (uint32_t) preset;
-        HelpMarker(
-            "Neural Rendering weights preset:\n"
-            "- Auto: Uses runtime default (Performance / Crazy Cuckoo Small FP8)\n"
-            "- Quality (Honest Tench): Full-precision teacher quantized model for maximum visual fidelity\n"
-            "- Performance (Crazy Cuckoo Small FP8): Lightweight FP8 Tensor Core model, up to 40% faster inference");
-
+        NrModelCombo(&config->DlssNrPreset, false);
         int style = (int) std::min(config->DlssNrStyle.value_or_default(), 2u);
         if (ImGui::Combo("Style", &style, styles, IM_ARRAYSIZE(styles)))
             config->DlssNrStyle = (uint32_t) style;
@@ -355,14 +375,7 @@ void RenderModel(Config* config)
     else
     {
         auto& pass = config->DlssNrPassOverrides[selectedPass - 1];
-        int preset = pass.preset.has_value() ? std::clamp((int) pass.preset.value(), 0, 2) + 1 : 0;
-        if (ImGui::Combo("Model preset", &preset, inheritedPresets, IM_ARRAYSIZE(inheritedPresets)))
-            pass.preset = preset ? std::optional<uint32_t>(preset - 1) : std::nullopt;
-        HelpMarker("Neural Rendering weights preset for this pass:\n"
-                   "- Auto: Inherits Pass 1 model preset\n"
-                   "- Quality (Honest Tench): Full-precision teacher quantized model\n"
-                   "- Performance (Crazy Cuckoo Small FP8): Lightweight FP8 Tensor Core model");
-
+        NrModelCombo(&pass.preset, true);
         int style = pass.style.has_value() ? std::clamp((int) pass.style.value(), 0, 2) + 1 : 0;
         if (ImGui::Combo("Style", &style, inheritedStyles, IM_ARRAYSIZE(inheritedStyles)))
             pass.style = style ? std::optional<uint32_t>(style - 1) : std::nullopt;
@@ -374,7 +387,21 @@ void RenderModel(Config* config)
 void RenderBlend(Config* config)
 {
     if (config->DlssNrResidualAcrossRr.value_or_default())
+    {
+        Checkbox("Reject stale history", config->DlssNrHistoryRejection);
+        HelpMarker("RR residual path: reject old edits when the input changes and limit them to nearby current edits. "
+                   "Can reduce trails. Off keeps the original history filter.");
         Slider("History confidence threshold", config->DlssNrResidualConfidenceSensitivity, 0.0f, 2.0f, "%.3f", 0.0f);
+    }
+    if (ImGui::TreeNode("Halo suppression (experimental)"))
+    {
+        Slider("Dark rims near bright objects", config->DlssNrHaloSuppression, 0.0f, 1.0f, "%.2f", 0.0f);
+        Slider("Dark rims near dark objects", config->DlssNrHaloBrightSuppression, 0.0f, 1.0f, "%.2f", 0.0f);
+        Slider("Halo radius (NR pixels)", config->DlssNrHaloRadius, 1.0f, 4.0f, "%.0f", 2.0f);
+        HelpMarker("Lifts fine dark rims while keeping broad lighting. Both strengths at zero disable the pass. "
+                   "May lighten real shadows; compare the result before keeping it on.");
+        ImGui::TreePop();
+    }
     if (config->DlssNrFinishedPicture.value_or_default() &&
         (config->DlssNrRunBeforeSr.value_or_default() || config->DlssNrDeferredDlss.value_or_default()))
     {

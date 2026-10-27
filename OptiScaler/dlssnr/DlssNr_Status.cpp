@@ -1,4 +1,4 @@
-#include <pch.h>
+﻿#include <pch.h>
 #include "DlssNr_Status.h"
 
 #include <array>
@@ -58,11 +58,11 @@ void RequestCapture(unsigned int frames)
     ++requests.captureGeneration;
 }
 
+std::optional<double> LastGpuTime() { return ReadStatus(Backend::Dx12).gpuTime; }
 void RequestHistoryReset()
 {
     std::lock_guard lock(statusMutex);
     ++requests.historyGeneration;
 }
 
-std::optional<double> LastGpuTime() { return ReadStatus(Backend::Dx12).gpuTime; }
 } // namespace DlssNr

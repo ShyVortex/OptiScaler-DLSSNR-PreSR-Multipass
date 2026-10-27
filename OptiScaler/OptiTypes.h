@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 
 /**
@@ -226,7 +226,7 @@ enum Value : uint32_t
     AMD = 0x1002,
     Intel = 0x8086,
 };
-};
+}; // namespace VendorId
 
 std::string ApiUpscalerInputName(ApiUpscalerInput upscaler);
 

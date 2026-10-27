@@ -427,7 +427,8 @@ auto DlssNr_Dx12::State::DeferredSrContext::Before(ID3D12GraphicsCommandList* cm
             const float configuredBlend = cfg.DlssNrResidualAcrossRrBlend.value_or_default();
             accum.ResidualBlend = std::isfinite(configuredBlend) ? std::clamp(configuredBlend, .01f, 1.0f) : .08f;
             accum.ResidualConfidenceSensitivity = cfg.DlssNrResidualConfidenceSensitivity.value_or_default();
-            accum.ResidualHistoryValid = g.accumulationValid && !frame.Reset;
+            DlssNr::ResidualHistory::Fill(accum, g.history, cfg.DlssNrHistoryRejection.value_or_default(),
+                                          frame.PreExposure, g.accumulationValid, frame.Reset);
             accum.GuideWidth = motionRegion.width;
             accum.GuideHeight = motionRegion.height;
             // v0.7.7 convention: convert the game's pixel displacement to input-frame UV displacement.
@@ -458,6 +459,7 @@ auto DlssNr_Dx12::State::DeferredSrContext::Before(ID3D12GraphicsCommandList* cm
                 g.accumulatedIndex = next;
             }
             g.accumulationValid = accumulated;
+            DlssNr::ResidualHistory::Record(g.history, accum);
         }
         DlssNrConstants encode {};
         encode.Mode = DlssNrMode_EncodeResidual;

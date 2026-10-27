@@ -12,6 +12,7 @@
 #include <fstream>
 #include <sstream>
 #include <mutex>
+#include <cstdio>
 
 namespace AmpereMfgLoader
 {
@@ -506,9 +507,12 @@ void TrySetup()
 
     if (!isAmpere && !isTuring)
     {
-        s_status.ErrorMessage = std::format("SM86/SM75 MFG requires an RTX 20 series (Turing) or RTX 30 series "
-                                            "(Ampere) GPU. Detected arch 0x{:x} ({}).",
-                                            archId, gpu.name);
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+                      "SM86/SM75 MFG requires an RTX 20 series (Turing) or RTX 30 series "
+                      "(Ampere) GPU. Detected arch 0x%x (%s).",
+                      archId, gpu.name.c_str());
+        s_status.ErrorMessage = buf;
         LOG_ERROR("AmpereMfgLoader: {}", s_status.ErrorMessage);
         return;
     }

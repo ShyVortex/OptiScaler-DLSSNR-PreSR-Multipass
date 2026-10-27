@@ -41,6 +41,14 @@ struct ModelStateDx12
     // The frame shrunk for the model, when it is working below full resolution.
     ID3D12Resource* colorSmall = nullptr;
 
+    // MatchGuides: depth and motion resampled to the working size below native. Their formats do not
+    // follow the colour format, so they stay out of altSurfaces and survive a format bounce untouched.
+    // UAV at rest; retired on resolution or placement changes.
+    ID3D12Resource* depthSmall = nullptr;
+    ID3D12Resource* motionSmall = nullptr;
+    bool loggedGuideMatch = false;
+    uint32_t loggedMotionReference = 0, loggedMotionTexture = 0, loggedMotionWork = 0;
+
     // Peripheral compression keeps a packed model pair and packed guides separate from the
     // ordinary uniform-scale pair consumed by composition and optional DLSS enlargement.
     ID3D12Resource* spatialColor = nullptr;

@@ -1,4 +1,4 @@
-// DLSS Neural Rendering calls, isolated in a module the snippet will accept as a caller.
+﻿// DLSS Neural Rendering calls, isolated in a module the snippet will accept as a caller.
 //
 // The snippet resolves the module owning its return address and requires that module's path to contain
 // "nvngx.dll" (the driver core is _nvngx.dll), rejecting anything else with FAIL_PlatformError before it
@@ -94,7 +94,7 @@ thread_local std::string g_modelError;
 void recordModelError(Snippet* snippet, const char* fallback)
 {
     auto message = snippet && snippet->module
-                       ? (const char* (*) ()) GetProcAddress(snippet->module, "NVFP4_GetLastError")
+                       ? (const char* (*)()) GetProcAddress(snippet->module, "NVFP4_GetLastError")
                        : nullptr;
     const char* detail = message ? message() : nullptr;
     g_modelError = detail && *detail ? detail : fallback;
