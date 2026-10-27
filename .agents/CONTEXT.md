@@ -1,4 +1,4 @@
-# OptiScaler-DLSSNR-PreSR-Multipass — Integration Context
+# OptiScaler-NR-PreSR-MFG — Integration Context
 
 ## Project Overview
 OptiScaler is a Windows x64 DLL proxy (dxgi.dll / d3d12.dll / version.dll etc.) that intercepts graphics calls to provide upscaling (DLSS, FSR, XeSS) and frame generation (DLSSG, FSR-FG, XeFG, OptiFG) support to games. It ships as a Visual Studio 2022 (v143) C++20 solution.
@@ -87,7 +87,7 @@ The mod by sdli1995 is a **standalone DLL proxy** (`version.dll` + `dlssg_sm86.i
 - **Upstream Repository**: `https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass.git` (remote: `upstream`)
 - **Divergence Context**:
   - After initially accepting PR #23 containing the SM75/SM86 MFG unlocker, upstream author `wilsjo2` excluded both the SM75-SM86 mod component and the Ada (RTX 40) MFG unlocker in later commits/branches (around v0.8.0–v0.8.3) due to NVIDIA DMCA concerns.
-  - This repository (`ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass`) explicitly maintains and supports both MFG unlockers: the Turing (SM75) and Ampere (SM86) MFG unlocker with the Linux 2X FG FSR Fallback pipeline, and the Ada (RTX 40) MFG unlocker (always compiled via `OptiScalerRtx40Mfg=true`).
+  - This repository (`ShyVortex/OptiScaler-NR-PreSR-MFG`, renamed from `ShyVortex/OptiScaler-DLSSNR-PreSR-Multipass`; older docs use the old name) explicitly maintains and supports both MFG unlockers: the Turing (SM75) and Ampere (SM86) MFG unlocker with the Linux 2X FG FSR Fallback pipeline, and the Ada (RTX 40) MFG unlocker (always compiled via `OptiScalerRtx40Mfg=true`).
 
 ### Permanent Multi-Branch Architecture
 To safely manage upstream merges and mod evolution, three permanent branches are established:
