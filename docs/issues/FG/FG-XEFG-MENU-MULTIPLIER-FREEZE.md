@@ -97,6 +97,7 @@ No `SetInterpolatedFrameCount` line appears: the hang moved in front of it.
   `xefg_hardening_diagnostics`, `xefg_diagnostic_ring`, `xefg_main_pacing_alignment`, `xefg_pacing_engine`,
   `xefg_swapchain_lifecycle`, `xefg_save_load_stability`.
 - clang-format 23 clean; UTF-8 BOM present. `IFGFeature.h` was missing its BOM and now has one.
-- **Pending:** an MSVC build, and the reporter confirming in Silent Hill Townfall that dragging the slider changes
-  the multiplier with no freeze. The log should show `interpolation count N requested; applying on the next present`
-  followed by `SetInterpolatedFrameCount called with count: N`.
+- **In game:** confirmed by the reporter on DLSS Unlocked #57 ("Works fine") with the CI build of `61f3d89f` (run
+  40503225385) in Silent Hill Townfall: changing the multiplier from the OptiScaler menu no longer freezes the game.
+- The reporter also noted shimmering in DLSS Quality mode that mostly disappears at Native. That is a separate,
+  unconfirmed observation, not covered by this fix.

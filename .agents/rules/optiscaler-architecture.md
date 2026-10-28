@@ -221,6 +221,8 @@ description: Architecture, frame generation, and safety rules for OptiScaler
      - **Live Multiplier Adaptation Without Destructive Deactivations (`XeFG_Dx12.cpp`, `menu_common.cpp`)**:
        - `_framesToInterpolate` initialized on swapchain creation.
        - `state.WAR_xefgRequestFGToggle` guarded with `!XeMfgLoader::EnabledForSession()`, and `state.fgChanged = true;` never set in multiplier slider callback. Live adjustments via `SetNumInterpolatedFrames` must never call `Deactivate()`, `SetEnabled: false`, or pause presentation for 10 frames.
+       - **Never call into the FG runtime from the overlay menu (verified in-game, DLSS Unlocked #57)**: the menu is drawn inside the real swapchain's Present, which XeFG issues from its own Present while `FGHooks::FGPresent` holds `fg->Mutex`. Menu multiplier changes must use `IFGFeature::RequestInterpolatedFrameCount`; `XeFG_Dx12` queues the value in `_pendingInterpolationCount` and applies it at the top of `XeFG_Dx12::Present()` on the game's present thread. `SetInterpolatedFrameCount` must not take `fg->Mutex` (non-recursive; `f904ab52` deadlocked). The synchronous Streamline `slDLSSGSetOptions` path is unaffected.
+         - Documentation: `docs/issues/FG/FG-XEFG-MENU-MULTIPLIER-FREEZE.md`. Associated test: `tests/xefg_menu_multiplier_queue_unit.cpp`.
      - **FrameRenderTime Sanity Floor Fallback (`XeFG_Dx12.cpp`)**:
        - In `XeFG_Dx12::Dispatch`, if `frameRenderTime < 1.0` or `< 0.25 * _ftDelta[fIndex]`, fallback to `_ftDelta[fIndex]` to stabilize optical flow motion vectors and eliminate judder.
      - **In-Game Menu UI & Section Suppression (`OptiScaler/menu/menu_common.cpp`)**:
@@ -249,5 +251,6 @@ description: Architecture, frame generation, and safety rules for OptiScaler
        - `tests/xemfg_sr_crash_fix_unit.cpp` (Tests 1–5)
        - `tests/xemfg_sr_parity_unit.cpp` (Tests 1–6)
        - `tests/xemfg_sr_unit.cpp` (Tests 1–11)
+       - `tests/xefg_menu_multiplier_queue_unit.cpp` (Tests 1–7)
 
 
