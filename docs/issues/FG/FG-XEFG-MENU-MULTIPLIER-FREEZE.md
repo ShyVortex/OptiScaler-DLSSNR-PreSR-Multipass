@@ -99,5 +99,5 @@ No `SetInterpolatedFrameCount` line appears: the hang moved in front of it.
 - clang-format 23 clean; UTF-8 BOM present. `IFGFeature.h` was missing its BOM and now has one.
 - **In game:** confirmed by the reporter on DLSS Unlocked #57 ("Works fine") with the CI build of `61f3d89f` (run
   40503225385) in Silent Hill Townfall: changing the multiplier from the OptiScaler menu no longer freezes the game.
-- The reporter also noted shimmering in DLSS Quality mode that mostly disappears at Native. That is a separate,
-  unconfirmed observation, not covered by this fix.
+- The reporter also noted shimmering in DLSS Quality mode that mostly disappears at Native. It came from the
+  `DisplayResolution=false` workaround; see `FG-XEFG-HIGHRES-MV-DEPTH-MISMATCH.md` for the cause and the fix.
