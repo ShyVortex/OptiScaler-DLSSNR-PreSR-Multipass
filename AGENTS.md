@@ -22,3 +22,4 @@ The plan must:
 - `.agents/rules/pr-review.md`
 - `.agents/rules/browser-tools.md`
 - `.agents/rules/ai-commit-coauthor.md`
+- `.agents/rules/issue-references.md`

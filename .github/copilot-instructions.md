@@ -22,3 +22,4 @@ When working on this codebase, adhere strictly to the rules defined in `.agents/
 - **Pull Requests:** Refer to `.agents/rules/pr-review.md`
 - **Browser / Research Tools:** Refer to `.agents/rules/browser-tools.md`
 - **AI Commit Co-Authorship:** Refer to `.agents/rules/ai-commit-coauthor.md`
+- **Issue & PR References:** Refer to `.agents/rules/issue-references.md`
