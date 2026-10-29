@@ -3428,6 +3428,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
                 ShowHelpMarker(details.c_str());
                 if (headline != AmpereMfgStatusText::Headline::NotRunning)
                     ImGui::TextWrapped("%s", AmpereMfgStatusText::MultiplierText(status));
+                if (AmpereMfgStatusText::GameRuntimeRefused(status) && status.ErrorMessage.empty())
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));
+                    ImGui::TextWrapped("%s", AmpereMfgStatusText::GameRuntimeAlternativesText);
+                    ImGui::PopStyleColor();
+                }
                 if (AmpereMfgStatusText::DriverBelowFloor(onLinux, primaryGpu.nvidiaDriverVersion))
                 {
                     ImGui::PushStyleColor(ImGuiCol_Text, toneMapColor(ImVec4(1.f, 0.75f, 0.2f, 1.f)));

@@ -25,6 +25,9 @@
 // 10. The menu greys the checkbox, never writes the value while locked, and explains why.
 // 11. The Preset combo's Auto entry says it runs as A on sdli1995 0.4.1+, while the stored value and the companion
 //     INI stay "Auto".
+// 12. A pre-310 game DLSS-G runtime (Remnant 2 ships 3.7.10, DLSS Unlocked #61) makes the headline "not running for
+//     this game" only on sdli1995 0.4.1+ with the mod loaded; a loader error keeps priority; details show the version.
+// 13. The menu shows the alternatives line only for a refused runtime, after the headline.
 
 using AmpereMfgLoader::ModVariant;
 using AmpereMfgLoader::Status;
@@ -193,6 +196,51 @@ int main()
            "the companion INI keeps Preset=Auto (0.3.x reads it; 0.4.1 runs it as A)");
     std::puts("Test 11 PASS: Preset Auto label per build; stored value and INI unchanged");
 
-    std::puts("All Ampere MFG status text tests passed (11/11).");
+    // Test 12
+    auto refused = v041;
+    refused.ModName = "sdli1995 v0.4.1";
+    refused.GameDlssgPath = L"C:\\Remnant2\\Plugins\\Shared\\Streamline\\nvngx_dlssg.dll";
+    refused.GameDlssgVersion = "3.7.10";
+    refused.GameDlssgGenerationA = true;
+    assert(GameRuntimeRefused(refused));
+    assert(ResolveHeadline(refused) == Headline::NotRunning);
+    assert(HeadlineText(refused) == "RTX 20/30 frame generation unlock: not running for this game: it ships DLSS-G "
+                                    "3.7.10 (older than 310.x), which sdli1995 v0.4.1 does not take over.");
+    assert(DetailsText(refused, "SM86").find("Game DLSS-G: 3.7.10") != std::string::npos);
+    for (auto accepted : { v040, unversioned, silyVersioned })
+    {
+        accepted.GameDlssgVersion = "3.7.10";
+        accepted.GameDlssgGenerationA = true;
+        assert(!GameRuntimeRefused(accepted) && ResolveHeadline(accepted) == Headline::Running);
+    }
+    auto modern = refused;
+    modern.GameDlssgVersion = "310.9.16";
+    modern.GameDlssgGenerationA = false;
+    assert(!GameRuntimeRefused(modern) && ResolveHeadline(modern) == Headline::Running);
+    auto refusedNotLoaded = refused;
+    refusedNotLoaded.DllLoaded = false;
+    assert(!GameRuntimeRefused(refusedNotLoaded));
+    auto refusedWithError = refused;
+    refusedWithError.ErrorMessage = "dlssg_sm86.dll not found";
+    assert(HeadlineText(refusedWithError) ==
+           "RTX 20/30 frame generation unlock: not running: dlssg_sm86.dll not found");
+    assert(DetailsText(running, "SM86").find("Game DLSS-G: not seen yet") != std::string::npos);
+    auto unreadVersion = running;
+    unreadVersion.GameDlssgPath = L"C:\\G\\nvngx_dlssg.dll";
+    assert(DetailsText(unreadVersion, "SM86").find("Game DLSS-G: version unknown") != std::string::npos);
+    std::string alternatives = GameRuntimeAlternativesText;
+    assert(alternatives.find("DLSS Swapper") != std::string::npos && alternatives.find("XeMFG") != std::string::npos &&
+           alternatives.find("OptiFG") != std::string::npos);
+    std::puts("Test 12 PASS: a refused pre-310 game runtime reads as not running for this game");
+
+    // Test 13
+    const auto refusedLine =
+        menu.find("if (AmpereMfgStatusText::GameRuntimeRefused(status) && status.ErrorMessage.empty())");
+    const auto alternativesLine = menu.find("AmpereMfgStatusText::GameRuntimeAlternativesText");
+    assert(refusedLine != std::string::npos && alternativesLine != std::string::npos);
+    assert(headline < refusedLine && refusedLine < alternativesLine);
+    std::puts("Test 13 PASS: the menu adds the alternatives under the headline for a refused runtime");
+
+    std::puts("All Ampere MFG status text tests passed (13/13).");
     return 0;
 }

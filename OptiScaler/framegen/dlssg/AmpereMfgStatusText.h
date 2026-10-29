@@ -16,9 +16,11 @@ enum class Headline
     Starting
 };
 
+inline bool GameRuntimeRefused(const AmpereMfgLoader::Status& status);
+
 inline Headline ResolveHeadline(const AmpereMfgLoader::Status& status)
 {
-    if (!status.ErrorMessage.empty())
+    if (!status.ErrorMessage.empty() || GameRuntimeRefused(status))
         return Headline::NotRunning;
     return status.DllLoaded ? Headline::Running : Headline::Starting;
 }
@@ -35,6 +37,9 @@ inline std::string HeadlineText(const AmpereMfgLoader::Status& status)
     case Headline::Running:
         return "RTX 20/30 frame generation unlock: running (" + ModName(status) + ")";
     case Headline::NotRunning:
+        if (status.ErrorMessage.empty())
+            return "RTX 20/30 frame generation unlock: not running for this game: it ships DLSS-G " +
+                   status.GameDlssgVersion + " (older than 310.x), which " + ModName(status) + " does not take over.";
         return "RTX 20/30 frame generation unlock: not running: " + status.ErrorMessage;
     default:
         return "RTX 20/30 frame generation unlock: starting...";
@@ -117,6 +122,17 @@ inline bool HardwareBilinearHonoured(const AmpereMfgLoader::Status& status) { re
 // 0.4.1 removed [DLSSG] Preset=Auto and runs it as A; the stored value stays "Auto" for builds that still honour it.
 inline bool PresetAutoRunsAsA(const AmpereMfgLoader::Status& status) { return IsSdli1995AtLeast041(status); }
 
+// sdli1995 0.4.1+ forwards a pre-310 game runtime unchanged, so the game asks for DLSS-G and NVIDIA's runtime
+// refuses RTX 20/30 (DLSS Unlocked #61, FG-REMNANT2-GENERATION-A-DLSSG.md).
+inline bool GameRuntimeRefused(const AmpereMfgLoader::Status& status)
+{
+    return status.DllLoaded && status.GameDlssgGenerationA && IsSdli1995AtLeast041(status);
+}
+
+inline constexpr const char* GameRuntimeAlternativesText =
+    "Update the game's nvngx_dlssg.dll to 310.x (for example with DLSS Swapper) and restart, or turn this unlock off "
+    "and use XeMFG (Input Source: Game) or OptiFG.";
+
 inline const char* PresetAutoLabel(const AmpereMfgLoader::Status& status)
 {
     return PresetAutoRunsAsA(status) ? "Auto (runs as A in this build)" : "Auto (Game / Profile default)";
@@ -131,6 +147,10 @@ inline std::string DetailsText(const AmpereMfgLoader::Status& status, const std:
 {
     return "Mod: " + ModName(status) + "\nDLL: " + (status.DllFound ? "found" : "missing") + "\nRouter: " + router +
            "\nINI: " + (status.IniWritten ? "written" : "not written") +
-           "\nLoaded: " + (status.DllLoaded ? "yes" : "no") + "\nLive control: " + LiveControlText(status);
+           "\nLoaded: " + (status.DllLoaded ? "yes" : "no") + "\nLive control: " + LiveControlText(status) +
+           "\nGame DLSS-G: " +
+           (status.GameDlssgPath.empty()      ? std::string("not seen yet")
+            : status.GameDlssgVersion.empty() ? std::string("version unknown")
+                                              : status.GameDlssgVersion);
 }
 } // namespace AmpereMfgStatusText
