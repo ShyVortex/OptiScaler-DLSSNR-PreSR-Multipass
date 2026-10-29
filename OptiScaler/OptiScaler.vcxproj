@@ -533,6 +533,9 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="shaders\depth_scale\DS_Common.h" />
     <ClInclude Include="shaders\depth_scale\DS_Dx12.h" />
     <ClInclude Include="shaders\depth_scale\precompiled\DS_Shader.h" />
+    <ClInclude Include="shaders\depth_resample\DR_Common.h" />
+    <ClInclude Include="shaders\depth_resample\DR_Dx12.h" />
+    <ClInclude Include="shaders\depth_resample\precompiled\DR_Shader.h" />
     <ClInclude Include="shaders\depth_transfer\DT_Common.h" />
     <ClInclude Include="shaders\depth_transfer\DT_Dx11.h" />
     <ClInclude Include="shaders\depth_transfer\precompile\dt_Shader_Dx11.h" />
@@ -797,6 +800,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="shaders\hudless_compare\HC_Dx12.cpp" />
     <ClCompile Include="shaders\resource_flip\RF_Dx12.cpp" />
     <ClCompile Include="shaders\depth_scale\DS_Dx12.cpp" />
+    <ClCompile Include="shaders\depth_resample\DR_Dx12.cpp" />
     <ClCompile Include="shaders\depth_transfer\DT_Dx11.cpp" />
     <ClCompile Include="upscalers\dlssd\DLSSDFeature.cpp" />
     <ClCompile Include="upscalers\dlssd\DLSSDFeature_Dx11.cpp" />

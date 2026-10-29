@@ -314,6 +314,15 @@
     <ClInclude Include="shaders\depth_scale\precompiled\DS_Shader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="shaders\depth_resample\DR_Common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="shaders\depth_resample\DR_Dx12.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="shaders\depth_resample\precompiled\DR_Shader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="misc\FrameLimit.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1179,6 +1188,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="shaders\depth_scale\DS_Dx12.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="shaders\depth_resample\DR_Dx12.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="misc\FrameLimit.cpp">
