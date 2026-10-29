@@ -821,6 +821,9 @@
     <ClInclude Include="framegen\dlssg\AmpereMfgStatusText.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="framegen\dlssg\DlssgRuntimeGeneration.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="framegen\smoothmotion\NVSmooth30Loader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
