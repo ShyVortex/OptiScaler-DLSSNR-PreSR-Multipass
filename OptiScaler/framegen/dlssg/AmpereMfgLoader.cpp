@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 
 #include "AmpereMfgLoader.h"
+#include "AmpereMfgStatusText.h"
+#include "DlssgRuntimeGeneration.h"
 
 #include <Config.h>
 #include <State.h>
@@ -175,6 +177,58 @@ Status LastStatus()
         ProbeCandidate(false);
     }
     return s_status;
+}
+
+void NoteGameDlssgRuntime(const std::vector<std::wstring>& searchPaths)
+{
+    std::lock_guard lock(s_mutex);
+
+    // Only the loaded mod decides what happens to the game's runtime; the Linux FSR fallback runs OptiScaler's FG.
+    if (!s_status.DllLoaded || s_status.FsrFallbackActive)
+        return;
+
+    // The mod's own 310.9 runtime lives in dlssg_sm86\ next to it. Its folder is excluded too, unless it is the game
+    // folder, which can hold the game's runtime.
+    const auto modDir = std::filesystem::path(s_status.LoadedDllPath).parent_path();
+    std::vector<std::wstring> excluded = { (modDir / L"dlssg_sm86").wstring() };
+    if (DlssgRuntimeGeneration::NormalizePath(modDir.wstring()) !=
+        DlssgRuntimeGeneration::NormalizePath(Util::ExePath().parent_path().wstring()))
+        excluded.push_back(modDir.wstring());
+
+    const auto runtime =
+        DlssgRuntimeGeneration::SelectGameRuntime(searchPaths, excluded,
+                                                  [](const std::wstring& path)
+                                                  {
+                                                      std::error_code ec;
+                                                      return std::filesystem::is_regular_file(path, ec);
+                                                  });
+
+    // NGX is initialised more than once with different lists; one without a game runtime keeps the earlier result.
+    if (runtime.empty() || runtime == s_status.GameDlssgPath)
+        return;
+
+    version_t version {};
+    if (!Util::GetFileVersion(runtime, &version))
+        version = {};
+
+    const auto generation = DlssgRuntimeGeneration::Classify(version.major);
+    s_status.GameDlssgPath = runtime;
+    s_status.GameDlssgVersion =
+        version.major == 0 ? "" : DlssgRuntimeGeneration::FormatVersion(version.major, version.minor, version.patch);
+    s_status.GameDlssgGenerationA = generation == DlssgRuntimeGeneration::Generation::A;
+
+    LOG_INFO("AmpereMfgLoader: game DLSS-G runtime: {} (version {})", wstring_to_string(runtime),
+             s_status.GameDlssgVersion.empty() ? "unknown" : s_status.GameDlssgVersion);
+
+    static bool warned = false;
+    if (s_status.GameDlssgGenerationA && AmpereMfgStatusText::IsSdli1995AtLeast041(s_status) && !warned)
+    {
+        warned = true;
+        LOG_WARN("AmpereMfgLoader: the game ships DLSS-G {} (older than 310.x). {} does not take over this runtime, "
+                 "so DLSS frame generation will not run on RTX 20/30. Update the game's nvngx_dlssg.dll to 310.x "
+                 "(e.g. with DLSS Swapper), or turn this unlocker off and use XeMFG (Source=Game) or OptiFG.",
+                 s_status.GameDlssgVersion, AmpereMfgStatusText::ModName(s_status));
+    }
 }
 
 bool ApplyLiveControl(uint32_t mode, uint32_t targetFps, uint32_t multiplier)

@@ -40,6 +40,9 @@ struct Status
     bool LiveControlActive = false;    // True if a live control command has been dispatched to the running module
     std::wstring LoadedDllPath;        // Absolute path of loaded DLL
     std::string ErrorMessage;          // Human-readable error if anything failed
+    std::wstring GameDlssgPath;        // nvngx_dlssg.dll NGX loads for the game; empty until NGX init
+    std::string GameDlssgVersion;      // Its file version (e.g. "3.7.10"); empty when unread
+    bool GameDlssgGenerationA = false; // Pre-310 runtime, which sdli1995 0.4.1+ does not take over
 };
 
 #pragma pack(push, 1)
@@ -70,6 +73,10 @@ void TrySetup();
 
 /// Regenerates and writes companion dlssg_sm86.ini (e.g. after in-game settings toggle).
 bool WriteCompanionIni();
+
+/// Records the nvngx_dlssg.dll NGX will load from the feature path list and warns once when the loaded mod does
+/// not take it over (pre-310 runtime with sdli1995 0.4.1+, DLSS Unlocked #61).
+void NoteGameDlssgRuntime(const std::vector<std::wstring>& searchPaths);
 
 /// Dispatches live programmatic control to the running SilyNoMeta module without restarting.
 /// mode: 0 = FollowGame, 1 = Dynamic MFG, 2 = Fixed Multiplier

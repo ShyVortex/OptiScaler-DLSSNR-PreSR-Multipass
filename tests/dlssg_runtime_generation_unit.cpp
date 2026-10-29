@@ -2,6 +2,9 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,8 +20,33 @@
 // 4. SelectGameRuntime follows search order and skips empty entries.
 // 5. The unlocker's runtime is skipped; with no game copy the result is empty.
 // 6. The Remnant 2 path list from the #61 log selects the Streamline copy.
+// 7. UpdateInitPaths (D3D12) hands the final path list to the loader, only with the unlocker enabled.
+// 8. NoteGameDlssgRuntime: only with the mod loaded and no Linux FSR fallback, the mod's dlssg_sm86 tree excluded,
+//    a later list without a runtime keeps the result, and one warning only for sdli1995 0.4.1+ with generation A.
 
 using namespace DlssgRuntimeGeneration;
+
+static std::string ReadFile(const char* path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        std::fprintf(stderr, "cannot open %s\n", path);
+        std::exit(1);
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+static std::string Between(const std::string& text, const std::string& from, const std::string& to)
+{
+    const auto start = text.find(from);
+    assert(start != std::string::npos);
+    const auto end = text.find(to, start + from.size());
+    assert(end != std::string::npos);
+    return text.substr(start, end - start);
+}
 
 static std::function<bool(const std::wstring&)> Files(std::set<std::wstring> existing)
 {
@@ -85,6 +113,33 @@ int main()
            NormalizePath(root + L"\\Plugins\\Shared\\Streamline\\Binaries\\ThirdParty\\Win64\\nvngx_dlssg.dll"));
     std::puts("Test 6 PASS: Remnant 2 path list selects the Streamline copy");
 
-    std::puts("All DLSS-G runtime generation tests passed (6/6).");
+    // Test 7
+    const auto dx12 = ReadFile("OptiScaler/inputs/NVNGX_DLSS_Dx12.cpp");
+    const auto initPaths = Between(dx12, "static void UpdateInitPaths(", "\n}\n");
+    const auto assigned = initPaths.find("InFeatureInfo->PathListInfo.Length =");
+    const auto gate = initPaths.find("if (Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default())");
+    const auto note =
+        initPaths.find("AmpereMfgLoader::NoteGameDlssgRuntime(State::Instance().NVNGX_FeatureInfo_Paths);");
+    assert(assigned != std::string::npos && gate != std::string::npos && note != std::string::npos);
+    assert(assigned < gate && gate < note && "noted after the final list is built, only with the unlocker on");
+    std::puts("Test 7 PASS: D3D12 NGX init hands the final path list to the loader");
+
+    // Test 8
+    const auto loader = ReadFile("OptiScaler/framegen/dlssg/AmpereMfgLoader.cpp");
+    const auto body = Between(loader, "void NoteGameDlssgRuntime(", "\n}\n");
+    const auto loadedGate = body.find("if (!s_status.DllLoaded || s_status.FsrFallbackActive)");
+    const auto select = body.find("DlssgRuntimeGeneration::SelectGameRuntime(");
+    assert(loadedGate != std::string::npos && select != std::string::npos && loadedGate < select);
+    assert(body.find("(modDir / L\"dlssg_sm86\").wstring()") != std::string::npos);
+    assert(body.find("if (runtime.empty() || runtime == s_status.GameDlssgPath)\n        return;") !=
+           std::string::npos);
+    const auto warn = body.find("LOG_WARN(");
+    assert(warn != std::string::npos && body.find("LOG_WARN(", warn + 1) == std::string::npos);
+    assert(body.find("s_status.GameDlssgGenerationA && AmpereMfgStatusText::IsSdli1995AtLeast041(s_status) && "
+                     "!warned") < warn);
+    assert(body.find("DLSS Swapper") != std::string::npos && body.find("XeMFG (Source=Game)") != std::string::npos);
+    std::puts("Test 8 PASS: loader records the runtime and warns once, only when the mod refuses it");
+
+    std::puts("All DLSS-G runtime generation tests passed (8/8).");
     return 0;
 }

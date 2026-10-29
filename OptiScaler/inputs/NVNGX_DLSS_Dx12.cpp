@@ -13,6 +13,7 @@
 #include "upscalers/dlss/DLSSFeature_Dx12.h"
 
 #include <framegen/nvngx/Nvngx_FG.h>
+#include <framegen/dlssg/AmpereMfgLoader.h>
 #if defined(OPTISCALER_RTX40_MFG)
 #include <framegen/dlssg/MfgUnlock.h>
 #endif
@@ -210,6 +211,10 @@ static void UpdateInitPaths(NVSDK_NGX_FeatureCommonInfo* InFeatureInfo)
 
         InFeatureInfo->PathListInfo.Path = paths;
         InFeatureInfo->PathListInfo.Length = (int) State::Instance().NVNGX_FeatureInfo_Paths.size();
+
+        // The RTX 20/30 unlocker does not take over every DLSS-G runtime; say so when the game's one is refused
+        if (Config::Instance()->FGDLSSGAmpereMfgUnlock.value_or_default())
+            AmpereMfgLoader::NoteGameDlssgRuntime(State::Instance().NVNGX_FeatureInfo_Paths);
     }
 }
 
