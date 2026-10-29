@@ -1,13 +1,25 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Upscaler_Inputs_Dx11wDx12.h"
 
 #include "MathUtils.h"
 
 #include <with_dx12/with_dx12.h>
 #include "shaders/depth_scale/DS_Dx12.h"
+#include "shaders/depth_resample/DR_Dx12.h"
+#include "FgDepthResample.h"
 
 using namespace OptiMath;
 static DS_Dx12* DepthScaleDx11wDx12 = nullptr;
+static DR_Dx12* DepthResampleDx11wDx12 = nullptr;
+
+static void TransitionDepth(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
+                            D3D12_RESOURCE_STATES after)
+{
+    if (before == after)
+        return;
+    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, before, after);
+    cmdList->ResourceBarrier(1, &barrier);
+}
 
 static bool PrepareFgResourceCache(NVSDK_NGX_Parameter* parameters, UINT64 frameKey)
 {
@@ -268,6 +280,57 @@ void UpscalerInputsDx11wDx12::UpscaleStart(NVSDK_NGX_Parameter* InParameters, IF
                     fg->SetResource(&setResource);
                     done = true;
                 }
+            }
+        }
+
+        // XeFG needs depth at the size of display-resolution motion vectors (DLSS Unlocked #57).
+        if (!done && FgDepthResample::Needed(State::Instance().activeFgOutput == FGOutput::XeFG, feature->LowResMV(),
+                                             feature->RenderWidth(), feature->RenderHeight(), feature->TargetWidth(),
+                                             feature->TargetHeight()))
+        {
+            if (DepthResampleDx11wDx12 == nullptr)
+                DepthResampleDx11wDx12 = new DR_Dx12("Depth Resample Dx11wDx12", _dx12Device);
+
+            if (DepthResampleDx11wDx12->CreateBufferResource(_dx12Device, paramDepth, feature->TargetWidth(),
+                                                             feature->TargetHeight(),
+                                                             D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+            {
+                DepthResampleDx11wDx12->SetBufferState(cmdList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+                const auto depthState = (D3D12_RESOURCE_STATES) Config::Instance()->DepthResourceBarrier.value_or(
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                TransitionDepth(cmdList, paramDepth, depthState, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                const bool resampled = DepthResampleDx11wDx12->Dispatch(
+                    cmdList, paramDepth, DepthResampleDx11wDx12->Buffer(), feature->RenderWidth(),
+                    feature->RenderHeight(), feature->TargetWidth(), feature->TargetHeight());
+                TransitionDepth(cmdList, paramDepth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, depthState);
+
+                if (resampled)
+                {
+                    Dx12Resource setResource {};
+                    setResource.type = FG_ResourceType::Depth;
+                    setResource.cmdList = cmdList;
+                    setResource.resource = DepthResampleDx11wDx12->Buffer();
+                    setResource.width = feature->TargetWidth();
+                    setResource.height = feature->TargetHeight();
+                    setResource.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                    setResource.validity = FG_ResourceValidity::JustTrackCmdlist;
+
+                    fg->SetResource(&setResource);
+                    done = true;
+                }
+            }
+
+            static bool loggedResample = false;
+            if (!loggedResample)
+            {
+                loggedResample = true;
+                if (done)
+                    LOG_INFO("XeFG depth resampled {}x{} -> {}x{} to match display-resolution motion vectors",
+                             feature->RenderWidth(), feature->RenderHeight(), feature->TargetWidth(),
+                             feature->TargetHeight());
+                else
+                    LOG_WARN("XeFG depth resample failed; XeFG may reject display-resolution motion vectors");
             }
         }
 

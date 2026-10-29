@@ -1,4 +1,5 @@
 ﻿#include "../OptiScaler/shaders/depth_resample/DR_Common.h"
+#include "../OptiScaler/inputs/FG/FgDepthResample.h"
 
 #include <cassert>
 #include <cstdint>
@@ -24,6 +25,10 @@
 // 5. The 32-bit HLSL arithmetic cannot overflow for sizes up to 16384.
 // 6. drShaderCode, precompiled/DR.hlsl and the C++ mapping use the same formula; the blob is signed DXIL.
 // 7. build_precompiled_shader.sh exists, is executable and uses the .bat's DXC flags plus dxv validation.
+// 8. FgDepthResample::Needed: only XeFG output, display-resolution motion vectors and different sizes resample.
+// 9. Both upscaler paths (DX12, DX11 w/ DX12) resample render -> target size, tag the buffer at the target size,
+//    restore the depth state, and fall back to the original depth tag when the resample does not happen.
+// 10. The resample comes after the opt-in depth-scale path and before the plain depth tag in both paths.
 
 static std::string ReadFile(const char* path)
 {
@@ -36,6 +41,26 @@ static std::string ReadFile(const char* path)
     std::stringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
+}
+
+// Collapses whitespace runs, so source checks do not depend on clang-format's line breaks.
+static std::string Squash(const std::string& text)
+{
+    std::string out;
+    bool space = false;
+    for (char c : text)
+    {
+        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+            space = true;
+        else
+        {
+            if (space && !out.empty())
+                out.push_back(' ');
+            space = false;
+            out.push_back(c);
+        }
+    }
+    return out;
 }
 
 static std::vector<float> Resample(const std::vector<float>& src, uint32_t sw, uint32_t sh, uint32_t tw, uint32_t th)
@@ -156,6 +181,51 @@ int main()
     assert(script.find("$toolsDir/fxc.exe") == std::string::npos && "never invokes FXC under Wine");
     std::puts("Test 7 PASS: Linux build script mirrors the .bat DXC step and validates");
 
-    std::puts("All XeFG depth resample tests passed (7/7).");
+    // Test 8
+    using FgDepthResample::Needed;
+    assert(Needed(true, false, 1279, 720, 1920, 1080) && "Silent Hill Townfall: display MV, render depth -> resample");
+    assert(!Needed(true, true, 1279, 720, 1920, 1080) && "low-res MV: sizes already match");
+    assert(!Needed(true, false, 1920, 1080, 1920, 1080) && "DLAA / native: nothing to do");
+    assert(!Needed(false, false, 1279, 720, 1920, 1080) && "other FG outputs keep their behaviour");
+    assert(!Needed(true, false, 0, 720, 1920, 1080) && !Needed(true, false, 1279, 720, 1920, 0));
+    assert(Needed(true, false, 1279, 545, 1920, 817) && "letterboxed sizes as well");
+    std::puts("Test 8 PASS: resample only for XeFG with display-resolution motion vectors and mismatched sizes");
+
+    // Test 9 / 10
+    for (const char* path :
+         { "OptiScaler/inputs/FG/Upscaler_Inputs_Dx12.cpp", "OptiScaler/inputs/FG/Upscaler_Inputs_Dx11wDx12.cpp" })
+    {
+        const std::string src = Squash(ReadFile(path));
+        assert(src.find("#include \"FgDepthResample.h\"") != std::string::npos);
+        assert(src.find("#include \"shaders/depth_resample/DR_Dx12.h\"") != std::string::npos);
+        const auto decision = src.find("FgDepthResample::Needed(State::Instance().activeFgOutput == FGOutput::XeFG, "
+                                       "feature->LowResMV(),");
+        assert(decision != std::string::npos);
+        const auto block = src.substr(decision, src.find("if (!done)", decision) - decision);
+        assert(block.find("feature->RenderWidth(), feature->RenderHeight()") != std::string::npos &&
+               block.find("feature->TargetWidth(), feature->TargetHeight()") != std::string::npos);
+        const auto create = block.find("->CreateBufferResource(");
+        const auto toRead = block.find("D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);");
+        const auto dispatch = block.find("->Dispatch(");
+        const auto restore = block.find("D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, depthState);");
+        const auto tag = block.find("setResource.width = feature->TargetWidth();");
+        assert(create != std::string::npos && toRead != std::string::npos && dispatch != std::string::npos &&
+               restore != std::string::npos && tag != std::string::npos);
+        assert(create < toRead && toRead < dispatch && dispatch < restore && restore < tag &&
+               "create, make readable, dispatch, restore the game's state, then tag");
+        assert(block.find("setResource.height = feature->TargetHeight();") != std::string::npos &&
+               block.find("->Buffer();") != std::string::npos && block.find("done = true;") != std::string::npos);
+
+        const auto depthScale = src.find("FGEnableDepthScale.value_or_default()");
+        const auto plainTag = src.find("if (!done)", decision);
+        assert(depthScale != std::string::npos && depthScale < decision && decision < plainTag &&
+               "after the opt-in depth scale, before the original depth tag");
+        assert(src.find("setResource.resource = paramDepth;", plainTag) != std::string::npos &&
+               "fallback keeps tagging the game's depth");
+    }
+    std::puts("Test 9 PASS: both upscaler paths resample render -> target and restore the depth state");
+    std::puts("Test 10 PASS: resample sits between the depth-scale path and the original depth tag");
+
+    std::puts("All XeFG depth resample tests passed (10/10).");
     return 0;
 }

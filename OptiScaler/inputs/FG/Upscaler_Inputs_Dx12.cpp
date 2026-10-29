@@ -1,12 +1,24 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Upscaler_Inputs_Dx12.h"
 #include <hudfix/Hudfix_Dx12.h>
 #include <resource_tracking/ResTrack_dx12.h>
 #include "shaders/depth_scale/DS_Dx12.h"
+#include "shaders/depth_resample/DR_Dx12.h"
+#include "FgDepthResample.h"
 #include "MathUtils.h"
 
 using namespace OptiMath;
 static DS_Dx12* DepthScale = nullptr;
+static DR_Dx12* DepthResample = nullptr;
+
+static void TransitionDepth(ID3D12GraphicsCommandList* cmdList, ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
+                            D3D12_RESOURCE_STATES after)
+{
+    if (before == after)
+        return;
+    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, before, after);
+    cmdList->ResourceBarrier(1, &barrier);
+}
 
 void UpscalerInputsDx12::Init(ID3D12Device* device)
 {
@@ -220,6 +232,56 @@ void UpscalerInputsDx12::UpscaleStart(ID3D12GraphicsCommandList* InCmdList, NVSD
 
                         done = true;
                     }
+                }
+            }
+
+            // XeFG needs depth at the size of display-resolution motion vectors (DLSS Unlocked #57).
+            if (!done && FgDepthResample::Needed(State::Instance().activeFgOutput == FGOutput::XeFG,
+                                                 feature->LowResMV(), feature->RenderWidth(), feature->RenderHeight(),
+                                                 feature->TargetWidth(), feature->TargetHeight()))
+            {
+                if (DepthResample == nullptr)
+                    DepthResample = new DR_Dx12("Depth Resample", _device);
+
+                if (DepthResample->CreateBufferResource(_device, paramDepth, feature->TargetWidth(),
+                                                        feature->TargetHeight(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+                {
+                    DepthResample->SetBufferState(InCmdList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+                    const auto depthState = (D3D12_RESOURCE_STATES) Config::Instance()->DepthResourceBarrier.value_or(
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    TransitionDepth(InCmdList, paramDepth, depthState, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    const bool resampled = DepthResample->Dispatch(InCmdList, paramDepth, DepthResample->Buffer(),
+                                                                   feature->RenderWidth(), feature->RenderHeight(),
+                                                                   feature->TargetWidth(), feature->TargetHeight());
+                    TransitionDepth(InCmdList, paramDepth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, depthState);
+
+                    if (resampled)
+                    {
+                        Dx12Resource setResource {};
+                        setResource.type = FG_ResourceType::Depth;
+                        setResource.cmdList = commandList;
+                        setResource.resource = DepthResample->Buffer();
+                        setResource.width = feature->TargetWidth();
+                        setResource.height = feature->TargetHeight();
+                        setResource.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                        setResource.validity = FG_ResourceValidity::JustTrackCmdlist;
+
+                        fg->SetResource(&setResource);
+                        done = true;
+                    }
+                }
+
+                static bool loggedResample = false;
+                if (!loggedResample)
+                {
+                    loggedResample = true;
+                    if (done)
+                        LOG_INFO("XeFG depth resampled {}x{} -> {}x{} to match display-resolution motion vectors",
+                                 feature->RenderWidth(), feature->RenderHeight(), feature->TargetWidth(),
+                                 feature->TargetHeight());
+                    else
+                        LOG_WARN("XeFG depth resample failed; XeFG may reject display-resolution motion vectors");
                 }
             }
 
