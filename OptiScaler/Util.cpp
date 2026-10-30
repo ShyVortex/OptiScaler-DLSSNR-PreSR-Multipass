@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <hooks/Gdi32_Hooks.h>
+#include <misc/GameRootSearch.h>
 
 typedef LONG(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
 typedef decltype(&GetFileVersionInfoSizeW) PFN_GetFileVersionInfoSizeW;
@@ -559,6 +560,7 @@ std::optional<std::filesystem::path> Util::FindFilePath(const std::filesystem::p
     // 3) Unreal-Engine/WinGDK fallback: check for Win64 or WinGDK in parent
     std::filesystem::path parent = startDir.parent_path().parent_path();
     uint32_t cnt = 0;
+    bool ueFallbackSearched = false;
     for (const char* folder : { "Win64", "WinGDK", "Win64MasterMasterSteamPGO" })
     {
         if (std::filesystem::exists(parent / folder) && std::filesystem::is_directory(parent / folder))
@@ -578,10 +580,30 @@ std::optional<std::filesystem::path> Util::FindFilePath(const std::filesystem::p
             }
 
             // If not found under this folder, break to avoid double-search
+            ueFallbackSearched = true;
             break;
         }
 
         cnt++;
+    }
+
+    // 4) Exe outside Binaries\Win64 (e.g. PBZ\platform\steam with PBZ\Engine): search the nearest Engine root
+    if (!ueFallbackSearched)
+    {
+        auto isDirectory = [](const std::filesystem::path& path)
+        {
+            std::error_code ec;
+            return std::filesystem::is_directory(path, ec);
+        };
+
+        if (auto engineRoot = GameRootSearch::FindEngineRoot(startDir, isDirectory))
+        {
+            if (auto foundPath = SearchDirectoryBFS(engineRoot.value()))
+            {
+                LOG_INFO(L"{} found at {}", fileName.wstring(), foundPath.value().wstring());
+                return foundPath;
+            }
+        }
     }
 
     // Not found anywhere

@@ -986,6 +986,9 @@
     <ClInclude Include="misc\SkipSpoof.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="misc\GameRootSearch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="shaders\Shader_Dx11.h">
       <Filter>Header Files</Filter>
     </ClInclude>
